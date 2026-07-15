@@ -107,6 +107,28 @@ def cmd_publish(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_webapp(args: argparse.Namespace) -> int:
+    from .webapp import write_app
+    write_app(args.out)
+    print(f"App shell written to {args.out}/")
+    return 0
+
+
+def cmd_produce(args: argparse.Namespace) -> int:
+    import time as _time
+    from ..generate.producer import produce_batch
+    seed = args.seed if args.seed is not None else int(_time.time())
+    made = produce_batch(
+        pool_dir=args.pool,
+        count=args.count,
+        max_seconds=args.max_seconds,
+        base_seed=seed,
+        n_deals=args.n,
+    )
+    print(f"\n{len(made)} problems added to {args.pool} (base seed {seed})")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="trainer",
@@ -145,6 +167,21 @@ def main(argv: list[str] | None = None) -> int:
     pub_p.add_argument("--grow-anchor", default=None,
                        help="UTC date (YYYY-MM-DD) growth counts from")
     pub_p.set_defaults(func=cmd_publish)
+
+    app_p = sub.add_parser("webapp", help="write the static app shell")
+    app_p.add_argument("--out", default="_site")
+    app_p.set_defaults(func=cmd_webapp)
+
+    prod_p = sub.add_parser(
+        "produce", help="generate random problems into the pool")
+    prod_p.add_argument("--pool", default="pool_data")
+    prod_p.add_argument("--count", type=int, default=10)
+    prod_p.add_argument("--max-seconds", type=float, default=3600.0)
+    prod_p.add_argument("--seed", type=int, default=None,
+                        help="base seed (default: derived from time)")
+    prod_p.add_argument("--n", type=int, default=600,
+                        help="simulated layouts per problem")
+    prod_p.set_defaults(func=cmd_produce)
 
     args = parser.parse_args(argv)
     return args.func(args)

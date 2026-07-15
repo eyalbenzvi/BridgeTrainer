@@ -16,6 +16,28 @@ Prints the verdict to stdout and writes a self-contained HTML report to
 `reports/`. Add `--answer 3S` to record your call non-interactively, `--n` to
 override the deal count, `--no-cache` to force regeneration.
 
+## Random problems (the app)
+
+The deployed app serves RANDOM problems, not authored ones: `trainer
+produce` deals a random board, has a deterministic rule-of-thumb bot
+(`bridge_trainer/bot/`, spec M5) bid it to a genuine decision point, inverts
+the bot's call signatures into constraints for the concealed hands, runs the
+usual simulate/DD/compare pipeline with the bot bidding out every candidate's
+continuation per layout, and keeps the problem only if the verdict is close
+(≤3 IMPs between the top candidates) and statistically sound. Each problem
+takes ~20-30s to build and lands in a JSON pool (`data/` on gh-pages) that
+the static app (`trainer webapp`) reads: index.html "deals" a random unseen
+problem; answers are stored in localStorage. Batches are generated manually
+for now (`trainer produce --pool ... --count N`); no scheduled jobs.
+
+The bot is deliberately simple (no Stayman/transfers, no 2C, no slam
+machinery — see `bridge_trainer/bot/bidder.py` docstring) and every call's
+constraint signature is soundness-tested against the hands that produce it.
+Problems record the full deal, the bot's complete auction, and the bot
+version, so weak spots can be reported and filtered later.
+
+## Authored problems (legacy drill, still available for dev)
+
 ## Phone / cloud usage
 
 `trainer publish` builds a static, mobile-friendly quiz site for the whole

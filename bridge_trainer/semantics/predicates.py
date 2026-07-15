@@ -107,3 +107,13 @@ def sound_two_level_overcall_over_spades(f: SeatFeatures) -> np.ndarray:
 def weak_two_suit_junk(f: SeatFeatures) -> np.ndarray:
     """A vulnerable-style weak two promises a real suit; Q-empty is excluded."""
     return f.suit_hcp["S"] <= 2
+
+
+def quality_floor(suit: str, min_shcp: int) -> str:
+    """Register (idempotently) a dynamic predicate excluding hands whose
+    honor points in `suit` fall below `min_shcp`. Used to invert the bot's
+    suit-quality signature conditions. Returns the predicate name."""
+    name = f"suit_quality_{suit}_{min_shcp}"
+    if name not in PREDICATES:
+        PREDICATES[name] = lambda f, s=suit, m=min_shcp: f.suit_hcp[s] < m
+    return name

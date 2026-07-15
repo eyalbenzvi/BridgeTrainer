@@ -9,3 +9,4 @@ reports/
 site/
 _site/
 .venv/
+pool_data/
