@@ -54,6 +54,10 @@ from ..pool.store import SCHEMA_VERSION
 from ..projection.tree import ConditionalTreeProjector, deal_features
 from ..scoring.comparison import compare_candidates
 from ..scoring.evaluate import ScoreEvaluator
+from ..validate.auction_state import validate_options_against_state
+
+EQUIVALENCE_THRESHOLD = 0.90  # V3: options reaching the same contract this
+                              # often are one option wearing two hats
 
 VALID_CALL = re.compile(r"^(P|X|XX|[1-7](C|D|H|S|NT))$")
 
@@ -92,6 +96,9 @@ def validate_finalization(doc: dict, hero: str) -> None:
         raise FinalizationError("projections must cover exactly the options")
     # Tree + contract validation via the real projector/parser.
     ConditionalTreeProjector(projections, hero)
+    deviations = doc.get("deviations") or {}
+    if not set(deviations) <= set(options):
+        raise FinalizationError("deviations must reference offered options")
     if not (doc.get("explanation") or "").strip():
         raise FinalizationError("explanation is required")
 
@@ -126,6 +133,10 @@ def build_record(
     """
     validate_finalization(doc, hero)
     options = list(doc["options"])
+    # V1 hard shell: mechanical auction legality of every option and every
+    # continuation leaf. Never trusted to an author.
+    validate_options_against_state(dealer, stem, hero, options,
+                                   doc["projections"])
     profile = meanings_to_profile(doc.get("meanings") or {})
 
     src = RejectionDealSource(my_seat=hero)
@@ -163,6 +174,29 @@ def build_record(
     if corr.toss_up:
         accepted += corr.toss_up_with
 
+    # V3 hard shell: options that reach the SAME final contract on almost
+    # every layout are equivalent — any DD margin between them is noise.
+    # They are jointly accepted, never separated.
+    contract_keys = {opt: [str(fc) for fc in contracts_by_option[opt]]
+                     for opt in options}
+    wsum = float(weights.sum())
+    equivalent_pairs = []
+    for i, a in enumerate(options):
+        for b in options[i + 1:]:
+            same = sum(w for ka, kb, w in
+                       zip(contract_keys[a], contract_keys[b], weights)
+                       if ka == kb)
+            if same / wsum >= EQUIVALENCE_THRESHOLD:
+                equivalent_pairs.append([a, b])
+    if equivalent_pairs:
+        eq_set = {opt for pair in equivalent_pairs for opt in pair}
+        if eq_set & set(accepted):
+            accepted = list(dict.fromkeys(accepted + sorted(eq_set)))
+
+    explanation = doc["explanation"]
+    for opt, note in sorted((doc.get("deviations") or {}).items()):
+        explanation += f"\n⚠ {opt} deviates from the card: {note}"
+
     meanings_out = [{"seat": s, "meaning": (spec.get("note") or "")}
                     for s, spec in (doc.get("meanings") or {}).items()]
     return {
@@ -176,15 +210,17 @@ def build_record(
         "auction": list(stem),
         "candidates": options,
         "verdict": {
-            "accepted": accepted, "toss_up": corr.toss_up,
+            "accepted": accepted,
+            "toss_up": corr.toss_up or bool(equivalent_pairs),
             "fog": (raw.toss_up != corr.toss_up or raw.verdict != corr.verdict),
             "corrected": rows(corr), "raw": rows(raw),
         },
         "difficulty": round(float(corr.candidates[0].ev_vs_best_alt), 3),
         "quality": {"ess": round(diag.effective_sample_size, 1),
                     "acceptance": round(diag.acceptance_rate, 6),
-                    "shortfall": diag.shortfall},
-        "explanation": doc["explanation"],
+                    "shortfall": diag.shortfall,
+                    "equivalent_pairs": equivalent_pairs},
+        "explanation": explanation,
         "source": source or {},
         "meanings": meanings_out,
         "full_deal": dict(hands),
