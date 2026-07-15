@@ -1,0 +1,39 @@
+# Opponents' assumed style: light openings allowed, aggressive weak raises.
+# 3H over (1H) 1S is preemptive: 4-card support, weak hand.
+schema_version: 1
+system: opps_light_preempts
+rules:
+  - id: open_1h
+    context: []
+    call: "1H"
+    constraints:
+      hcp:
+        core: [11, 21]
+        margin:
+          - {range: [10, 10], weight: 0.4}  # light style: shapely 10-counts
+      suits:
+        H: {core: [5, 8]}
+    exclusions:
+      - balanced_15_17    # would have opened 1NT
+
+  - id: raise_3h_preemptive
+    context: ["1H", "1S"]
+    call: "3H"
+    constraints:
+      hcp:
+        core: [2, 8]
+        margin:
+          - {range: [9, 9], weight: 0.5}   # maximum with no game interest
+      suits:
+        H: {core: [4, 5], margin: [{range: [3, 3], weight: 0.2}]}
+        S: {core: [0, 3]}
+    exclusions:
+      - game_forcing_raise_values          # would have cue-bid 2S instead
+
+  - id: pass_after_1h_1s
+    context: ["1H", "1S"]
+    call: "P"
+    constraints:
+      hcp: {core: [0, 8], margin: [{range: [9, 10], weight: 0.4}]}
+      suits:
+        H: {core: [0, 2], margin: [{range: [3, 3], weight: 0.3}]}

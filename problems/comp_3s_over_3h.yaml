@@ -1,0 +1,73 @@
+# Competitive decision: compete to 3S over a preemptive heart raise?
+schema_version: 1
+id: comp_3s_over_3h
+title: "Compete to 3S over the preemptive raise?"
+category: competitive_part_scores
+description: >
+  IMPs, favorable vulnerability. LHO opens 1H, partner overcalls 1S, RHO
+  jumps to a preemptive 3H. You hold three-card support with scattered
+  values. The field question: sell out, compete to 3S on the eight-card
+  fit, or make a responsive double?
+
+dealer: W
+vul: EW              # favorable: they are vulnerable, we are not
+my_seat: S
+my_hand: "K93.752.A854.T62"
+auction: ["1H", "1S", "3H"]
+
+our_system:
+  name: "2/1"
+  description: "2/1 GF; sound but flexible overcalls at favorable"
+  ruleset: our_2over1.yaml
+
+opps_system:
+  name: "Light/aggressive"
+  description: "Light overcalls allowed; 3H is weak (4-card preemptive raise)"
+  ruleset: opps_light_preempts.yaml
+
+n_deals: 800
+
+breakdowns:
+  - feature: partner_spades
+    label: "Partner's spade length"
+  - feature: west_hcp
+    label: "Opener's HCP"
+
+candidates:
+  - call: "P"
+    label: "Pass (defend 3H)"
+    projection:
+      # Strong opener with a known 10-card fit bids on to game.
+      - when: "west_hcp >= 17 and opps_combined_hearts >= 10"
+        contract: "4HW"
+      - else: {contract: "3HW", terminal: true}
+
+  - call: "3S"
+    label: "Bid 3S"
+    projection:
+      # A maximum opener with a big fit competes to the vulnerable game.
+      - when: "west_hcp >= 17 and opps_combined_hearts >= 10"
+        contract: "4HW"
+      # Shapely maximum takes the push to 4H even without the 10th trump.
+      - when: "west_hcp >= 18 and west_hearts >= 6"
+        contract: "4HW"
+      # Trump stack behind partner doubles for penalties.
+      - when: "east_spades >= 5 and east_hcp >= 7"
+        contract: "3SNx"
+      - else: {contract: "3SN", terminal: true}
+
+  - call: "X"
+    label: "Responsive double"
+    projection:
+      # Partner's sit/pull is decided per deal, never by a global weight.
+      # Partner sits with balanced defence and decent values...
+      - when: "partner_hearts >= 2 and partner_hcp >= 12 and partner_spades <= 5"
+        contract: "3HWx"
+      # ...pulls to game with a real 6-card suit and a maximum...
+      - when: "partner_spades >= 6 and partner_hcp >= 13"
+        contract: "4SN"
+      # ...otherwise treats it as competitive and bids 3S,
+      # over which a big-fit maximum opener still saves in 4H.
+      - when: "west_hcp >= 17 and opps_combined_hearts >= 10"
+        contract: "4HW"
+      - else: {contract: "3SN", terminal: true}

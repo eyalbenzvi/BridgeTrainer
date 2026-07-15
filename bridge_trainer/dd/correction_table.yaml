@@ -1,0 +1,13 @@
+# Single-dummy correction: probability that real-table tricks differ from the
+# double-dummy count by the given delta. Edit to taste; probabilities per row
+# must sum to 1. Applied symmetrically to every contract in a comparison
+# (INV5). Keys are trick deltas relative to DD.
+schema_version: 1
+suit:
+  -1: 0.10
+  0: 0.75
+  1: 0.15
+nt:
+  -1: 0.12
+  0: 0.68
+  1: 0.20

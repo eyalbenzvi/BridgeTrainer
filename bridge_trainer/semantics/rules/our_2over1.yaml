@@ -1,0 +1,32 @@
+# Our side: 2/1 game forcing, sound-ish overcalls but flexible at favorable.
+schema_version: 1
+system: our_2over1
+rules:
+  # Partner's 1S overcall over a 1H opening.
+  - id: overcall_1s_over_1h
+    context: ["1H"]
+    call: "1S"
+    constraints:
+      hcp:
+        core: [8, 16]
+        margin:
+          - {range: [7, 7], weight: 0.5}   # shapely light overcalls happen
+          - {range: [17, 17], weight: 0.4} # slightly too strong, no better call
+      suits:
+        S: {core: [5, 7]}
+        H: {core: [0, 4]}
+    exclusions:
+      - takeout_double_shape_over_hearts   # would double, not overcall
+      - strong_jump_shift_values           # would start with a stronger action
+
+  # Partner passes over a 1H opening (used by tests / other problems, INV8).
+  - id: pass_over_1h
+    context: ["1H"]
+    call: "P"
+    constraints:
+      hcp:
+        core: [0, 12]
+        margin:
+          - {range: [13, 14], weight: 0.3} # trap pass / awkward shape
+      suits:
+        S: {core: [0, 4], margin: [{range: [5, 5], weight: 0.2}]}
