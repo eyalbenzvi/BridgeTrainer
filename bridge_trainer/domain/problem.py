@@ -41,6 +41,11 @@ class BiddingProblem:
     n_deals: int = 800
     breakdowns: list[dict] = field(default_factory=list)  # [{feature, label}]
     category: str = ""
+    # Optional "next deal" support: a class of hands my seat can be dealt
+    # ({"hcp": [lo, hi], "suits": {"S": [lo, hi], ...}}) and how many seeded
+    # variants to publish. Variant 0 always uses the authored my_hand.
+    my_hand_class: dict | None = None
+    variants: int = 1
 
     def vul_for_side(self, side: str) -> bool:
         return self.vul == "Both" or self.vul == side

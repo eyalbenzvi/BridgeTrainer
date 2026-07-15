@@ -97,9 +97,10 @@ def cmd_publish(args: argparse.Namespace) -> int:
         n_override=args.n,
         use_cache=not args.no_cache,
         cache_dir=args.cache_dir,
+        variants_override=args.variants,
     )
     for e in entries:
-        print(f"  {e.id}: {e.n_deals} deals")
+        print(f"  {e.id}: {e.variants} deal variants x {e.n_deals} simulations")
     print(f"\nSite: {args.out}/index.html ({len(entries)} problems)")
     return 0
 
@@ -135,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="override every problem's deal count")
     pub_p.add_argument("--no-cache", action="store_true")
     pub_p.add_argument("--cache-dir", default=".trainer_cache")
+    pub_p.add_argument("--variants", type=int, default=None,
+                       help="cap the number of deal variants per problem")
     pub_p.set_defaults(func=cmd_publish)
 
     args = parser.parse_args(argv)

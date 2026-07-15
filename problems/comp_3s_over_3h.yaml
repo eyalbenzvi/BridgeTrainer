@@ -15,6 +15,16 @@ my_seat: S
 my_hand: "K93.752.A854.T62"
 auction: ["1H", "1S", "3H"]
 
+# "Next deal": fresh hands from the same decision family. Exactly three-card
+# support, 2-3 hearts, near-minimum values, so Pass/3S/X stay the sensible
+# candidates and the projection trees remain valid.
+my_hand_class:
+  hcp: [5, 10]
+  suits:
+    S: [3, 3]
+    H: [2, 3]
+variants: 24
+
 our_system:
   name: "2/1"
   description: "2/1 GF; sound but flexible overcalls at favorable"

@@ -3,12 +3,17 @@
 Runs every problem in the bank and emits a self-contained, mobile-friendly
 static site (no server, deployable to GitHub Pages):
 
-    site/index.html            problem list + your progress
-    site/<id>/index.html       quiz page: pick a call, then the verdict reveals
-    site/<id>/report.html      the full analysis report
+    site/index.html               problem list + your progress
+    site/<id>/index.html          redirect to your first unanswered deal
+    site/<id>/v<k>/index.html     deal k: pick a call, verdict reveals,
+                                  "Next deal" jumps to an unseen variant
+    site/<id>/v<k>/report.html    the full analysis report for that deal
 
-Answers are tracked client-side in localStorage — fine for personal use and
-keeps the site fully static.
+"Next deal" support: a problem with `my_hand_class` + `variants: N` gets N
+seeded variants. Variant 0 is the authored hand; each further variant deals
+my seat a fresh hand from the class and re-runs the whole simulation, so
+every deal is a genuinely new, DD-solved problem. Answers are tracked
+client-side in localStorage (key: "<id>/v<k>").
 """
 from __future__ import annotations
 
@@ -17,6 +22,10 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+import numpy as np
+
+from ..bank.schema import load_problem
+from ..dealing.myhand import sample_my_hand
 from ..domain.auction import partner_of
 from ..domain.interfaces import GenerationBudget
 from .report import render_report
@@ -48,6 +57,8 @@ th, td { border: 1px solid #ccc; padding: .4em .5em; font-size: .85em;
 th { background: #f0f0f5; }
 a { color: #3673b5; }
 .muted { color: #888; font-size: .85em; }
+.pill { display: inline-block; border-radius: 999px; padding: .1em .7em;
+        font-size: .8em; border: 1px solid #8886; margin-left: .4em; }
 """
 
 _QUIZ_CSS = _BASE_CSS + """
@@ -65,8 +76,11 @@ button.cand.bad { border-color: #d3455b; background: #d3455b22; }
 .headline { font-size: 1.2em; font-weight: bold; margin: .4em 0; }
 .fog { background: #ffdd5733; border: 1px solid #cca42f88; border-radius: 8px;
        padding: .6em .8em; margin: .6em 0; }
-.pill { display: inline-block; border-radius: 999px; padding: .1em .7em;
-        font-size: .8em; border: 1px solid #8886; }
+a.next { display: block; text-align: center; font-size: 1.15em;
+         padding: .8em; border-radius: 10px; margin: .8em 0;
+         background: #3673b5; color: #fff; text-decoration: none;
+         font-weight: bold; }
+.topbar { display: flex; justify-content: space-between; align-items: baseline; }
 """
 
 
@@ -76,6 +90,7 @@ class PublishedEntry:
     title: str
     category: str
     n_deals: int
+    variants: int
 
 
 def _auction_html(problem) -> str:
@@ -92,7 +107,7 @@ def _hand_html(hand: str) -> str:
                        for s, p in zip("SHDC", parts))
 
 
-def _quiz_payload(result: RunResult) -> dict:
+def _quiz_payload(result: RunResult, k: int, total: int) -> dict:
     def comp_rows(comp):
         return [{
             "action": c.action, "label": c.label,
@@ -107,7 +122,9 @@ def _quiz_payload(result: RunResult) -> dict:
     if corr.toss_up:
         accepted += corr.toss_up_with
     return {
-        "id": result.problem.id,
+        "pid": result.problem.id,
+        "k": k,
+        "total": total,
         "accepted": accepted,
         "toss_up": corr.toss_up,
         "fog": result.in_dd_fog,
@@ -116,9 +133,9 @@ def _quiz_payload(result: RunResult) -> dict:
     }
 
 
-def render_quiz(result: RunResult) -> str:
+def render_quiz(result: RunResult, k: int, total: int) -> str:
     p = result.problem
-    payload = json.dumps(_quiz_payload(result)).replace("<", "\\u003c")
+    payload = json.dumps(_quiz_payload(result, k, total)).replace("<", "\\u003c")
     buttons = "".join(
         f'<button class="cand" data-action="{html.escape(c.call)}" '
         f'onclick="choose(this)">{html.escape(c.call)} &mdash; '
@@ -127,9 +144,12 @@ def render_quiz(result: RunResult) -> str:
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{html.escape(p.title)}</title>
+<title>{html.escape(p.title)} &mdash; deal {k + 1}</title>
 <style>{_QUIZ_CSS}</style></head><body>
-<p><a href="../index.html">&larr; all problems</a></p>
+<div class="topbar">
+<a href="../../index.html">&larr; all problems</a>
+<span class="muted">deal {k + 1} / {total}</span>
+</div>
 <h1>{html.escape(p.title)}</h1>
 <div class="card">
 <div class="muted">Dealer {p.dealer} &middot; Vul {p.vul} &middot; IMPs &middot;
@@ -144,20 +164,30 @@ you are {p.my_seat}</div>
 <table id="vtable"></table>
 <p class="muted">Corrected view (single-dummy smeared). EV is IMPs vs the
 candidate's toughest rival.</p>
+<a class="next" id="next" href="#">Next deal &rarr;</a>
 <p><a href="report.html">Full report &rarr;</a>
 &nbsp;&middot;&nbsp; <a href="#" onclick="return retry()">retry</a></p>
 </div>
 <script>
 const V = {payload};
 const KEY = "bt_answers";
+const VID = V.pid + "/v" + V.k;
 function store() {{ try {{ return JSON.parse(localStorage.getItem(KEY)) || {{}}; }}
                     catch (e) {{ return {{}}; }} }}
+function nextUnseen() {{
+  const s = store();
+  for (let d = 1; d <= V.total; d++) {{
+    const j = (V.k + d) % V.total;
+    if (!s[V.pid + "/v" + j]) return j;
+  }}
+  return (V.k + 1) % V.total;  // all answered: just cycle
+}}
 function choose(btn) {{
   const s = store();
-  if (s[V.id]) return;
+  if (s[VID]) return;
   const action = btn.dataset.action;
-  s[V.id] = {{ answer: action,
-               correct: V.accepted.includes(action), ts: Date.now() }};
+  s[VID] = {{ answer: action,
+              correct: V.accepted.includes(action), ts: Date.now() }};
   localStorage.setItem(KEY, JSON.stringify(s));
   reveal(action);
 }}
@@ -185,22 +215,45 @@ function reveal(chosen) {{
             `<td>${{Math.round(c.p_loss * 100)}}%</td></tr>`;
   }}
   document.getElementById("vtable").innerHTML = rows;
+  document.getElementById("next").href = "../v" + nextUnseen() + "/index.html";
   document.getElementById("verdict").style.display = "block";
 }}
 function retry() {{
-  const s = store(); delete s[V.id];
+  const s = store(); delete s[VID];
   localStorage.setItem(KEY, JSON.stringify(s));
   location.reload(); return false;
 }}
-const prev = store()[V.id];
+const prev = store()[VID];
 if (prev) reveal(prev.answer);
+</script>
+</body></html>"""
+
+
+def render_problem_redirect(pid: str, title: str, total: int) -> str:
+    """<id>/index.html: jump to the first deal you haven't answered."""
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)}</title>
+<style>{_BASE_CSS}</style></head><body>
+<p class="muted">Picking your next deal&hellip;
+<a id="fallback" href="v0/index.html">continue</a></p>
+<script>
+const PID = {json.dumps(pid)}, TOTAL = {total};
+let s = {{}};
+try {{ s = JSON.parse(localStorage.getItem("bt_answers")) || {{}}; }} catch (e) {{}}
+let target = 0;
+for (let j = 0; j < TOTAL; j++) {{
+  if (!s[PID + "/v" + j]) {{ target = j; break; }}
+}}
+location.replace("v" + target + "/index.html");
 </script>
 </body></html>"""
 
 
 def render_index(entries: list[PublishedEntry], generated_at: str) -> str:
     items = "".join(f"""<a class="card problem" href="{html.escape(e.id)}/index.html"
- data-id="{html.escape(e.id)}">
+ data-id="{html.escape(e.id)}" data-total="{e.variants}">
 <b>{html.escape(e.title)}</b>
 <span class="pill">{html.escape(e.category) or 'uncategorized'}</span>
 <span class="pill status" data-id="{html.escape(e.id)}"></span>
@@ -211,8 +264,6 @@ def render_index(entries: list[PublishedEntry], generated_at: str) -> str:
 <title>Bridge Bidding Trainer</title>
 <style>{_BASE_CSS}
 a.card {{ display: block; text-decoration: none; color: inherit; }}
-.pill {{ display: inline-block; border-radius: 999px; padding: .1em .7em;
-        font-size: .8em; border: 1px solid #8886; margin-left: .4em; }}
 </style></head><body>
 <h1>Bridge Bidding Trainer</h1>
 <p class="muted">{len(entries)} problem{'s' if len(entries) != 1 else ''}
@@ -224,13 +275,19 @@ const KEY = "bt_answers";
 function store() {{ try {{ return JSON.parse(localStorage.getItem(KEY)) || {{}}; }}
                     catch (e) {{ return {{}}; }} }}
 const s = store();
-document.querySelectorAll(".status").forEach(el => {{
-  const rec = s[el.dataset.id];
-  if (rec) {{
-    el.textContent = rec.correct ? "\\u2713 " + rec.answer
-                                 : "\\u2717 " + rec.answer;
-    el.style.borderColor = rec.correct ? "#2c9e5f" : "#d3455b";
-  }} else {{ el.textContent = "new"; }}
+document.querySelectorAll("a.problem").forEach(card => {{
+  const id = card.dataset.id, total = parseInt(card.dataset.total);
+  let done = 0, right = 0;
+  for (let j = 0; j < total; j++) {{
+    const rec = s[id + "/v" + j];
+    if (rec) {{ done++; if (rec.correct) right++; }}
+  }}
+  const el = card.querySelector(".status");
+  if (done === 0) el.textContent = total + " deals";
+  else {{
+    el.textContent = "\\u2713 " + right + " / " + done + " of " + total;
+    el.style.borderColor = right === done ? "#2c9e5f" : "#cca42f";
+  }}
 }});
 function resetAll() {{
   if (confirm("Clear all recorded answers?")) {{
@@ -250,6 +307,7 @@ def publish(
     use_cache: bool = True,
     cache_dir: str | Path = ".trainer_cache",
     budget: GenerationBudget | None = None,
+    variants_override: int | None = None,
 ) -> list[PublishedEntry]:
     problems_dir, out_dir = Path(problems_dir), Path(out_dir)
     paths = sorted(problems_dir.glob("*.yaml"))
@@ -257,19 +315,38 @@ def publish(
         raise FileNotFoundError(f"no problem files in {problems_dir}")
     entries = []
     for path in paths:
-        result = run_problem(path, seed=seed, n_override=n_override,
-                             use_cache=use_cache, cache_dir=cache_dir,
-                             budget=budget)
-        pdir = out_dir / result.problem.id
-        pdir.mkdir(parents=True, exist_ok=True)
-        (pdir / "index.html").write_text(render_quiz(result), encoding="utf-8")
-        (pdir / "report.html").write_text(render_report(result), encoding="utf-8")
-        entries.append(PublishedEntry(
-            id=result.problem.id,
-            title=result.problem.title,
-            category=result.problem.category,
-            n_deals=len(result.deals),
-        ))
+        first = None
+        spec = load_problem(path)
+        total = min(variants_override, spec.variants) if variants_override \
+            else spec.variants
+        for k in range(total):
+            seed_k = seed + k
+            my_hand = None
+            if k > 0:
+                rng = np.random.default_rng([seed_k, 777])
+                my_hand = sample_my_hand(spec.my_hand_class, rng)
+            result = run_problem(path, seed=seed_k, n_override=n_override,
+                                 use_cache=use_cache, cache_dir=cache_dir,
+                                 budget=budget, my_hand_override=my_hand)
+            vdir = out_dir / result.problem.id / f"v{k}"
+            vdir.mkdir(parents=True, exist_ok=True)
+            (vdir / "index.html").write_text(
+                render_quiz(result, k, total), encoding="utf-8")
+            (vdir / "report.html").write_text(
+                render_report(result), encoding="utf-8")
+            if first is None:
+                first = result
+        entry = PublishedEntry(
+            id=first.problem.id,
+            title=first.problem.title,
+            category=first.problem.category,
+            n_deals=len(first.deals),
+            variants=total,
+        )
+        (out_dir / entry.id / "index.html").write_text(
+            render_problem_redirect(entry.id, entry.title, total),
+            encoding="utf-8")
+        entries.append(entry)
     import datetime
     stamp = datetime.date.today().isoformat() + f" (seed {seed})"
     (out_dir / "index.html").write_text(render_index(entries, stamp),

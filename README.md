@@ -23,6 +23,14 @@ problem bank (`site/index.html`): each problem page shows the hand and
 auction, you tap a call, and the verdict reveals. Answers are stored in the
 browser's localStorage (per device), so no server is needed.
 
+**Next deal**: a problem with `my_hand_class` (HCP + suit-length bounds for
+your seat) and `variants: N` publishes N seeded deals of the same decision —
+variant 0 is the authored hand, the rest are freshly dealt from the class and
+fully re-simulated. The quiz's "Next deal" button jumps to your first
+unanswered variant; the per-problem URL redirects there too. To get more
+deals, bump `variants:` in the problem YAML and push — only the new variants
+are computed (deal sets and DD tables are content-addressed in the cache).
+
 `.github/workflows/publish.yml` runs the tests, rebuilds the site and deploys
 it to **GitHub Pages** on every push to `main` (deal sets and DD trick tables
 are cached between CI runs, so unchanged problems republish in seconds). One-

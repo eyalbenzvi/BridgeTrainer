@@ -101,10 +101,13 @@ def run_problem(
     cache_dir: str | Path = ".trainer_cache",
     budget: GenerationBudget | None = None,
     correction: CorrectionTable | None = None,
+    my_hand_override: str | None = None,
 ) -> RunResult:
     t_start = time.perf_counter()
     problem_path = Path(problem_path)
     problem = load_problem(problem_path)
+    if my_hand_override is not None:
+        problem.my_hand = my_hand_override  # "next deal" variant hand
     n = n_override or problem.n_deals
 
     # Semantics: auction -> constraints (INV8: every call, incl. passes).

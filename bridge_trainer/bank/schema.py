@@ -79,6 +79,20 @@ def load_problem(path: str | Path) -> BiddingProblem:
     _require(len({c.call for c in candidates}) == len(candidates),
              "duplicate candidate calls")
 
+    hand_class = data.get("my_hand_class")
+    if hand_class is not None:
+        _require(isinstance(hand_class, dict), "my_hand_class must be a mapping")
+        for key, lo_hi in [("hcp", hand_class.get("hcp"))] + [
+                (s, b) for s, b in hand_class.get("suits", {}).items()]:
+            if lo_hi is not None:
+                _require(isinstance(lo_hi, list) and len(lo_hi) == 2
+                         and lo_hi[0] <= lo_hi[1],
+                         f"my_hand_class {key!r} must be [lo, hi]")
+    variants = int(data.get("variants", 1))
+    _require(variants >= 1, "variants must be >= 1")
+    _require(variants == 1 or hand_class is not None,
+             "variants > 1 requires my_hand_class")
+
     return BiddingProblem(
         id=str(data["id"]),
         title=str(data["title"]),
@@ -94,4 +108,6 @@ def load_problem(path: str | Path) -> BiddingProblem:
         n_deals=int(data.get("n_deals", 800)),
         breakdowns=list(data.get("breakdowns", [])),
         category=str(data.get("category", "")),
+        my_hand_class=hand_class,
+        variants=variants,
     )
