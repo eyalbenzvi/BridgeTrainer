@@ -213,10 +213,14 @@ def _problem_html() -> str:
 <div id="verdict" class="card">
 <div class="headline" id="headline"></div>
 <div id="fog"></div>
+<p id="explanation"></p>
 <table id="vtable"></table>
 <p class="muted">Corrected view (single-dummy smeared). EV is IMPs vs the
 candidate's toughest rival. <span id="quality"></span></p>
+<div class="muted" id="source"></div>
 <button class="big" id="next">Next deal &rarr;</button>
+<details id="meanings-box"><summary class="muted">Assumed meanings of the
+auction</summary><ul id="meanings"></ul></details>
 <details><summary class="muted">Raw double-dummy view</summary>
 <table id="rtable"></table></details>
 </div>
@@ -254,6 +258,22 @@ function reveal(chosen) {{
   const q = P.quality || {{}};
   document.getElementById("quality").textContent =
     `Simulated ${{P.generator.n_deals}} layouts (ESS ${{Math.round(q.ess || 0)}}).`;
+  if (P.explanation)
+    document.getElementById("explanation").textContent = P.explanation;
+  if (P.source) {{
+    const s = P.source, rc = s.room_calls || {{}}, ct = s.room_contracts || {{}},
+          rr = s.room_results || {{}};
+    document.getElementById("source").innerHTML =
+      `Real deal: <b>${{s.teams}}</b>, ${{s.event}}, board ${{s.board}}.<br>` +
+      `At the tables: ${{rc.o}} \\u2192 ${{ct.o}} (${{rr.o || "?"}}) \\u00b7 ` +
+      `${{rc.c}} \\u2192 ${{ct.c}} (${{rr.c || "?"}})`;
+  }}
+  if (P.meanings && P.meanings.length) {{
+    document.getElementById("meanings").innerHTML = P.meanings.map(m =>
+      `<li><b>${{m.seat}}</b>: ${{m.meaning}}</li>`).join("");
+  }} else {{
+    document.getElementById("meanings-box").style.display = "none";
+  }}
   document.getElementById("verdict").style.display = "block";
 }}
 function choose(btn) {{

@@ -10,3 +10,4 @@ site/
 _site/
 .venv/
 pool_data/
+pool_harvest/
