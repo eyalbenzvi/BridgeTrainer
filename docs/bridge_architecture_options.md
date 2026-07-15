@@ -404,3 +404,33 @@ problems — they must reject f50022-21 and f50003-18 unaided; then install
 Ben CPU-only and roll out 2S vs 3S on f50021-27's layouts — if the
 fabricated 0.5-IMP gap collapses into an honest toss-up, the architecture
 is proven on the exact evidence that motivated it.
+
+---
+
+## Amendments (2026-07-15, after owner review)
+
+### A1. V2 reframed: conformance is "least-lie accounting", not a ban
+The owner is right that sometimes only bad options exist and a rule must be
+violated. Auction LEGALITY (V1) stays hard. System conformance (V2) becomes:
+- every option is annotated with what it SHOWS vs what the hand HOLDS;
+  deviations are allowed and are often the training point ("which lie is
+  smallest?");
+- hard-reject only UNACKNOWLEDGED deviations: if an option deviates, the
+  finalization must say so, the concealed-hand meanings must reflect what
+  the bid CLAIMS (partner believes the bid — that is how lies get punished
+  in the simulation), and the explanation must weigh the lie;
+- f50003-18 under this rule: 2D is admissible only as a flagged deviation,
+  simulated with partner acting as if it showed 10+, and explained as such.
+
+### A2. Approach F runs inside Claude Code sessions (owner decision)
+The ensemble is built with no API key and no scheduled jobs:
+- proposer and adversarial verifier = independent subagents in a Claude Code
+  session (separate contexts; the verifier sees only the proposal + deal +
+  card + auction, never the proposer's reasoning);
+- Ben runs locally in the session container (CPU) as the neural
+  cross-examiner for continuations/meanings;
+- hard shell + DD gates are local code; survivors are pushed to the live
+  pool before the session ends; every finalization document is committed
+  (auditable, regenerable).
+Batch cadence: on demand, ~10-25 problems per sitting. If unattended volume
+is ever wanted, the identical pipeline moves to CI with an API key.
