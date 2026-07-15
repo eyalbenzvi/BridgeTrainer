@@ -16,6 +16,24 @@ Prints the verdict to stdout and writes a self-contained HTML report to
 `reports/`. Add `--answer 3S` to record your call non-interactively, `--n` to
 override the deal count, `--no-cache` to force regeneration.
 
+## Phone / cloud usage
+
+`trainer publish` builds a static, mobile-friendly quiz site for the whole
+problem bank (`site/index.html`): each problem page shows the hand and
+auction, you tap a call, and the verdict reveals. Answers are stored in the
+browser's localStorage (per device), so no server is needed.
+
+`.github/workflows/publish.yml` runs the tests, rebuilds the site and deploys
+it to **GitHub Pages** on every push to `main` (deal sets and DD trick tables
+are cached between CI runs, so unchanged problems republish in seconds). One-
+time setup: repo → Settings → Pages → Source: **GitHub Actions**, then
+bookmark the published URL on your phone.
+
+Note: GitHub Pages sites are public (even for private repos, outside
+Enterprise). The content is just bridge problems, but if that bothers you,
+Cloudflare Pages + Access gives the same static hosting behind a free email
+login.
+
 ## Architecture
 
 ```
@@ -70,10 +88,13 @@ The single-dummy correction table is editable:
 - **M0 (done)**: feasibility spike — see `docs/m0_results.md`. Gate: tight
   generation is seconds-scale → reserve dealers stay deferred.
 - **M1 (done)**: vertical slice end-to-end on `comp_3s_over_3h`; golden tests.
-- **M2 (partially pulled forward)**: correction layer, deal-set disk cache and
-  sample audit already shipped in M1; remaining: DD-result caching.
-- **M3+**: SQLite session store, more problems, generation-diagnostics
-  publishing gate, spaced repetition, matchpoints via FieldModel.
+- **M2 (done, pulled forward)**: correction layer, deal-set + DD-result disk
+  caches, sample audit, schema validation.
+- **Cloud publishing (added)**: `trainer publish` static quiz site + GitHub
+  Pages workflow; per-device answer tracking via localStorage.
+- **M3+**: SQLite session store (or localStorage export), more problems,
+  generation-diagnostics publishing gate, spaced repetition, matchpoints via
+  FieldModel.
 
 Note: DD solving (~13 ms/deal for two denominations) dominates wall clock,
 which is why problems default to `n_deals: 800` (< 30 s per run, CI half-width

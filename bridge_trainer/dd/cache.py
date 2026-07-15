@@ -63,13 +63,17 @@ def deal_set_cache_key(
 
 
 class DealSetCache:
-    """Stores deal sets (PBN + weights + diagnostics) as JSON per key."""
+    """Stores deal sets (PBN + weights + diagnostics) as JSON per key,
+    plus DD trick tables keyed by (deal-set key, denominations)."""
 
     def __init__(self, root: str | Path = ".trainer_cache"):
         self.root = Path(root)
 
     def _path(self, key: str) -> Path:
         return self.root / f"deals_{key}.json"
+
+    def _dd_path(self, key: str, denoms: set[str]) -> Path:
+        return self.root / f"dd_{key}_{'-'.join(sorted(denoms))}.json"
 
     def load(self, key: str) -> tuple[list[WeightedDeal], GenerationDiagnostics] | None:
         path = self._path(key)
@@ -99,3 +103,20 @@ class DealSetCache:
             "diagnostics": diagnostics.to_dict(),
         }
         self._path(key).write_text(json.dumps(data))
+
+    def load_tricks(self, key: str, denoms: set[str]):
+        """Cached DD trick arrays, or None. Valid for the exact deal set the
+        key identifies (INV4), so no extra key material is needed."""
+        import numpy as np
+        path = self._dd_path(key, denoms)
+        if not path.exists():
+            return None
+        data = json.loads(path.read_text())
+        return {(dn, pl): np.array(v, dtype=np.int8)
+                for k, v in data.items()
+                for dn, pl in [k.split("|")]}
+
+    def store_tricks(self, key: str, denoms: set[str], tricks) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        data = {f"{dn}|{pl}": arr.tolist() for (dn, pl), arr in tricks.items()}
+        self._dd_path(key, denoms).write_text(json.dumps(data))

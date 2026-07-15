@@ -100,6 +100,19 @@ def test_cache_key_sensitivity_inv4():
         "W": SeatConstraints.from_bands(hcp=[Band(12, 21)])})) != base
 
 
+def test_dd_tricks_cache_roundtrip(tmp_path):
+    cache = DealSetCache(tmp_path)
+    tricks = DDSolver().solve([WeightedDeal(FIXTURE)], {"S", "H"})
+    assert cache.load_tricks("k1", {"S", "H"}) is None
+    cache.store_tricks("k1", {"S", "H"}, tricks)
+    loaded = cache.load_tricks("k1", {"S", "H"})
+    assert set(loaded) == set(tricks)
+    for k in tricks:
+        np.testing.assert_array_equal(loaded[k], tricks[k])
+    # Different denomination set is a different cache entry.
+    assert cache.load_tricks("k1", {"S"}) is None
+
+
 def test_deal_set_cache_roundtrip(tmp_path):
     cache = DealSetCache(tmp_path)
     deals = [WeightedDeal(FIXTURE, weight=0.4)]

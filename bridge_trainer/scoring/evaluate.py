@@ -19,6 +19,13 @@ from ..domain.deals import WeightedDeal
 from .tables import contract_score
 
 
+def needed_denoms(
+        contracts_by_candidate: dict[str, list[FinalContract]]) -> set[str]:
+    return {c.denom
+            for contracts in contracts_by_candidate.values()
+            for c in contracts if not c.passed_out}
+
+
 class ScoreEvaluator:
     def __init__(self, my_seat: Seat, vul: str,
                  correction: CorrectionTable, solver: DDSolver | None = None):
@@ -35,11 +42,14 @@ class ScoreEvaluator:
     def prepare(self, deals: list[WeightedDeal],
                 contracts_by_candidate: dict[str, list[FinalContract]]) -> None:
         """Solve DD once for the union of denominations across candidates."""
-        denoms = {c.denom
-                  for contracts in contracts_by_candidate.values()
-                  for c in contracts if not c.passed_out}
-        self._tricks = self.solver.solve(deals, denoms)
-        self._prepared_for = len(deals)
+        denoms = needed_denoms(contracts_by_candidate)
+        self.set_tricks(self.solver.solve(deals, denoms), len(deals))
+
+    def set_tricks(self, tricks: dict[tuple[str, str], np.ndarray],
+                   n_deals: int) -> None:
+        """Use precomputed (e.g. cached) DD trick arrays instead of solving."""
+        self._tricks = tricks
+        self._prepared_for = n_deals
 
     def evaluate(
         self,

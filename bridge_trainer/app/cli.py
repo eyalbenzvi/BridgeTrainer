@@ -88,6 +88,22 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_publish(args: argparse.Namespace) -> int:
+    from .publish import publish
+    entries = publish(
+        problems_dir=args.problems,
+        out_dir=args.out,
+        seed=args.seed,
+        n_override=args.n,
+        use_cache=not args.no_cache,
+        cache_dir=args.cache_dir,
+    )
+    for e in entries:
+        print(f"  {e.id}: {e.n_deals} deals")
+    print(f"\nSite: {args.out}/index.html ({len(entries)} problems)")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="trainer",
@@ -108,6 +124,18 @@ def main(argv: list[str] | None = None) -> int:
                        help="generation time budget")
     run_p.add_argument("--out", default="reports")
     run_p.set_defaults(func=cmd_run)
+
+    pub_p = sub.add_parser(
+        "publish", help="build the static quiz site for the whole bank")
+    pub_p.add_argument("problems", nargs="?", default="problems",
+                       help="directory of problem YAML files")
+    pub_p.add_argument("--out", default="site")
+    pub_p.add_argument("--seed", type=int, default=42)
+    pub_p.add_argument("--n", type=int, default=None,
+                       help="override every problem's deal count")
+    pub_p.add_argument("--no-cache", action="store_true")
+    pub_p.add_argument("--cache-dir", default=".trainer_cache")
+    pub_p.set_defaults(func=cmd_publish)
 
     args = parser.parse_args(argv)
     return args.func(args)

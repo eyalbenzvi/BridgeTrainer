@@ -6,4 +6,6 @@ dist/
 .pytest_cache/
 .trainer_cache/
 reports/
+site/
+_site/
 .venv/

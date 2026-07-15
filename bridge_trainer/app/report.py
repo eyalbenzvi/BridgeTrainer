@@ -184,10 +184,13 @@ def render_report(result: RunResult, user_answer: str | None = None) -> str:
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(p.title)}</title>
 <style>
 body {{ font-family: Georgia, serif; max-width: 900px; margin: 2em auto;
        padding: 0 1em; color: #1a1a2e; }}
+table {{ display: block; overflow-x: auto; max-width: 100%;
+        width: fit-content; }}
 h1 {{ font-size: 1.5em; }}
 .red {{ color: #c0392b; }}
 .banner {{ background: #fdf6e3; border: 1px solid #e0d5b8; padding: .6em 1em;

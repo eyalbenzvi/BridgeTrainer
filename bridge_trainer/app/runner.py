@@ -19,7 +19,7 @@ from ..domain.interfaces import GenerationBudget
 from ..domain.problem import BiddingProblem
 from ..projection.tree import ConditionalTreeProjector, deal_features
 from ..scoring.comparison import ComparisonResult, compare_candidates
-from ..scoring.evaluate import ScoreEvaluator
+from ..scoring.evaluate import ScoreEvaluator, needed_denoms
 from ..semantics.engine import RuleEngine, load_ruleset
 
 
@@ -160,10 +160,18 @@ def run_problem(
         for c in problem.candidates
     }
 
-    # DD + scoring, raw and corrected applied symmetrically (INV5).
+    # DD + scoring, raw and corrected applied symmetrically (INV5). Trick
+    # tables are cached per (deal-set key, denoms): the key already pins the
+    # exact deal set (INV4), so cached DD results stay valid.
     evaluator = ScoreEvaluator(
         problem.my_seat, problem.vul, correction or load_default_correction())
-    evaluator.prepare(deals, contracts_by_candidate)
+    denoms = needed_denoms(contracts_by_candidate)
+    tricks = cache.load_tricks(key, denoms) if use_cache else None
+    if tricks is None:
+        tricks = evaluator.solver.solve(deals, denoms)
+        if use_cache:
+            cache.store_tricks(key, denoms, tricks)
+    evaluator.set_tricks(tricks, len(deals))
     weights = np.array([wd.weight for wd in deals])
     raw_scores, corrected_scores = {}, {}
     for call, contracts in contracts_by_candidate.items():
