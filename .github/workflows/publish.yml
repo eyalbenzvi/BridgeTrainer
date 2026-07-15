@@ -36,6 +36,11 @@ jobs:
           restore-keys: trainer-cache-
       - name: Build site
         run: trainer publish problems --out _site --seed 42
+      # enablement: true creates the Pages site on first run, so no manual
+      # Settings -> Pages step is needed.
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
