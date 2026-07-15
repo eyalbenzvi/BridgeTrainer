@@ -422,3 +422,22 @@ artifacts that already encode expert bridge at scale; the architecture
 above uses each strictly where it is strong and keeps our own strongest
 asset — the honest statistics stack — as the referee's evidence, not the
 referee.
+
+---
+
+## Decision record (2026-07-15, owner)
+
+1. **Verdict authority: DD simulation** — the owner overrides §3's hybrid
+   verdict. Once the problem definition and candidate options are finalized,
+   the DD simulation over the constrained layouts is the sole judge
+   (empirical, token-free). The toss-up/CI/fog discipline (INV5, INV7)
+   remains mandatory.
+2. **LLM role narrowed to problem finalization**: one generation-time call
+   per problem — (a) real-dilemma check (discard otherwise), (b) finalize
+   the candidate set, (c) emit the auction's call meanings as constraint
+   ranges for the hidden-hand simulation, (d) short explanation text. No
+   verdict vote.
+3. **Problem source: real tournament deal records** (owner's proposal) —
+   real auctions harvested from public championship/vugraph archives,
+   stopped at decision points (table divergence preferred), replacing
+   bot-generated stems. Ben demoted to an optional future volume source.
