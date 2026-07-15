@@ -17,26 +17,51 @@ _CSS = """
 * { box-sizing: border-box; }
 body { font-family: -apple-system, "Segoe UI", Roboto, Georgia, serif;
        max-width: 640px; margin: 0 auto; padding: 1em;
-       background: #fdfdf8; color: #1a1a2e; }
+       background: var(--bg); color: var(--fg);
+       --bg: #fdfdf8; --fg: #1a1a2e; --card: #ffffff;
+       --th: #f0f0f5; --border: #ccc; }
 @media (prefers-color-scheme: dark) {
-  body { background: #16161e; color: #e4e4ec; }
-  .card { background: #1f1f2a; }
-  th { background: #2a2a38 !important; }
-  td, th { border-color: #444 !important; }
+  body { --bg: #16161e; --fg: #e4e4ec; --card: #1f1f2a;
+         --th: #2a2a38; --border: #444; }
 }
 h1 { font-size: 1.3em; }
 .red { color: #d3455b; }
-.card { background: #fff; border: 1px solid #8884; border-radius: 10px;
+.card { background: var(--card); color: var(--fg);
+        border: 1px solid #8884; border-radius: 10px;
         padding: 1em; margin: .8em 0; }
 table { border-collapse: collapse; width: 100%; display: block;
         overflow-x: auto; }
-th, td { border: 1px solid #ccc; padding: .4em .5em; font-size: .85em;
-         text-align: left; }
-th { background: #f0f0f5; }
+th, td { border: 1px solid var(--border); padding: .4em .5em;
+         font-size: .85em; text-align: left; }
+th { background: var(--th); }
 a { color: #3673b5; }
 .muted { color: #888; font-size: .85em; }
 .hand { font-size: 1.5em; line-height: 1.5; letter-spacing: .06em; }
-.auction { font-size: 1.15em; margin: .6em 0; }
+/* Bidding diagram: explicit colors in BOTH themes so it never inherits an
+   unreadable background; one round of four calls per row; You act last. */
+table.bidding { display: table; width: 100%; margin: .2em 0 .8em;
+                border-collapse: collapse; background: #ffffff;
+                color: #16161e; font-size: 1.1em; border-radius: 8px; }
+table.bidding th, table.bidding td { border: 1px solid #b9b9c4;
+  text-align: center; padding: .45em .2em; width: 25%; font-size: 1em; }
+table.bidding th { background: #e8e8f0; color: #333; font-weight: 600; }
+table.bidding th small { font-weight: normal; color: #777; }
+table.bidding th.me { background: #3673b5; color: #fff; }
+table.bidding td.them { color: #8a5200; background: #fff7e8; }
+table.bidding td.us { color: #16161e; font-weight: 600; }
+table.bidding td.dim { color: #aaa; }
+table.bidding td.turn { background: #3673b5; color: #fff;
+                        font-weight: bold; font-size: 1.15em; }
+@media (prefers-color-scheme: dark) {
+  table.bidding { background: #23232e; color: #f2f2f6;
+                  border-color: #555; }
+  table.bidding th, table.bidding td { border-color: #4a4a58; }
+  table.bidding th { background: #30303e; color: #d8d8e2; }
+  table.bidding td.them { color: #ffc46b; background: #2b2620; }
+  table.bidding td.us { color: #f2f2f6; }
+  table.bidding td.dim { color: #666; }
+}
+table.bidding .red { color: #d3455b; }
 .candidates { display: flex; flex-direction: column; gap: .6em; margin: 1em 0; }
 button.cand { font-size: 1.15em; padding: .8em; border-radius: 10px;
               border: 2px solid #8886; background: inherit; color: inherit;
@@ -81,16 +106,40 @@ function handHtml(hand) {
   return ["S","H","D","C"].map((s, i) =>
     `${SUIT_HTML[s]} ${parts[i] || "\\u2014"}`).join("<br>");
 }
-function auctionHtml(p) {
+function callHtml(tok) {
+  if (tok === "P") return "Pass";
+  if (tok === "X") return "X";
+  if (tok === "XX") return "XX";
+  const denom = tok.slice(1);
+  if (denom === "NT") return tok;
+  return tok[0] + SUIT_HTML[denom];
+}
+function auctionTableHtml(p) {
   const seats = ["N","E","S","W"];
-  const mine = p.seat, partner = seats[(seats.indexOf(mine) + 2) % 4];
+  const hero = p.seat, partner = seats[(seats.indexOf(hero) + 2) % 4];
+  // Columns: LHO, partner, RHO, You — your decision closes each row.
+  const order = [1, 2, 3, 0].map(
+    i => seats[(seats.indexOf(hero) + i) % 4]);
+  const head = order.map(s => {
+    if (s === hero) return "<th class=me>You</th>";
+    if (s === partner) return `<th class=us>${s}<br><small>pard</small></th>`;
+    return `<th class=them>${s}</th>`;
+  }).join("");
+  const cells = [];
+  for (let i = 0; i < order.indexOf(p.dealer); i++)
+    cells.push('<td class=dim>\\u2013</td>');
   let seat = p.dealer;
-  const parts = p.auction.map(tok => {
-    const t = (seat === mine || seat === partner) ? tok : `(${tok})`;
+  for (const tok of p.auction) {
+    const cls = (seat === hero || seat === partner) ? "us" : "them";
+    cells.push(`<td class=${cls}>${callHtml(tok)}</td>`);
     seat = seats[(seats.indexOf(seat) + 1) % 4];
-    return t;
-  });
-  return parts.join(" \\u2013 ") + " \\u2013 ?";
+  }
+  cells.push('<td class=turn>?</td>');
+  while (cells.length % 4) cells.push("<td></td>");
+  let rows = "";
+  for (let i = 0; i < cells.length; i += 4)
+    rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
+  return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
 }
 """
 
@@ -225,13 +274,13 @@ async function init() {{
   document.getElementById("meta").textContent =
     `Dealer ${{P.dealer}} \\u00b7 Vul ${{P.vul}} \\u00b7 IMPs \\u00b7 you are ${{P.seat}}`;
   document.getElementById("problem").innerHTML =
-    `<div class="card"><div class="auction">${{auctionHtml(P)}}</div>` +
+    `<div class="card">${{auctionTableHtml(P)}}` +
     `<div class="hand">${{handHtml(P.hand)}}</div></div>`;
   const cands = document.getElementById("cands");
   for (const c of P.candidates) {{
     const b = document.createElement("button");
     b.className = "cand"; b.dataset.action = c;
-    b.textContent = c === "P" ? "Pass" : (c === "X" ? "Double" : c);
+    b.innerHTML = c === "X" ? "Double" : callHtml(c);
     b.onclick = () => choose(b);
     cands.appendChild(b);
   }}
