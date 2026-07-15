@@ -11,3 +11,4 @@ _site/
 .venv/
 pool_data/
 pool_harvest/
+pool_final/
