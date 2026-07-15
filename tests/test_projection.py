@@ -37,6 +37,13 @@ def test_features_of_concrete_deal():
     assert f["rho_hearts"] == 4              # RHO of S is E
     assert f["opps_combined_hearts"] == 9    # W 5 + E 4
     assert f["south_hcp"] == 7
+    # Role alias for my own (known) hand, usable in continuation predicates.
+    assert f["me_hcp"] == 7 and f["me_spades"] == 3
+    # Per-suit honor points: W holds AKQJT of hearts, N holds Kx of diamonds.
+    assert f["west_hearts_hcp"] == 10
+    assert f["partner_diamonds_hcp"] == 3
+    assert f["our_combined_hcp"] == 15       # S 7 + N 8
+    assert f["our_combined_spades"] == 9
 
 
 def test_projection_picks_first_matching_rule():

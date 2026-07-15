@@ -5,9 +5,10 @@ title: "Compete to 3S over the preemptive raise?"
 category: competitive_part_scores
 description: >
   IMPs, favorable vulnerability. LHO opens 1H, partner overcalls 1S, RHO
-  jumps to a preemptive 3H. You hold three-card support with scattered
-  values. The field question: sell out, compete to 3S on the eight-card
-  fit, or make a responsive double?
+  jumps to a preemptive 3H (weak, four trumps). You hold exactly three-card
+  support with scattered values. Sell out, bid 3S on the eight-card fit, or
+  make a value-showing double (cards, exactly three spades, defensive
+  tolerance — NOT penalty; partner pulls to 3S by default)?
 
 dealer: W
 vul: EW              # favorable: they are vulnerable, we are not
@@ -15,11 +16,11 @@ my_seat: S
 my_hand: "K93.752.A854.T62"
 auction: ["1H", "1S", "3H"]
 
-# "Next deal": fresh hands from the same decision family. Exactly three-card
-# support, 2-3 hearts, near-minimum values, so Pass/3S/X stay the sensible
-# candidates and the projection trees remain valid.
+# "Next deal": exactly three-card support, 2-3 hearts, 6-10 HCP, so that
+# Pass / 3S / X is a genuine three-way decision for EVERY hand in the class
+# (below 6 HCP nobody considers X and the problem degenerates).
 my_hand_class:
-  hcp: [5, 10]
+  hcp: [6, 10]
   suits:
     S: [3, 3]
     H: [2, 3]
@@ -32,7 +33,7 @@ our_system:
 
 opps_system:
   name: "Light/aggressive"
-  description: "Light overcalls allowed; 3H is weak (4-card preemptive raise)"
+  description: "Light openings allowed; 3H is weak (4-card preemptive raise)"
   ruleset: opps_light_preempts.yaml
 
 n_deals: 800
@@ -47,37 +48,70 @@ candidates:
   - call: "P"
     label: "Pass (defend 3H)"
     projection:
-      # Strong opener with a known 10-card fit bids on to game.
-      - when: "west_hcp >= 17 and opps_combined_hearts >= 10"
+      # Opener with a genuine maximum and a 6th heart raises himself to the
+      # vulnerable game over the preemptive raise; we double holding an
+      # ace-rich hand with trump length (favorable, +200/+500 territory).
+      - when: "west_hcp >= 17 and west_hearts >= 6 and me_hcp >= 9 and me_hearts >= 3"
+        contract: "4HWx"
+        terminal: false
+      - when: "west_hcp >= 17 and west_hearts >= 6"
         contract: "4HW"
-      - else: {contract: "3HW", terminal: true}
+        terminal: true
+      # The overcaller does NOT sell out silently: he reopens 3S with a 6th
+      # spade and sound values...
+      - when: "partner_spades >= 6 and partner_hcp >= 12"
+        contract: "3SN"
+        terminal: true
+      # ...or reopens with a double holding real extras and at most a
+      # doubleton heart; with our 3-card support we bid 3S.
+      - when: "partner_hcp >= 16 and partner_hearts <= 2"
+        contract: "3SN"
+        terminal: true
+      # Otherwise it goes pass-pass-pass: the auction is genuinely over.
+      - else: {contract: "3HW", terminal: false}
 
   - call: "3S"
-    label: "Bid 3S"
+    label: "Bid 3S (eight-card fit, three level)"
     projection:
-      # A maximum opener with a big fit competes to the vulnerable game.
-      - when: "west_hcp >= 17 and opps_combined_hearts >= 10"
+      # Vulnerable opponents take the push only on offense: the 10-card fit
+      # opposite a sound opening, or a 7-card suit. When they do, we double
+      # with defence (ace-rich 9+ and trump length); this is where the
+      # favorable vulnerability pays.
+      - when: "(opps_combined_hearts >= 10 and west_hcp >= 16 or west_hearts >= 7 and west_hcp >= 14) and me_hcp >= 9 and me_hearts >= 3"
+        contract: "4HWx"
+        terminal: false
+      - when: "opps_combined_hearts >= 10 and west_hcp >= 16 or west_hearts >= 7 and west_hcp >= 14"
         contract: "4HW"
-      # Shapely maximum takes the push to 4H even without the 10th trump.
-      - when: "west_hcp >= 18 and west_hearts >= 6"
-        contract: "4HW"
-      # Trump stack behind partner doubles for penalties.
-      - when: "east_spades >= 5 and east_hcp >= 7"
-        contract: "3SNx"
+        terminal: true
+      # Partner raises himself to game only with an offensive maximum and a
+      # 6th trump (our 3S was purely competitive).
+      - when: "partner_hcp >= 15 and partner_spades >= 6"
+        contract: "4SN"
+        terminal: true
+      # 3S essentially never gets doubled here: the raiser is broke and
+      # East's spade length is capped at 3 by the raise itself. (The old
+      # "east_spades >= 5" penalty branch was dead code.)
       - else: {contract: "3SN", terminal: true}
 
   - call: "X"
-    label: "Responsive double"
+    label: "Value-showing double (cards, 3 spades, tolerance for defending)"
     projection:
-      # Partner's sit/pull is decided per deal, never by a global weight.
-      # Partner sits with balanced defence and decent values...
-      - when: "partner_hearts >= 2 and partner_hcp >= 12 and partner_spades <= 5"
+      # Partner converts for penalty ONLY with a defensive maximum whose
+      # heart honours sit over opener — never with small doubletons.
+      - when: "partner_hearts >= 2 and partner_hearts_hcp >= 3 and partner_hcp >= 13 and partner_spades <= 5"
         contract: "3HWx"
-      # ...pulls to game with a real 6-card suit and a maximum...
-      - when: "partner_spades >= 6 and partner_hcp >= 13"
+        terminal: false
+      # Offensive maximum with a 6th spade jumps to the nonvul game.
+      - when: "partner_spades >= 6 and partner_hcp >= 14"
         contract: "4SN"
-      # ...otherwise treats it as competitive and bids 3S,
-      # over which a big-fit maximum opener still saves in 4H.
-      - when: "west_hcp >= 17 and opps_combined_hearts >= 10"
+        terminal: true
+      # Default: partner signs off in 3S. The vulnerable opponents push to
+      # 4H only with the big fit opposite a sound opening; we double with
+      # defence.
+      - when: "opps_combined_hearts >= 10 and west_hcp >= 16 and me_hcp >= 9 and me_hearts >= 3"
+        contract: "4HWx"
+        terminal: false
+      - when: "opps_combined_hearts >= 10 and west_hcp >= 16"
         contract: "4HW"
+        terminal: true
       - else: {contract: "3SN", terminal: true}

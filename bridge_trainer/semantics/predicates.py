@@ -66,3 +66,44 @@ def seven_card_suit(f: SeatFeatures) -> np.ndarray:
     lens = f.suit_lengths
     stacked = np.stack([lens[s] for s in SUIT_NAMES], axis=1)
     return stacked.max(axis=1) >= 7
+
+
+@predicate("balanced_20_21")
+def balanced_20_21(f: SeatFeatures) -> np.ndarray:
+    """Would have opened 2NT."""
+    return f.is_balanced & (f.hcp >= 20) & (f.hcp <= 21)
+
+
+@predicate("light_overcall_junk_spades")
+def light_overcall_junk_spades(f: SeatFeatures) -> np.ndarray:
+    """A light 1S overcall requires suit quality; with a near-honorless suit
+    and sub-opening values the expert passes."""
+    return (f.hcp <= 9) & (f.suit_hcp["S"] <= 2)
+
+
+@predicate("takeout_double_shape_over_spades")
+def takeout_double_shape_over_spades(f: SeatFeatures) -> np.ndarray:
+    """Would have doubled spades for takeout instead of passing."""
+    lens = f.suit_lengths
+    return (
+        (f.hcp >= 12)
+        & (lens["S"] <= 2)
+        & (lens["H"] >= 3) & (lens["D"] >= 3) & (lens["C"] >= 3)
+    )
+
+
+@predicate("sound_two_level_overcall_over_spades")
+def sound_two_level_overcall_over_spades(f: SeatFeatures) -> np.ndarray:
+    """Would have made a direct two-level overcall over spades instead of
+    passing: opening values with a good five-card suit outside spades."""
+    lens, shcp = f.suit_lengths, f.suit_hcp
+    good_suit = np.zeros(len(f.cards), dtype=bool)
+    for s in ("H", "D", "C"):
+        good_suit |= (lens[s] >= 5) & (shcp[s] >= 5)
+    return (f.hcp >= 12) & good_suit
+
+
+@predicate("weak_two_suit_junk")
+def weak_two_suit_junk(f: SeatFeatures) -> np.ndarray:
+    """A vulnerable-style weak two promises a real suit; Q-empty is excluded."""
+    return f.suit_hcp["S"] <= 2

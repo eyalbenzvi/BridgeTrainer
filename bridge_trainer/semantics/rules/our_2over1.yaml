@@ -2,6 +2,24 @@
 schema_version: 1
 system: our_2over1
 rules:
+  # --- Openings ---------------------------------------------------------
+  # Partner's 1S opening (used by five_level_over_save).
+  - id: open_1s
+    context: []
+    call: "1S"
+    constraints:
+      hcp:
+        core: [11, 19]
+        margin:
+          - {range: [10, 10], weight: 0.3}   # shapely rule-of-20 tens
+          - {range: [20, 21], weight: 0.3}   # unbalanced 20-21, no 2C bid
+      suits:
+        S: {core: [5, 7]}
+    exclusions:
+      - balanced_15_17     # opens 1NT
+      - balanced_20_21     # opens 2NT
+
+  # --- Direct-seat actions over (1H) ------------------------------------
   # Partner's 1S overcall over a 1H opening.
   - id: overcall_1s_over_1h
     context: ["1H"]
@@ -18,6 +36,7 @@ rules:
     exclusions:
       - takeout_double_shape_over_hearts   # would double, not overcall
       - strong_jump_shift_values           # would start with a stronger action
+      - light_overcall_junk_spades         # light overcalls need suit quality
 
   # Partner passes over a 1H opening (used by tests / other problems, INV8).
   - id: pass_over_1h
@@ -30,3 +49,38 @@ rules:
           - {range: [13, 14], weight: 0.3} # trap pass / awkward shape
       suits:
         S: {core: [0, 4], margin: [{range: [5, 5], weight: 0.2}]}
+
+  # --- Sandwich-seat pass over (1S)-P-(2S) (used by bal_reopen_after_2s) --
+  # Partner heard 1S on his right and 2S coming back; he passed twice by
+  # implication of this single call (his only call so far). Caps his values
+  # and denies clear direct action.
+  - id: pass_sandwich_after_1s_p_2s
+    context: ["1S", "P", "2S"]
+    call: "P"
+    constraints:
+      hcp:
+        core: [0, 11]
+        margin:
+          - {range: [12, 14], weight: 0.4}   # flat or misfitting 12-14 sells
+      suits:
+        S: {core: [0, 4]}
+    exclusions:
+      - takeout_double_shape_over_spades       # would have doubled 2S
+      - sound_two_level_overcall_over_spades   # would have overcalled
+
+  # --- Forcing pass over (5H) (used by five_level_over_save) -------------
+  # Opener's pass of 5H after 1S-(3H)-4S-(5H) is forcing: "no clear
+  # direction, cards suggest defending but I will respect your decision."
+  # With a heart void + extreme shape opener bids 5S himself; with a
+  # trump-stack-proof double he doubles himself. So the pass shows 1-3
+  # hearts and a normal opening without extreme shape.
+  - id: forcing_pass_after_5h
+    context: ["1S", "3H", "4S", "5H"]
+    call: "P"
+    constraints:
+      hcp:
+        core: [11, 16]
+        margin:
+          - {range: [17, 19], weight: 0.4}   # extras but still no clear call
+      suits:
+        H: {core: [1, 3], margin: [{range: [0, 0], weight: 0.3}]}

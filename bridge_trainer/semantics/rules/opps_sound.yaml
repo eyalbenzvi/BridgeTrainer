@@ -1,0 +1,40 @@
+# Opponents' assumed style: sound openings, constructive raises, 15-17 NT.
+schema_version: 1
+system: opps_sound
+rules:
+  - id: open_1s_sound
+    context: []
+    call: "1S"
+    constraints:
+      hcp:
+        core: [12, 21]
+        margin:
+          - {range: [11, 11], weight: 0.4}
+      suits:
+        S: {core: [5, 7]}
+    exclusions:
+      - balanced_15_17     # opens 1NT
+      - balanced_20_21     # opens 2NT
+
+  - id: raise_2s_constructive
+    context: ["1S", "P"]
+    call: "2S"
+    constraints:
+      hcp:
+        core: [6, 9]
+        margin:
+          - {range: [5, 5], weight: 0.4}
+      suits:
+        S: {core: [3, 4]}
+    exclusions:
+      - game_forcing_raise_values   # 10+ makes a limit raise or better
+
+  # Opener's pass of 2S caps him: no game try, no extras.
+  - id: opener_pass_after_2s
+    context: ["1S", "P", "2S", "P"]
+    call: "P"
+    constraints:
+      hcp:
+        core: [11, 14]
+        margin:
+          - {range: [15, 16], weight: 0.3}   # flat 15-16, no playable try

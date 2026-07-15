@@ -27,9 +27,16 @@ browser's localStorage (per device), so no server is needed.
 your seat) and `variants: N` publishes N seeded deals of the same decision —
 variant 0 is the authored hand, the rest are freshly dealt from the class and
 fully re-simulated. The quiz's "Next deal" button jumps to your first
-unanswered variant; the per-problem URL redirects there too. To get more
-deals, bump `variants:` in the problem YAML and push — only the new variants
-are computed (deal sets and DD tables are content-addressed in the cache).
+unanswered variant; the per-problem URL redirects there too.
+
+**Continuous generation**: the deploy workflow also runs on a daily cron with
+`--grow-per-day K --grow-anchor <date>`, so every problem family gains K
+fresh deals per day, forever — deterministic within a day, and only the new
+deals are ever computed (deal sets and DD tables are content-addressed in the
+cache). The site's "Deal me a hand" button serves a random deal you haven't
+answered, across all families. True tap-time generation would need a compute
+server or an in-browser DD engine; the daily pool + random unseen serving
+gives the same experience on free static hosting.
 
 `.github/workflows/publish.yml` runs the tests, rebuilds the site and deploys
 it to **GitHub Pages** on every push to `main` (deal sets and DD trick tables

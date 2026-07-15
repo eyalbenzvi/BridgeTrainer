@@ -26,17 +26,20 @@ def test_hand_verified_1h_opening_rule():
     auction = Auction.from_tokens("W", ["1H", "1S", "3H"])
     profile = engine.extract(auction)
     w = profile.seats["W"]
-    # Core 11-21 at weight 1.0, 10 at 0.4, nothing below 10 or above 21.
+    # Core 11-19 at weight 1.0; 10 at 0.4; unbalanced 20-21 at 0.3.
     assert w.hcp_weights[9] == 0.0
     assert w.hcp_weights[10] == 0.4
-    assert all(w.hcp_weights[h] == 1.0 for h in range(11, 22))
+    assert all(w.hcp_weights[h] == 1.0 for h in range(11, 20))
+    assert w.hcp_weights[20] == 0.3 and w.hcp_weights[21] == 0.3
     assert w.hcp_weights[22] == 0.0
-    # 5-8 hearts only.
+    # 5-7 hearts core, 8 at reduced weight.
     assert w.suit_weights["H"][4] == 0.0
     assert w.suit_weights["H"][5] == 1.0
-    assert w.suit_weights["H"][8] == 1.0
+    assert w.suit_weights["H"][7] == 1.0
+    assert w.suit_weights["H"][8] == 0.2
     assert w.suit_weights["H"][9] == 0.0
     assert "balanced_15_17" in w.exclusions
+    assert "balanced_20_21" in w.exclusions
 
 
 def test_hand_verified_overcall_and_raise_rules():
@@ -46,9 +49,16 @@ def test_hand_verified_overcall_and_raise_rules():
     assert n.hcp_weights[7] == 0.5 and n.hcp_weights[8] == 1.0
     assert n.suit_weights["S"][4] == 0.0 and n.suit_weights["S"][5] == 1.0
     assert "takeout_double_shape_over_hearts" in n.exclusions
+    assert "light_overcall_junk_spades" in n.exclusions
     e = profile.seats["E"]
-    assert e.hcp_weights[2] == 1.0 and e.hcp_weights[9] == 0.5
-    assert e.suit_weights["H"][3] == 0.2 and e.suit_weights["H"][4] == 1.0
+    # Preemptive jump raise: 3-8 core (2 at 0.4, 9 at 0.5), EXACTLY 4 trumps
+    # in the core (5 at reduced weight, never 3).
+    assert e.hcp_weights[2] == 0.4 and e.hcp_weights[3] == 1.0
+    assert e.hcp_weights[9] == 0.5 and e.hcp_weights[10] == 0.0
+    assert e.suit_weights["H"][3] == 0.0
+    assert e.suit_weights["H"][4] == 1.0
+    assert e.suit_weights["H"][5] == 0.4
+    assert e.suit_weights["H"][6] == 0.0
     assert profile.unrecognized_calls == []
 
 

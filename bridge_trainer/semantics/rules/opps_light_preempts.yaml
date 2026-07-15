@@ -1,5 +1,5 @@
-# Opponents' assumed style: light openings allowed, aggressive weak raises.
-# 3H over (1H) 1S is preemptive: 4-card support, weak hand.
+# Opponents' assumed style: light openings allowed, aggressive weak raises
+# and preempts. 3H over (1H) 1S is preemptive: 4-card support, weak hand.
 schema_version: 1
 system: opps_light_preempts
 rules:
@@ -8,24 +8,28 @@ rules:
     call: "1H"
     constraints:
       hcp:
-        core: [11, 21]
+        core: [11, 19]
         margin:
-          - {range: [10, 10], weight: 0.4}  # light style: shapely 10-counts
+          - {range: [10, 10], weight: 0.4}   # light style: shapely 10-counts
+          - {range: [20, 21], weight: 0.3}   # unbalanced 20-21, below a 2C bid
       suits:
-        H: {core: [5, 8]}
+        H: {core: [5, 7], margin: [{range: [8, 8], weight: 0.2}]}
     exclusions:
       - balanced_15_17    # would have opened 1NT
+      - balanced_20_21    # would have opened 2NT
 
   - id: raise_3h_preemptive
     context: ["1H", "1S"]
     call: "3H"
     constraints:
       hcp:
-        core: [2, 8]
+        core: [3, 8]
         margin:
+          - {range: [2, 2], weight: 0.4}   # total trash, but they are vul
           - {range: [9, 9], weight: 0.5}   # maximum with no game interest
       suits:
-        H: {core: [4, 5], margin: [{range: [3, 3], weight: 0.2}]}
+        # A preemptive JUMP raise promises four trumps; no 3-card margin.
+        H: {core: [4, 4], margin: [{range: [5, 5], weight: 0.4}]}
         S: {core: [0, 3]}
     exclusions:
       - game_forcing_raise_values          # would have cue-bid 2S instead
@@ -37,3 +41,55 @@ rules:
       hcp: {core: [0, 8], margin: [{range: [9, 10], weight: 0.4}]}
       suits:
         H: {core: [0, 2], margin: [{range: [3, 3], weight: 0.3}]}
+
+  # --- Weak two in spades (used by comp_over_weak_2s; they are vul) ------
+  - id: open_2s_weak
+    context: []
+    call: "2S"
+    constraints:
+      hcp:
+        core: [5, 10]
+        margin:
+          - {range: [4, 4], weight: 0.3}
+          - {range: [11, 11], weight: 0.3}
+      suits:
+        S: {core: [6, 6], margin: [{range: [5, 5], weight: 0.2}]}
+        H: {core: [0, 3], margin: [{range: [4, 4], weight: 0.3}]}
+    exclusions:
+      - seven_card_suit        # would open 3S
+      - weak_two_suit_junk     # vulnerable weak twos need a real suit
+
+  # --- Weak jump overcall over our 1S (used by five_level_over_save) -----
+  - id: wjo_3h_over_1s
+    context: ["1S"]
+    call: "3H"
+    constraints:
+      hcp:
+        core: [5, 9]
+        margin:
+          - {range: [4, 4], weight: 0.5}
+          - {range: [10, 10], weight: 0.4}
+      suits:
+        H: {core: [6, 6], margin: [{range: [7, 7], weight: 0.25}]}
+        S: {core: [0, 2], margin: [{range: [3, 3], weight: 0.3}]}
+
+  # --- The 5H save over our 4S (used by five_level_over_save) ------------
+  # Favorable for them: big fit, shortness in our suit, no defence.
+  - id: save_5h_over_4s
+    context: ["1S", "3H", "4S"]
+    call: "5H"
+    constraints:
+      hcp:
+        core: [3, 9]
+        margin:
+          - {range: [10, 11], weight: 0.4}
+      suits:
+        H: {core: [4, 5], margin: [{range: [3, 3], weight: 0.3}]}
+        S: {core: [0, 1], margin: [{range: [2, 2], weight: 0.3}]}
+
+  # --- Preemptor's pass after the save and our forcing pass --------------
+  - id: pass_after_save
+    context: ["1S", "3H", "4S", "5H", "P"]
+    call: "P"
+    constraints:
+      hcp: {core: [0, 11]}

@@ -31,8 +31,11 @@ def test_site_structure(site):
             assert (root / e.id / f"v{k}" / "report.html").exists()
 
 
-def _payload(root, entries, k):
-    html = (root / entries[0].id / f"v{k}" / "index.html").read_text()
+COMP = "comp_3s_over_3h"
+
+
+def _payload(root, pid, k):
+    html = (root / pid / f"v{k}" / "index.html").read_text()
     m = re.search(r"const V = (\{.*?\});\n", html)
     assert m, "quiz payload missing"
     return json.loads(m.group(1))
@@ -40,8 +43,8 @@ def _payload(root, entries, k):
 
 def test_quiz_payload_is_valid_json_with_verdict(site):
     root, entries = site
-    payload = _payload(root, entries, 0)
-    assert payload["pid"] == entries[0].id
+    payload = _payload(root, COMP, 0)
+    assert payload["pid"] == COMP
     assert payload["k"] == 0 and payload["total"] == 3
     actions = {c["action"] for c in payload["corrected"]}
     assert set(payload["accepted"]) <= actions
@@ -54,7 +57,7 @@ def test_quiz_payload_is_valid_json_with_verdict(site):
 
 def test_variants_have_distinct_hands_and_v0_is_authored(site):
     root, entries = site
-    pages = [(root / entries[0].id / f"v{k}" / "index.html").read_text()
+    pages = [(root / COMP / f"v{k}" / "index.html").read_text()
              for k in range(3)]
     # v0 shows the authored hand (K93 in spades).
     assert "K93" in pages[0].replace("&#9824; K93", "K93")

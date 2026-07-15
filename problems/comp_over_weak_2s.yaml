@@ -1,0 +1,110 @@
+# Competing over their vulnerable weak two.
+schema_version: 1
+id: comp_over_weak_2s
+title: "Over their weak 2S: pass, double, or 3H?"
+category: direct_actions
+description: >
+  IMPs, they are vulnerable, we are not. RHO opens a (sound, vulnerable)
+  weak 2S. You hold a decent 13-count with a good five-card heart suit and
+  a doubleton spade. Defend quietly, make a slightly off-shape takeout
+  double, or bid a natural 3H?
+
+dealer: E
+vul: EW              # they are vulnerable, we are not
+my_seat: S
+my_hand: "A7.KQT84.K93.J52"
+auction: ["2S"]
+
+# Exactly five hearts, 1-2 spades, 12-14 HCP: strong enough that passing
+# throughout is not automatic, weak enough that neither X nor 3H is clear.
+my_hand_class:
+  hcp: [12, 14]
+  suits:
+    S: [1, 2]
+    H: [5, 5]
+variants: 12
+
+our_system:
+  name: "2/1"
+  description: "2/1 GF; sound three-level overcalls"
+  ruleset: our_2over1.yaml
+
+opps_system:
+  name: "Light/aggressive"
+  description: "Aggressive preempts, but vulnerable weak twos deliver a suit"
+  ruleset: opps_light_preempts.yaml
+
+n_deals: 800
+
+breakdowns:
+  - feature: partner_hearts
+    label: "Partner's heart length"
+  - feature: west_spades
+    label: "LHO's spade fit (the jam risk)"
+
+candidates:
+  - call: "P"
+    label: "Pass (defend 2S)"
+    projection:
+      # LHO raises the preempt to game with a fit and real values...
+      - when: "west_hcp >= 14 and west_spades >= 3"
+        contract: "4SE"
+        terminal: true
+      # ...or extends the preempt with a 4th trump.
+      - when: "west_spades >= 4"
+        contract: "3SE"
+        terminal: true
+      # Partner balances with a takeout double; we jump to our hearts.
+      - when: "partner_hcp >= 13 and partner_spades <= 2"
+        contract: "3HS"
+        terminal: true
+      - else: {contract: "2SE", terminal: false}
+
+  - call: "X"
+    label: "Takeout double (off-shape 2-5-3-3)"
+    projection:
+      # Partner converts with a genuine trump stack (they are vulnerable:
+      # +200/+500/+800 territory).
+      - when: "partner_spades >= 5 and partner_spades_hcp >= 4"
+        contract: "2SEx"
+        terminal: false
+      # LHO jams to 3S on a fit; we double again with a full maximum,
+      # otherwise it plays there when partner is broke.
+      - when: "west_spades >= 3 and west_hcp >= 6 and partner_hcp <= 9 and me_hcp >= 14"
+        contract: "3SEx"
+        terminal: false
+      - when: "west_spades >= 3 and west_hcp >= 6 and partner_hcp <= 9"
+        contract: "3SE"
+        terminal: true
+      # Partner advances: game with values + a fit, else the cheapest suit —
+      # including the painful 4-3 minor when he has no major.
+      - when: "partner_hcp >= 10 and partner_hearts >= 4"
+        contract: "4HN"
+        terminal: true
+      - when: "partner_hearts >= 4"
+        contract: "3HN"
+        terminal: true
+      - when: "partner_diamonds >= 5"
+        contract: "3DN"
+        terminal: true
+      - when: "partner_clubs >= 5"
+        contract: "3CN"
+        terminal: true
+      - else: {contract: "3DN", terminal: true}
+
+  - call: "3H"
+    label: "Overcall 3H (natural, sound)"
+    projection:
+      # Partner raises to game with 3-card support and 10+.
+      - when: "partner_hearts >= 3 and partner_hcp >= 10"
+        contract: "4HS"
+        terminal: true
+      # They Law-raise to 3S with the 9-card fit; partner competes to the
+      # nonvul 4H holding 4 trumps and a working 8+.
+      - when: "west_spades >= 3 and opps_combined_spades >= 9 and partner_hearts >= 4 and partner_hcp >= 8"
+        contract: "4HS"
+        terminal: true
+      - when: "west_spades >= 3 and opps_combined_spades >= 9"
+        contract: "3SE"
+        terminal: true
+      - else: {contract: "3HS", terminal: true}

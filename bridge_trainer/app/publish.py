@@ -252,6 +252,7 @@ location.replace("v" + target + "/index.html");
 
 
 def render_index(entries: list[PublishedEntry], generated_at: str) -> str:
+    manifest = json.dumps([{"id": e.id, "total": e.variants} for e in entries])
     items = "".join(f"""<a class="card problem" href="{html.escape(e.id)}/index.html"
  data-id="{html.escape(e.id)}" data-total="{e.variants}">
 <b>{html.escape(e.title)}</b>
@@ -264,16 +265,35 @@ def render_index(entries: list[PublishedEntry], generated_at: str) -> str:
 <title>Bridge Bidding Trainer</title>
 <style>{_BASE_CSS}
 a.card {{ display: block; text-decoration: none; color: inherit; }}
+a.deal {{ display: block; text-align: center; font-size: 1.25em;
+         padding: .9em; border-radius: 12px; margin: 1em 0;
+         background: #3673b5; color: #fff; text-decoration: none;
+         font-weight: bold; }}
 </style></head><body>
 <h1>Bridge Bidding Trainer</h1>
-<p class="muted">{len(entries)} problem{'s' if len(entries) != 1 else ''}
-&middot; published {generated_at}
+<a class="deal" href="#" onclick="return dealMe()">Deal me a hand &rarr;</a>
+<p class="muted">New deals are generated daily &middot; published {generated_at}
 &middot; <a href="#" onclick="return resetAll()">reset progress</a></p>
 {items}
 <script>
+const MANIFEST = {manifest};
 const KEY = "bt_answers";
 function store() {{ try {{ return JSON.parse(localStorage.getItem(KEY)) || {{}}; }}
                     catch (e) {{ return {{}}; }} }}
+function dealMe() {{
+  const s = store(), unseen = [];
+  for (const p of MANIFEST)
+    for (let j = 0; j < p.total; j++)
+      if (!s[p.id + "/v" + j]) unseen.push(p.id + "/v" + j);
+  if (!unseen.length) {{
+    alert("You've answered every deal! New ones are generated daily " +
+          "\\u2014 come back tomorrow, or reset your progress.");
+    return false;
+  }}
+  const pick = unseen[Math.floor(Math.random() * unseen.length)];
+  location.href = pick + "/index.html";
+  return false;
+}}
 const s = store();
 document.querySelectorAll("a.problem").forEach(card => {{
   const id = card.dataset.id, total = parseInt(card.dataset.total);
@@ -308,17 +328,33 @@ def publish(
     cache_dir: str | Path = ".trainer_cache",
     budget: GenerationBudget | None = None,
     variants_override: int | None = None,
+    grow_per_day: int = 0,
+    grow_anchor: str | None = None,
 ) -> list[PublishedEntry]:
+    """grow_per_day/grow_anchor: continuous generation. Each problem with a
+    hand class gains grow_per_day fresh deals per UTC day since the anchor
+    date (YYYY-MM-DD) — deterministic within a day, so CI republishes are
+    stable and only the newest deals ever need computing."""
+    import datetime
+
     problems_dir, out_dir = Path(problems_dir), Path(out_dir)
     paths = sorted(problems_dir.glob("*.yaml"))
     if not paths:
         raise FileNotFoundError(f"no problem files in {problems_dir}")
+    grown = 0
+    if grow_per_day and grow_anchor:
+        anchor = datetime.date.fromisoformat(grow_anchor)
+        today = datetime.datetime.now(datetime.timezone.utc).date()
+        grown = max(0, (today - anchor).days) * grow_per_day
     entries = []
     for path in paths:
         first = None
         spec = load_problem(path)
-        total = min(variants_override, spec.variants) if variants_override \
-            else spec.variants
+        total = spec.variants
+        if spec.my_hand_class is not None:
+            total += grown
+        if variants_override:
+            total = min(variants_override, total)
         for k in range(total):
             seed_k = seed + k
             my_hand = None
@@ -347,7 +383,6 @@ def publish(
             render_problem_redirect(entry.id, entry.title, total),
             encoding="utf-8")
         entries.append(entry)
-    import datetime
     stamp = datetime.date.today().isoformat() + f" (seed {seed})"
     (out_dir / "index.html").write_text(render_index(entries, stamp),
                                         encoding="utf-8")

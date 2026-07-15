@@ -98,6 +98,8 @@ def cmd_publish(args: argparse.Namespace) -> int:
         use_cache=not args.no_cache,
         cache_dir=args.cache_dir,
         variants_override=args.variants,
+        grow_per_day=args.grow_per_day,
+        grow_anchor=args.grow_anchor,
     )
     for e in entries:
         print(f"  {e.id}: {e.variants} deal variants x {e.n_deals} simulations")
@@ -138,6 +140,10 @@ def main(argv: list[str] | None = None) -> int:
     pub_p.add_argument("--cache-dir", default=".trainer_cache")
     pub_p.add_argument("--variants", type=int, default=None,
                        help="cap the number of deal variants per problem")
+    pub_p.add_argument("--grow-per-day", type=int, default=0,
+                       help="fresh deals added per problem per day")
+    pub_p.add_argument("--grow-anchor", default=None,
+                       help="UTC date (YYYY-MM-DD) growth counts from")
     pub_p.set_defaults(func=cmd_publish)
 
     args = parser.parse_args(argv)

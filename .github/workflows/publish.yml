@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"  # daily: continuous deal generation
 
 permissions:
   contents: write
@@ -33,7 +35,9 @@ jobs:
           key: trainer-cache-${{ hashFiles('problems/**', 'bridge_trainer/**') }}
           restore-keys: trainer-cache-
       - name: Build site
-        run: trainer publish problems --out _site --seed 42
+        run: >
+          trainer publish problems --out _site --seed 42
+          --grow-per-day 2 --grow-anchor 2026-07-16
       # Pushing a gh-pages branch auto-enables GitHub Pages (branch source),
       # which the workflow token IS allowed to do — unlike creating a Pages
       # site via the API (actions/configure-pages enablement fails with

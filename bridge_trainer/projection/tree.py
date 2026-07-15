@@ -50,16 +50,21 @@ def compile_predicate(expr: str, allowed_names: set[str]):
     return lambda features: bool(eval(code, {"__builtins__": {}}, features))
 
 
+def _per_seat_feature_keys() -> list[str]:
+    keys = ["hcp"]
+    for s in SUIT_WORDS.values():
+        keys.append(s)            # suit length
+        keys.append(f"{s}_hcp")   # honor points held in that suit
+    return keys
+
+
 def feature_names(my_seat: Seat) -> set[str]:
     names: set[str] = set()
-    for word in SEAT_WORDS.values():
-        names.add(f"{word}_hcp")
-        names.update(f"{word}_{s}" for s in SUIT_WORDS.values())
-    for role in ("partner", "lho", "rho"):
-        names.add(f"{role}_hcp")
-        names.update(f"{role}_{s}" for s in SUIT_WORDS.values())
-    names.add("opps_combined_hcp")
-    names.update(f"opps_combined_{s}" for s in SUIT_WORDS.values())
+    keys = _per_seat_feature_keys()
+    for word in list(SEAT_WORDS.values()) + ["partner", "lho", "rho", "me"]:
+        names.update(f"{word}_{k}" for k in keys)
+    for side in ("opps_combined", "our_combined"):
+        names.update(f"{side}_{k}" for k in keys)
     return names
 
 
@@ -72,7 +77,9 @@ def deal_features(deal, my_seat: Seat) -> dict[str, int]:
         feats = {"hcp": int(sum(HCP_BY_RANK[c % 13] for c in cards))}
         for suit_char, word in SUIT_WORDS.items():
             si = "SHDC".index(suit_char)
-            feats[word] = sum(1 for c in cards if c // 13 == si)
+            in_suit = [c for c in cards if c // 13 == si]
+            feats[word] = len(in_suit)
+            feats[f"{word}_hcp"] = int(sum(HCP_BY_RANK[c % 13] for c in in_suit))
         per_seat[seat] = feats
 
     out: dict[str, int] = {}
@@ -80,6 +87,7 @@ def deal_features(deal, my_seat: Seat) -> dict[str, int]:
         for k, v in feats.items():
             out[f"{SEAT_WORDS[seat]}_{k}"] = v
     roles = {
+        "me": my_seat,
         "partner": partner_of(my_seat),
         "lho": next_seat(my_seat),
         "rho": next_seat(partner_of(my_seat)),
@@ -87,9 +95,10 @@ def deal_features(deal, my_seat: Seat) -> dict[str, int]:
     for role, seat in roles.items():
         for k, v in per_seat[seat].items():
             out[f"{role}_{k}"] = v
-    opp1, opp2 = roles["lho"], roles["rho"]
-    for k in per_seat[opp1]:
-        out[f"opps_combined_{k}"] = per_seat[opp1][k] + per_seat[opp2][k]
+    for side, (s1, s2) in (("opps_combined", (roles["lho"], roles["rho"])),
+                           ("our_combined", (my_seat, roles["partner"]))):
+        for k in per_seat[s1]:
+            out[f"{side}_{k}"] = per_seat[s1][k] + per_seat[s2][k]
     return out
 
 
