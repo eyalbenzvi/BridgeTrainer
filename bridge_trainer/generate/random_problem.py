@@ -22,7 +22,8 @@ import numpy as np
 from endplay.types import Player
 
 from .. import __version__ as trainer_version
-from ..bot.bidder import BOT_VERSION, HandView, Signature, SimpleBidder
+from ..bot.bidder import (BOT_VERSION, CANDIDATE_SLACK, STRICT, TIGHT,
+                          HandView, Signature, SimpleBidder)
 from ..bot.walker import AuctionWalker
 from ..dd.correction import load_default_correction
 from ..dealing.features import hand_to_pbn
@@ -41,6 +42,7 @@ MAX_DIFFICULTY_GAP = 3.0   # IMPs: top action must not win by more than this
 MIN_ESS = 100.0
 MAX_SHORTFALL_FRAC = 0.4
 MAX_PUSH_RATE = 0.90       # all-candidates-transpose problems are boring
+MIN_INTEREST = 5           # expert_review_v2 §3.3 threshold
 
 
 def signature_to_constraints(sigs: list[Signature]) -> SeatConstraints:
@@ -80,47 +82,109 @@ def signature_to_constraints(sigs: list[Signature]) -> SeatConstraints:
                                       exclusions=exclusions)
 
 
-def _plausible_candidates(bidder: SimpleBidder, hand: HandView, view,
-                          chosen: str) -> list[str]:
-    """Distinct calls this seat could defensibly consider right now."""
-    cands = [chosen]
-
-    def add(tok):
-        if tok not in cands:
-            cands.append(tok)
-
-    add("P")
-    # Double: legal (their bid stands undoubled) and we hold real values.
-    if view.level > 0 and view.last_bidder_side == "them" \
-            and not view.doubled and hand.hcp >= 8:
-        add("X")
-    # Raise partner's suit one level.
-    ps = view.partner_last_bid
-    if ps and ps != "NT" and hand.length.get(ps, 0) >= 2:
-        lvl = view.cheapest_level(ps)
-        if lvl <= 4 and view.outbids(lvl, ps) \
-                and hand.support_points(ps) >= 5:
-            add(f"{lvl}{ps}")
-    # Bid/rebid my longest suit.
-    longest = hand.longest()
-    if hand.length[longest] >= 5 and hand.hcp >= 6:
-        lvl = view.cheapest_level(longest)
-        if lvl <= 3 and view.outbids(lvl, longest):
-            add(f"{lvl}{longest}")
-    return cands[:4]
+def _max_fit(hand: HandView, view) -> int:
+    return max(hand.length[s] + view.partner_suit_min.get(s, 0)
+               for s in ("S", "H", "D", "C"))
 
 
-def _turn_interest(view, n_candidates: int, turn_index: int) -> int:
-    if n_candidates < 2:
-        return 0
-    score = n_candidates
-    if view.level >= 1 and view.last_bidder_side == "them":
-        score += 2           # live competitive decision
-    if view.level >= 2:
-        score += 1
-    if turn_index >= 4:
-        score += 1           # later decisions tend to be richer
-    return score
+def evaluate_turn(bidder: SimpleBidder, hand: HandView, view,
+                  turn_index: int):
+    """Candidate generation + problem-selection per expert_review_v2.md.
+
+    Returns (chosen: BotCall, candidates: list[str], qualifies: bool,
+    score: int). Candidates are bridge-legitimate options only: doubles come
+    from the bidder's strict double rules (never a bare HCP test), bids from
+    slack-fired rules passing level/fit floors, NT bids need stoppers, and
+    Pass is included only when declining to act is coherent.
+    """
+    chosen = bidder.bid(hand, view)
+
+    fired = bidder.enumerate_calls(hand, view, CANDIDATE_SLACK)
+    strict_tokens = {c.token for c in bidder.enumerate_calls(hand, view,
+                                                             STRICT)}
+
+    picked: list[str] = []
+    by_suit_level: dict[str, int] = {}
+    for call in fired:
+        tok = call.token
+        if tok in ("P", chosen.token) or tok in picked:
+            continue
+        if tok == "X":
+            # Doubles are strict rules (penalty/takeout/power/negative):
+            # legitimate iff the rule itself fires (no slack inside).
+            picked.append(tok)
+            continue
+        level, denom = int(tok[0]), tok[1:]
+        if level >= 6:
+            continue
+        if denom == "NT":
+            if not bidder._enemy_stopped(hand, view):
+                continue
+        else:
+            fit = hand.length[denom] + view.partner_suit_min.get(denom, 0)
+            if level == 4 and not (hand.length[denom] >= 5 or fit >= 8):
+                continue
+            if level == 5:
+                if not (fit >= 9 or hand.length[denom] >= 7):
+                    continue
+                if hand.hcp <= 7 and not (not view.vul_us and view.vul_them):
+                    continue  # sacrifice-flavoured: favorable only
+            # Per suit keep the cheapest level unless the higher bid fired
+            # strictly (a real game bid vs a courtesy raise).
+            prev = by_suit_level.get(denom)
+            if prev is not None and level > prev and tok not in strict_tokens:
+                continue
+        if denom != "NT":
+            by_suit_level.setdefault(denom, level)
+        picked.append(tok)
+
+    # Pass legitimacy: (a) live competitive decision, or (b) the chosen rule
+    # sits at its own threshold — tightening by 1 makes the bot pass.
+    if chosen.token != "P":
+        pass_ok = (view.last_bidder_side == "them"
+                   or bidder.bid(hand, view, TIGHT).token == "P")
+    else:
+        pass_ok = False
+
+    candidates = [chosen.token] + picked[:3]
+    if chosen.token != "P" and pass_ok and "P" not in candidates:
+        candidates.append("P")
+    candidates = candidates[:4]
+
+    alts = [c for c in candidates if c not in ("P", chosen.token)]
+
+    # Qualification gate.
+    if chosen.token != "P":
+        qualifies = bool(alts) or pass_ok
+    else:
+        qualifies = bool(alts)
+
+    # Exclusions.
+    if qualifies and chosen.token == "P" and set(alts) == {"X"} \
+            and view.our_first_denom == "" and view.partner_min_hcp == 0 \
+            and view.denom and view.denom != "NT" \
+            and view.level >= {"S": 4, "H": 4, "D": 5, "C": 5}[view.denom]:
+        qualifies = False  # E1: lone X of their unopposed game
+    if qualifies and view.level == 0 and view.passes_since_last_bid == 3:
+        qualifies = False  # E2: 4th-seat pass-out turns
+
+    score = 0
+    if qualifies:
+        score = 2
+        if len(alts) + (1 if pass_ok and chosen.token != "P" else 0) >= 2:
+            score += 2
+        if view.our_first_denom != "" and (
+                view.they_opened or view.last_bidder_side == "them"):
+            score += 2
+        if view.level >= 3:
+            score += 1
+        if view.level >= 4 and _max_fit(hand, view) >= 8:
+            score += 1
+        if chosen.token != "P" and bidder.at_edge(hand, view, chosen.token):
+            score += 1
+        if view.passes_since_last_bid == 2 and view.level > 0:
+            score += 1
+    return chosen, candidates, qualifies and score >= MIN_INTEREST, score
 
 
 def generate_problem(seed: int, n_deals: int = 600,
@@ -139,15 +203,14 @@ def generate_problem(seed: int, n_deals: int = 600,
 
     # 2. Bid it out, scoring every turn for decision-ness.
     walker = AuctionWalker(dealer, vul, hands=hands, bidder=bidder)
-    turns = []  # (interest, turn_index, seat, candidates, stem_tokens)
+    turns = []  # (score, turn_index, seat, candidates, stem_tokens)
     while not walker.finished and len(walker.calls) < 24:
         seat = walker.next_to_call
         view = walker.view_for(seat)
-        chosen = bidder.bid(hands[seat], view)
-        cands = _plausible_candidates(bidder, hands[seat], view, chosen.token)
-        interest = _turn_interest(view, len(cands), len(walker.calls))
-        if interest >= 4:
-            turns.append((interest, len(walker.calls), seat,
+        chosen, cands, qualifies, score = evaluate_turn(
+            bidder, hands[seat], view, len(walker.calls))
+        if qualifies:
+            turns.append((score, len(walker.calls), seat,
                           cands, walker.tokens()))
         walker.record(seat, chosen)
 
@@ -235,7 +298,7 @@ def generate_problem(seed: int, n_deals: int = 600,
 
     record = {
         "schema": SCHEMA_VERSION,
-        "id": f"r{seed:08x}",
+        "id": f"b{BOT_VERSION}-{seed:08x}",
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "generator": {
             "bot_version": BOT_VERSION,

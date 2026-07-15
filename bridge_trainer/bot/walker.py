@@ -124,7 +124,16 @@ class AuctionWalker:
             opening_denom_them=opening_denom_them,
             opening_level_them=opening_level_them,
             my_opening_token=self.opening_token if self.opener == seat else "",
+            passes_since_last_bid=self._trailing_passes(),
         )
+
+    def _trailing_passes(self) -> int:
+        n = 0
+        for _, call in reversed(self.calls):
+            if call.token != "P":
+                break
+            n += 1
+        return n
 
     # ------------------------------------------------------------- actions
     def record(self, seat: str, call: BotCall) -> None:

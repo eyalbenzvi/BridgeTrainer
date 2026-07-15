@@ -9,11 +9,17 @@ from bridge_trainer.generate.random_problem import generate_problem
 from bridge_trainer.pool.store import ProblemPool
 
 
+def _first_accepted(start, n_deals=80, tries=40):
+    for seed in range(start, start + tries):
+        rec, _ = generate_problem(seed=seed, n_deals=n_deals)
+        if rec is not None:
+            return seed, rec
+    raise AssertionError("no seed accepted — generator gate too strict?")
+
+
 @pytest.fixture(scope="module")
 def problem():
-    rec, reason = generate_problem(seed=0, n_deals=80)
-    assert rec is not None, reason
-    return rec
+    return _first_accepted(0)[1]
 
 
 def test_generated_problem_schema(problem):
@@ -31,9 +37,10 @@ def test_generated_problem_schema(problem):
 
 
 def test_generation_is_deterministic():
-    a, _ = generate_problem(seed=0, n_deals=60)
-    b, _ = generate_problem(seed=0, n_deals=60)
-    assert a is not None and b is not None
+    seed, a = _first_accepted(0, n_deals=60)
+    b, _ = generate_problem(seed=seed, n_deals=60)
+    assert b is not None
+    a = dict(a)
     a.pop("created_at"), b.pop("created_at")
     assert a == b
 
