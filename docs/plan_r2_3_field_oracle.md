@@ -47,7 +47,13 @@ R2-1 miner: deal → candidates/trees (owner's card) → sim → close + materia
                                         │
                  human-split score = high → publish (priority)
                  human-split score = low  → publish rate-limited / deprioritized
+                 no score (support-gate fail or unminable context)
+                                          → publish neutrally, unscored
 ```
+
+The third branch matters: early on, most nominated spots will have no
+score (few minable contexts). Absence of a score is never treated as a
+low score — it is recorded as `oracle: none` in provenance.
 
 ## The system-vs-judgment separator, rebuilt
 
@@ -67,7 +73,12 @@ population:
    fit pair-conditioned models. A split is *systemic* when pair-cluster
    membership explains it (within-cluster the call is near-deterministic);
    it is *judgment* when entropy survives **within** clusters of
-   same-method pairs.
+   same-method pairs. Practicalities (round-2 notes): a pair contributes
+   few boards per context, so clustering pools each pair's *convention
+   signature across all contexts* (alert-informed), never per-context;
+   `pn|` names are operator-typed and need normalization; the P0 census
+   reports pairs-per-context and boards-per-pair so a P1 control failure
+   can be attributed to data rather than concept.
 2. **Stop discarding alert data**: `_norm_call` strips `!` and skips
    `an|` explanation tokens — the corpus's only direct convention
    annotations. Retain both; alert density per context is a direct
@@ -83,6 +94,9 @@ population:
    (v1's token-level "call doesn't exist in the card" guard is deleted:
    call tokens are universal; multi 2♦ maps token-perfectly onto a weak
    2♦ and means the opposite.)
+   **Ordering rule** (round-2 note): the separator in step 1 runs on the
+   *unfiltered* corpus — it must see the systemic splits to flag them;
+   the oracle *trains* on the filtered sub-corpus only.
 
 ## Trust boundaries of the oracle score
 

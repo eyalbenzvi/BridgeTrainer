@@ -46,8 +46,16 @@ existing stack):
    ε and all thresholds are **stake-normalized per context** — partscore
    IMP quanta and game-swing quanta cannot share one ε.
 4. **Anti-lottery rule**: a close top-2 gap with 4+ mutually non-dominated
-   candidates and near-uniform per-layout winners is a *pure guess*
+   candidates and near-uniform per-layout winners — defined as no call
+   being clairvoyantly best on even 40% of layouts — is a *pure guess*
    (the b2-0135277e "teaches nothing" class) → discard, per rubric Q3.
+   (This 40% uniformity threshold is distributional, sits outside the
+   stake-normalization rule, and is pre-registered in P0 like the rest.)
+
+Honest knob count: δ, ε, `D_hi`, `V_lo`, x%, the closeness band, the
+uniformity threshold, the EVPI noise floor — **eight**, of which five
+derive from the single stake-normalization rule and three (x%,
+uniformity, noise floor) are pre-registered independently in P0.
 
 ## Candidate universe and continuations — the honest system statement
 
@@ -86,7 +94,22 @@ and is T-compatible (once, versioned, reviewable).
 **In scope (v1.0)**: direct-seat actions over openings and preempts;
 responder's decisions after interference (negative-double territory);
 raise decisions after partner's opening + overcall; balancing over weak
-twos *in undoubled-partscore lines only*.
+twos.
+
+Two boundary rules (round-2 verification notes), stated precisely:
+
+- **The invite quarantine applies to candidates, not just contexts.**
+  Inside kept raise contexts, any spot whose top-2 comparison is
+  invite-vs-game (3♠ vs 4♠) is quarantined under the same rule as
+  invitational sequences until the correction table is validated for it;
+  the P0 calibration set includes a labeled invite-in-competition spot to
+  measure exactly this.
+- **Doubled continuations are never pruned from trees** (a censored
+  outcome space would undervalue every X). The penalty-bias exclusion is
+  a *context* filter, applied empirically: if more than a threshold share
+  of a context's layouts terminate in doubled contracts (e.g., reopening
+  doubles with frequent penalty-pass conversions), the context is dropped
+  and reported — measured by the sim itself, not guessed.
 
 **Out of scope, pre-declared**:
 - **Opening decisions** — dropped entirely: the metric is blind to
@@ -121,6 +144,9 @@ context catalogue (owner's card; per-context candidates + trees, authored once)
      option (card meanings, why each wins/loses) + the dominance/EVPI
      table as supporting evidence — never the frequency table alone
    → hard shell V1–V7 → pool
+     (publish priority = the R2-3 oracle's human-split score where one
+      exists; spots without a score publish neutrally — absence of a
+      score is never treated as a low score)
 ```
 
 ## P0 — the redesigned calibration gate

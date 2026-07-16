@@ -53,10 +53,18 @@ machinery is close.)
    *off* the menu (deal a heart void inside the 10–12 class and the
    expert call is a splinter no option offers). Per instance:
    mechanically enumerate legal natural + card-conventional calls at the
-   decision point (b1 backlog #15), screen with a cheap proxy pass, and
-   any un-offered call that screens in as plausibly best **rejects or
-   re-routes the instance**. The gate can now say "this hand's best call
-   isn't in this family."
+   decision point (b1 backlog #15) and screen them in two defined stages:
+   (i) **card-rule screen** — does any card rule recommend this
+   un-offered call for this dealt hand? (pure lookup, no simulation);
+   (ii) **generic-tree EV screen** — calls passing (i) are scored with
+   *generic short continuation trees* authored once per call family
+   (splinter, cue, natural NT, penalty pass, …) as a P0 deliverable, and
+   compared against the menu's best. Any un-offered call that screens in
+   as plausibly best **rejects the instance, or re-routes it** where a
+   catalogue family offering that call exists; **when no target family
+   exists the fallback is reject**, and rejection reports distinguish
+   "re-routable" from "no home in catalogue" so the catalogue's gaps are
+   visible. The screen is calibrated in P0 on the five trusted recipes.
 2. **Hero-stem validator** (b1 backlog #5) — a compiled hero must be a
    hand that *would have bid the stem*: a "12–14, opened 1♦" hero that
    any expert opens 1NT is a fictional auction at instance level. Every
@@ -148,6 +156,22 @@ family YAML (authored once; panel-reviewed over compiled corners)
 
 No engines, no APIs. New code: the gate's four checks, conditional
 options, corner-compile review support, family/catalogue surfaces.
+
+## Sequencing with R2-1 (round-2 verification note)
+
+Gate check 3 consumes R2-1's corrected metrics and their pre-registered,
+stake-normalized thresholds — so **R2-1's P0 completes before this
+plan's gate thresholds freeze** (if R2-1 dies in its P0, the gate falls
+back to the existing ≤3-IMP + INV7 machinery, losing the stakes floor
+but not the audit or the validators). Separately, R2-1 pre-declares
+penalty/doubled, sacrifice/5-level and invitational genres out of its
+scope for *directional* DD bias; the starter catalogue deliberately
+includes such families (negative-double-vs-penalty-pass, 5-level,
+sacrifice, invite-or-blast). For those genres the gate's dilemma test is
+**quarantined to CI-discipline only + a genre flag**, and their P1
+authoring is scheduled after the correction table is validated for the
+genre — the b1 #12 penalty discount applies to the *gate*, not just the
+explanations.
 
 ## Phases (re-budgeted per the panel)
 
