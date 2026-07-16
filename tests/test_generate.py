@@ -36,6 +36,30 @@ def test_generated_problem_schema(problem):
     assert problem["full_deal"][problem["seat"]] == problem["hand"]
 
 
+def test_generated_problem_has_notes(problem):
+    """Every stem call and every option carries an explanation."""
+    assert len(problem["auction_notes"]) == len(problem["auction"])
+    assert all(problem["auction_notes"]), "empty auction note"
+    assert set(problem["option_notes"]) == set(problem["candidates"])
+    for note in problem["option_notes"].values():
+        assert note["shows"]
+        assert "simulated auctions end in" in note["partner"]
+
+
+def test_rule_phrases_cover_every_bot_rule():
+    """Each rule name the bidder can emit has a human phrasing."""
+    import re
+    from pathlib import Path
+    import bridge_trainer.bot.bidder as bidder_mod
+    from bridge_trainer.generate.notes import rule_phrase
+    src = Path(bidder_mod.__file__).read_text()
+    rules = set(re.findall(r'BotCall\((?:[^,]+),\s*f?"([a-z0-9_{}.()]+)"',
+                           src))
+    for rule in rules:
+        probe = re.sub(r"\{[^}]*\}", "s", rule)
+        assert rule_phrase(probe), f"no phrase for bot rule {probe!r}"
+
+
 def test_generation_is_deterministic():
     seed, a = _first_accepted(0, n_deals=60)
     b, _ = generate_problem(seed=seed, n_deals=60)

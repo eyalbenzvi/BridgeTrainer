@@ -45,6 +45,7 @@ from ..pool.store import SCHEMA_VERSION
 from ..scoring.comparison import compare_candidates
 from ..scoring.evaluate import ScoreEvaluator, needed_denoms
 from ..semantics.predicates import quality_floor
+from .notes import auction_notes, option_notes
 
 VULS = ("None", "NS", "EW", "Both")
 
@@ -206,6 +207,18 @@ def evaluate_turn(bidder: SimpleBidder, hand: HandView, view,
 def generate_problem(seed: int, n_deals: int = 600,
                      bidder: SimpleBidder | None = None):
     """Returns (record, None) on success or (None, reject_reason)."""
+    setup, reason = prepare_problem(seed, n_deals, bidder)
+    if setup is None:
+        return None, reason
+    return _evaluate_and_record(seed, n_deals, setup)
+
+
+def prepare_problem(seed: int, n_deals: int = 600,
+                    bidder: SimpleBidder | None = None):
+    """Steps 1-4 (everything except DD and the verdict): deal, bid out,
+    pick the decision point, simulate layouts, project candidates.
+    Cheap (~0.5s); also used to rebuild notes for stored records.
+    Returns (setup dict, None) or (None, reject_reason)."""
     rng = np.random.default_rng([seed, 20260715])
     bidder = bidder or SimpleBidder()
 
@@ -275,6 +288,33 @@ def generate_problem(seed: int, n_deals: int = 600,
             w.force(cand)
             contracts.append(w.run_to_end())
         contracts_by_candidate[cand] = contracts
+
+    # What each candidate would show, per the bot's own rules at this turn.
+    hero_view = stem.view_for(hero)
+    fired_by_token: dict[str, object] = {}
+    for c in ([bidder.bid(hands[hero], hero_view)]
+              + list(bidder.enumerate_calls(hands[hero], hero_view,
+                                            CANDIDATE_SLACK))):
+        fired_by_token.setdefault(c.token, c)
+
+    return {
+        "dealer": dealer, "vul": vul, "hero": hero,
+        "hands_pbn": hands_pbn, "candidates": candidates,
+        "stem_tokens": stem_tokens, "interest": interest,
+        "stem_calls": [call for _, call in stem.calls],
+        "fired_by_token": fired_by_token,
+        "deals": deals, "diag": diag,
+        "contracts_by_candidate": contracts_by_candidate,
+        "bot_auction_complete": walker.tokens(),
+    }, None
+
+
+def _evaluate_and_record(seed: int, n_deals: int, setup: dict):
+    """DD + verdict + record assembly (step 5)."""
+    dealer, vul, hero = setup["dealer"], setup["vul"], setup["hero"]
+    hands_pbn, candidates = setup["hands_pbn"], setup["candidates"]
+    deals, diag = setup["deals"], setup["diag"]
+    contracts_by_candidate = setup["contracts_by_candidate"]
 
     evaluator = ScoreEvaluator(hero, vul, load_default_correction())
     weights_all = np.array([wd.weight for wd in deals])
@@ -362,8 +402,12 @@ def generate_problem(seed: int, n_deals: int = 600,
         "vul": vul,
         "seat": hero,
         "hand": hands_pbn[hero],
-        "auction": stem_tokens,
+        "auction": setup["stem_tokens"],
         "candidates": candidates,
+        "auction_notes": auction_notes(setup["stem_calls"]),
+        "option_notes": option_notes(candidates, setup["fired_by_token"],
+                                     contracts_by_candidate, weights_all,
+                                     hero),
         "verdict": {
             "accepted": accepted,
             "toss_up": corr_cmp.toss_up,
@@ -376,9 +420,9 @@ def generate_problem(seed: int, n_deals: int = 600,
             "ess": round(float(weights.sum() ** 2 / (weights ** 2).sum()), 1),
             "acceptance": round(diag.acceptance_rate, 6),
             "shortfall": diag.shortfall,
-            "interest": interest,
+            "interest": setup["interest"],
         },
         "full_deal": {s: hands_pbn[s] for s in SEATS},
-        "bot_auction_complete": walker.tokens(),
+        "bot_auction_complete": setup["bot_auction_complete"],
     }
     return record, None
