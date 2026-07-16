@@ -1,135 +1,183 @@
-# Plan R2-1 — Empirical Dilemma Mining (high-level, v1)
+# Plan R2-1 — Empirical Dilemma Mining (high-level, v2 — post panel round 1)
 
-Status: high-level plan for expert review. Date: 2026-07-16.
-Parent: `docs/problem_quality_concepts_round2.md` §R2-1.
+Status: v2, revised per expert review (`docs/panel/plans_round1.md`).
+Date: 2026-07-16. Parent: `docs/problem_quality_concepts_round2.md` §R2-1.
 
 ## What it is, in plain language
 
 Deal random boards and let **measurement**, not anyone's opinion, decide
 whether a spot is a problem. A hero hand at a decision point qualifies
-when two things are true across the thousands of layouts the concealed
-hands could be:
+when the simulation says the choice is genuinely close between real
+candidate calls, the stakes are material, and the closeness survives
+statistical scrutiny.
 
-1. **No call dominates** — there is no single call that is at least as
-   good as every alternative on (almost) every layout; and
-2. **The unseen cards matter a lot** — which call is best genuinely
-   changes from layout to layout, with real IMPs at stake.
+v1 of this plan proposed "no dominant call + high value of hidden
+information" as the dilemma definition. The expert panel showed both
+metrics keep **automatic** bids: a routine 4♠ game acceptance fails on
+25% of layouts, so nothing dominates and clairvoyance is worth ~2 IMPs —
+yet no player thinks for a second. What actually separates auto-bids from
+dilemmas is the **gap between the top candidates' expected scores**. v2
+reassigns the metric roles accordingly.
 
-A clear 1NT opening or an automatic Stayman hand fails test 2 instantly:
-one call is best essentially everywhere. The detector computes only in
-tricks and IMPs — it has no system vocabulary, so it cannot confuse "a
-different system" with "a dilemma."
+## The metrics, with their corrected roles
 
-## The two metrics, precisely
+Over layouts `L` consistent with the context, `S(c, l)` = corrected
+IMP-scored outcome of candidate `c` on layout `l` (continuations + DD,
+existing stack):
 
-Over layouts `L` consistent with the decision context, with `S(c, l)` =
-IMP-scored outcome of call `c` on layout `l` (via continuation projection
-+ DD, the existing stack):
+1. **Dilemma detector — top-2 EV gap**: the spot is a candidate problem
+   iff the two best calls' expected scores are within a per-context
+   closeness band AND the gap's CI makes the ranking genuinely uncertain
+   or small (the existing ≤3-IMP closeness filter + INV7 discipline,
+   promoted from publish-gate to *the detector*).
+2. **Materiality floor — EVPI**: `E_l[max_c S(c,l)] − max_c E_l[S(c,l)]`
+   must exceed a per-context, stake-normalized floor — this only filters
+   out decisions where nothing is at stake; it never *keeps* a spot by
+   itself. Because a max over noisy estimates is biased upward
+   (winner's curse, growing with candidate count), EVPI is used only
+   with: (a) per-context noise-floor subtraction calibrated on known
+   auto-bids, (b) split-half estimation (pick per-layout winners on one
+   half of rollouts, score them on the other), (c) a mandatory
+   fresh-seed confirmation re-sim before any spot is kept (cheap under
+   INV4/INV6).
+3. **Discard rules — dominance**: one call ε-dominating on ≥`D_hi` of
+   layouts discards the spot as one-sided; near-identical outcome vectors
+   between two calls collapse them as route-equivalent (transpositions).
+   ε and all thresholds are **stake-normalized per context** — partscore
+   IMP quanta and game-swing quanta cannot share one ε.
+4. **Anti-lottery rule**: a close top-2 gap with 4+ mutually non-dominated
+   candidates and near-uniform per-layout winners is a *pure guess*
+   (the b2-0135277e "teaches nothing" class) → discard, per rubric Q3.
 
-- **Dominance score** `dom(c) = fraction of l where S(c,l) ≥ S(c',l) − ε
-  for all c'`. If `max_c dom(c) ≥ D_hi` (e.g., 0.90), the spot is an
-  auto-bid → discard.
-- **Value of hidden information**
-  `EVPI = E_l[max_c S(c,l)] − max_c E_l[S(c,l)]`.
-  Below `V_lo` (in IMPs) → the decision doesn't matter → discard.
-  The kept band is: no dominant call, EVPI above threshold, and the
-  existing INV7 CI discipline on the pairwise comparisons.
+## Candidate universe and continuations — the honest system statement
 
-- **Option derivation**: offer exactly the calls that are strictly best on
-  at least `x%` of layouts (e.g., 10%), capped by the schema's 2–5. A call
-  best on ~0% of layouts can never be offered — the filler-Pass class dies
-  empirically; a call best on 30% of layouts cannot be omitted — the
-  missing-2C class dies empirically.
+v1 claimed "no system vocabulary is ever consulted." Retracted: system
+enters through the semantics rules that define consistent layouts and
+through every continuation tree. The honest formulation of the
+system-safety constraint is **one system — the owner's card** — a
+closed world with no cross-table ambiguity, which is what the owner's
+constraint actually requires.
+
+Consequence made explicit: each mined context needs a **per-context
+candidate list and continuation trees authored on the owner's card,
+once, reviewed once** — including the conventional calls the old bot
+lacked (Stayman, transfers, 2♣) wherever a context can involve them.
+Without a continuation model for 2♣, `S(2♣, l)` does not exist and the
+missing-Stayman failure is untestable, let alone fixed. Budget: ~10
+contexts × up to ~8 candidates; this is the plan's main authoring cost
+and is T-compatible (once, versioned, reviewable).
+
+## Option derivation (v2 rule)
+
+- **Base**: all candidates within δ (per-context) of the EV-best call in
+  expectation — the calls a result-oriented expert is actually choosing
+  among. The EV-best call is always included.
+- **Union**: calls strictly best (within ε) on ≥ x% of layouts — the
+  clairvoyant's picks — *filtered by card legality/forcing status*: Pass
+  is never offered in a forcing auction; no call is offered that the card
+  marks unavailable. (v1's pure x% rule both resurrected absurd
+  clairvoyant Passes and excluded flexible "master bids" like negative
+  doubles that tie rather than win — the δ-EV base catches those.)
+- Cap per schema (2–5); overflow → collapse route-equivalents, else
+  discard the spot as too wide.
+
+## Context catalogue (v2 — trimmed and exclusion-listed)
+
+**In scope (v1.0)**: direct-seat actions over openings and preempts;
+responder's decisions after interference (negative-double territory);
+raise decisions after partner's opening + overcall; balancing over weak
+twos *in undoubled-partscore lines only*.
+
+**Out of scope, pre-declared**:
+- **Opening decisions** — dropped entirely: the metric is blind to
+  descriptive/systemic value (the panel showed e50006-19's clear 1NT
+  plausibly lands *in* the keep band: per-layout winners flip constantly
+  on small margins), and the Pass continuation is the whole board's
+  auction — the projection burden is maximal exactly where the metric is
+  weakest.
+- **Penalty/doubled-terminal contexts and sacrifice/5-level decisions** —
+  DD's perfect defense biases these *directionally* (phantom +500s,
+  systematic Pass bias), not noisily; the INV5 scalar correction cannot
+  fix a comparative bias between a doubled contract and a partscore.
+- **Invitational sequences** — quarantined until validated against the
+  correction table (DD never misguesses thin games and information
+  transfer is free, so blast systematically beats invite under DD).
+
+**Coverage statement (owner-acknowledged trade)**: this catalogue reaches
+roughly **a quarter to a third** of a serious 2/1 player's real dilemma
+space. Deep competitive battles, game tries, sit-or-pull, forcing-pass
+positions and slam auctions are deep-stem by nature and belong to R2-5
+authored families. The miner is a scout, not the whole army.
 
 ## Pipeline
 
 ```
-context catalogue (shallow stems, owner's card only)
-   → random deal (existing NumPy dealer)
-   → cheap prefilter (hand-feature heuristics; skip obvious auto-bids)
-   → low-n probe sim (~100 layouts, DD)     — kills 90% cheaply
-   → full sim (existing n≈800, INV1–8)      — dominance + EVPI + CI gates
-   → finalization (meanings from card rules; explanation from the metric
-     evidence: "best call varies: 3S wins on 41% of layouts, X on 33%…")
+context catalogue (owner's card; per-context candidates + trees, authored once)
+   → random deal → cheap prefilter → low-n probe sim (~100 layouts)
+   → full sim (n≈800, INV1–8) → detector: top-2 EV gap in closeness band
+   → floors: EVPI (de-biased) ≥ V_lo; anti-lottery; dominance discards
+   → fresh-seed confirmation re-sim
+   → finalization: meanings from card; explanation = bridge rationale per
+     option (card meanings, why each wins/loses) + the dominance/EVPI
+     table as supporting evidence — never the frequency table alone
    → hard shell V1–V7 → pool
 ```
 
-## The decision context: shallow, standardized, yours
+## P0 — the redesigned calibration gate
 
-Mining needs an auction to define "consistent layouts." To keep stems
-beyond reproach, v1 mines only **shallow contexts** (0–2 non-pass calls
-before hero) drawn from a fixed catalogue expressed in the owner's card:
-opening decisions, direct-seat actions over an opening, responses to
-partner's opening ± overcall, balancing-seat decisions. Concealed-hand
-meanings come from the existing semantics rules for those short contexts.
-Deep competitive stems are out of scope for the miner (they belong to
-R2-5 families, where the stem is authored and reviewed).
+v1's gate (a handful of spots, thresholds free to move) could pass by
+tuning. v2:
 
-## The honest weak layer: continuations
-
-`S(c, l)` requires deciding what happens *after* each candidate call on
-each layout — the projection trees. This plan inherits the existing
-projection machinery + V6 realism validation, and the known limitation
-that projection quality bounds verdict quality. Two mitigations:
-1. shallow contexts have short, well-understood continuations (the trees
-   are small and reviewable);
-2. the dominance/EVPI *detection* decision is more robust to projection
-   error than a 0.3-IMP verdict is — detection needs only "does the best
-   call vary materially," not a precise margin. Verdict publication keeps
-   the full INV5/INV7 discipline as today.
-
-## Calibration gate before anything ships (P0)
-
-Run the two metrics on the existing corpus **before** mining anything:
-
-- owner-flagged non-problems (e50006-19, b2-000273ee) must score below
-  the keep-band;
-- the b1 problems the panel rated SOUND (e50006-24, e50018-10) must score
-  inside it;
-- a hand-picked set of known auto-bids (routine 1NT openings, textbook
-  Stayman, a 9-playing-trick 4♠ preempt) must be rejected by dominance.
-
-This is a falsifiable, cheap experiment on machinery that already exists.
-If the metrics cannot separate these, the concept dies in P0 for the cost
-of a week — that is the point of the gate.
+- **Pre-registered thresholds**: δ, ε, `D_hi`, `V_lo`, per-context
+  normalizations fixed *before* scoring the calibration set.
+- **≥20 labeled spots** spanning genres: owner-flagged non-problems;
+  b1-panel-endorsed problems (e50006-24, e50018-10); routine game
+  acceptances and textbook preempts (labeled auto-bid); hand-built
+  card-legal genuine dilemmas; known pure guesses; and one
+  flexible-double spot *expected to stress the blind spot* — measured,
+  not hidden.
+- **Held-out half**: thresholds tuned on one half must separate the other.
+- **Rank correlation** with labels required, not just binary separation.
+- **Re-simulation, not re-scoring**: b2-000273ee and f50022-21 are re-run
+  with corrected candidate sets and the new continuation trees — scoring
+  stale outputs over the wrong candidates proves nothing.
+- Expected result stated up front: e50006-19 *fails* the naive v1 metrics;
+  the v2 detector must reject it via the opening-context exclusion and
+  the auto-bid labels. If the detector cannot rank the labeled set, the
+  concept dies in P0 at census cost.
 
 ## Phases
 
-- **P0 — Metric spike (~3–5 days).** Implement dominance + EVPI over the
-  existing sim outputs; run the calibration gate above. No new dealing, no
-  new contexts. Gate: clean separation on the calibration set.
-- **P1 — Shallow-context miner (~1 week).** Context catalogue (≈10
-  shallow contexts), prefilter, staged probe/full sim, mining loop.
-  Gate: owner rubric Q1–Q5 (`core_problem_method.md` §6) on a 10-problem
-  batch; track yield (problems kept per 1000 deals) and CPU per keep.
-- **P2 — Option derivation + explanations from evidence (~1 week).**
-  The x%-of-layouts option rule; explanation template quoting the
-  variability evidence; publishing path through the hard shell.
-  Gate: owner rubric, Phase-2 targets.
-- **P3 — Breadth.** More contexts, balancing/competitive families where
-  semantics rules exist; feed high-scoring spots to R2-5 as family
-  candidates.
+- **P0 — Metric spike + calibration (~1 week).** Detector/floors/discards
+  over the sim stack; candidate lists + trees for the 3–4 contexts the
+  calibration set needs; the gate above.
+- **P1 — Miner (~1–1.5 weeks).** Catalogue contexts + remaining trees;
+  staged sims; yield + CPU-per-keep instrumentation. Gate: owner rubric
+  Q1–Q5 on a 10-problem batch.
+- **P2 — Options + explanations (~1 week).** v2 option rule; explanation
+  contract (bridge rationale + evidence table). Gate: owner rubric.
+- **P3 — Breadth + handoff.** Additional contexts inside the exclusion
+  rules; high-scoring spots proposed to R2-5 as family candidates.
 
 ## Risks
 
-1. **Projection realism bounds everything** (inherited, §above) —
-   shallow-context restriction is the containment.
-2. **DD fog on penalty/doubled partscores** — existing correction table +
-   fog labels; contexts whose keep-band spots are mostly fog-flagged get
-   dropped from the catalogue.
-3. **Compute per kept problem** — staged sims + prefilters; measure in P1;
-   if yield is poor, R2-4's breeding is the designed escape hatch (same
-   metrics as fitness terms).
-4. **EVPI threshold tuning** — one global `V_lo` may not fit all contexts
-   (game decisions swing more than partscore ones); per-context thresholds
-   normalized by stake size, set during P1.
-5. **Metric gaming by artifacts** — a projection bug that randomizes
-   outcomes *looks* like high EVPI; the V6 tree validation and the P0
-   calibration set are the guards.
+1. **Continuation realism bounds everything** (inherited): contained by
+   shallow contexts, the exclusion list, and trees-reviewed-once; the
+   fresh-seed re-sim kills the noisiest survivors.
+2. **Winner's-curse EVPI**: addressed structurally (noise floor,
+   split-half, confirmation re-sim) — kept in the risk list because the
+   floor calibration itself can drift.
+3. **Compute per kept problem**: staged sims; measure in P1; R2-4
+   breeding is the designed escape hatch.
+4. **Threshold sprawl** (now ~6 knobs): all pre-registered in P0, all
+   per-context values derived from one stake-normalization rule, not
+   hand-set per context.
+5. **Catalogue narrowness**: stated coverage fraction; R2-5 carries the
+   deep-stem genres.
 
 ## What the owner gets
 
 A generator whose "is this a problem?" judgment is a measurement he can
-audit (every published problem carries its dominance table and EVPI), no
-external dependencies, and a P0 experiment that proves or kills the idea
-against his own past flags before any new infrastructure is built.
+audit, computed entirely inside his own system's closed world, with a
+falsifiable pre-registered P0 experiment — and an honest statement of
+which third of the dilemma space it covers.

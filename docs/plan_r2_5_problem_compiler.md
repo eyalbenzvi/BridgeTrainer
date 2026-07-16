@@ -1,145 +1,190 @@
-# Plan R2-5 — The Problem Compiler (high-level, v1)
+# Plan R2-5 — The Problem Compiler (high-level, v2 — post panel round 1)
 
-Status: high-level plan for expert review. Date: 2026-07-16.
-Parent: `docs/problem_quality_concepts_round2.md` §R2-5.
+Status: v2, revised per expert review (`docs/panel/plans_round1.md`).
+Date: 2026-07-16. Parent: `docs/problem_quality_concepts_round2.md` §R2-5.
 
 ## What it is, in plain language
 
-A **problem family** is a recipe, not a deal. Example recipe:
+A **problem family** is a recipe, not a deal:
 
 > *"You hold 10–12 HCP with exactly three spades after partner opens 1♠
-> and RHO overcalls 2♥. Options: 3♠, X, 2♠, Pass."*
+> and RHO overcalls 2♥."*
 
-That recipe describes a *decision*, not a hand. The **compiler** turns a
-recipe into an endless stream of concrete problems: it deals you a fresh
-13-card hand fitting the recipe, deals the three concealed hands to fit
-what the auction showed, and runs the full simulation for *that specific
-deal* — because with ♠KQ5 and club values the answer may be 3♠, while
-with ♠Q52 and wasted heart honors it may be Pass. Same decision, fresh
-cards, honest per-deal verdict, forever.
+The **compiler** turns a recipe into an endless stream of concrete
+problems: fresh hero hand fitting the recipe, concealed hands dealt to
+fit what the auction showed, full simulation for *that deal* — because
+with ♠KQ5 and club values the answer may be 3♠, while with wasted heart
+honors it may be Pass. Same decision, fresh cards, honest per-deal
+verdict, forever. **A recipe is reviewed once and generates for life.**
 
-**You review a recipe once; it generates problems for life.** Twenty
-reviewed recipes ≈ a bottomless, quality-controlled problem bank.
+~70% of the machinery exists: `problems/*.yaml` are recipes;
+`my_hand_class` + `variants: N` already deals fresh hero hands from a
+class and re-simulates each. This plan promotes that side feature into
+the main generator and adds the quality layers the panel showed are
+missing.
 
-The key fact: **~70% of this already exists in the repo.** The five YAMLs
-in `problems/` are exactly recipes (hand constraints + auction + options
-+ meanings + projections), and the `my_hand_class` + `variants: N`
-machinery already deals fresh hero hands from a class and re-simulates
-each one (README: "variant 0 is the authored hand, the rest are freshly
-dealt from the class and fully re-simulated"). This plan promotes that
-side feature into the main generator, hardens the missing quality layer,
-and grows the catalogue.
+## The v2 quality claim (corrected)
 
-## What's genuinely new (the plan), on top of what exists
+v1 claimed: *family review fixes bridge-sense once; the instance gate
+fixes per-deal degeneracy.* The panel showed that is true only at the
+class **centroid** — and the centroid was never where this project's
+failures came from. v2's claim: **family review fixes the decision's
+bridge-sense at the class corners; the instance gate fixes degeneracy,
+menu-fit, and stem-fit per deal.** The changes that make it true:
 
-### 1. The instance gate — the layer that doesn't exist yet
+### 1. Conditional options (was: one fixed list per family)
 
-A family guarantees the decision *class*; it cannot guarantee every
-*instance*. A hand at the extreme edge of the class can be an auto-bid
-(the maximum 12-count with perfect shape is a clear 3♠ — publishing it as
-a "problem" recreates e50006-19). So every compiled instance passes a
-**per-instance publish gate** before it reaches the pool, using R2-1's
-metrics on the instance's own sim output:
+A static menu is bridge-wrong across a class. In "10–12, 3 spades, after
+1♠–(2♥)": a flat hand with ♥KJx has natural 2NT live; a 5-card minor
+makes 3♣/3♦ live; heart shortness moves the decision into the
+splinter/mixed-raise family; heart length + honors makes the penalty
+treatment live. So each option carries a **`live_when:` predicate** over
+hero features (stopper quality, side-suit length/quality, shortness,
+wastage), with its own projection tree; the instance's menu is compiled
+from the predicates. Where the predicates get heavy, the honest
+alternative is **splitting the class into subfamilies** with constant
+menus. (The projection language already reads `*_suit_hcp` — the
+machinery is close.)
 
-- dominance check: if one option wins on ≥90% of layouts → the instance
-  is an auto-bid → *served as a calibration hand or skipped*, never
-  published as a dilemma;
-- degenerate-option check: an option best on ~0% of layouts for THIS
-  instance is dropped from THIS instance's display (the family's option
-  list is the superset; the instance shows the live ones, min 2);
-- the existing INV7/fog discipline unchanged.
+### 2. The instance gate (was: dominance-only; now four checks)
 
-This is the plan's central quality argument: **family review fixes the
-decision's bridge-sense once; the instance gate fixes per-deal
-degeneracy automatically.**
+1. **Missing-option audit** — the v1 gate compared offered options
+   against each other and was structurally blind to the best call living
+   *off* the menu (deal a heart void inside the 10–12 class and the
+   expert call is a splinter no option offers). Per instance:
+   mechanically enumerate legal natural + card-conventional calls at the
+   decision point (b1 backlog #15), screen with a cheap proxy pass, and
+   any un-offered call that screens in as plausibly best **rejects or
+   re-routes the instance**. The gate can now say "this hand's best call
+   isn't in this family."
+2. **Hero-stem validator** (b1 backlog #5) — a compiled hero must be a
+   hand that *would have bid the stem*: a "12–14, opened 1♦" hero that
+   any expert opens 1NT is a fictional auction at instance level. Every
+   hero stem call is checked against the dealt hand; class schema gains
+   suit-quality bands (b1 #4), not lengths alone.
+3. **Dilemma test on R2-1's corrected metrics** — not layout-share:
+   corrected-EV top-2 gap within the closeness band + stakes floor +
+   INV7 CI discipline. Auto-bid instances (one option clearly best in
+   EV) are *served as calibration hands or skipped*, never published as
+   dilemmas; within-CI instances are toss-ups, never single winners.
+4. **Menu display honesty** — the family's option set stays visible per
+   instance; options dead on *this* deal are greyed and annotated **after
+   the answer** ("X was best on 0 of 800 layouts here — see why"), never
+   silently dropped (silent shrinking both changes the lesson and leaks a
+   meta-clue).
 
-### 2. The family schema (formalizing `problems/*.yaml`)
+### 3. Family review over compiled corners (was: review the YAML)
 
-Additions to the existing problem schema: `family_id`, hero hand-class
-(already exists as `my_hand_class`), per-family principle text (one
-paragraph: what this decision teaches), tags (genre, difficulty prior,
-vulnerability/scoring form), and instance-gate thresholds. Existing
-semantics rulesets and projection trees are reused untouched.
+The panel reviews the family **plus a fan of 8–12 compiled corner
+instances** — HCP extremes, each shape extreme, max/zero wastage in their
+suit — because projection-tree realism is hero-conditional (fixed
+thresholds like `me_hcp >= 9` treat a quacky 9-count and two aces
+identically: the e50023-20 baked-in-verdict disease). Compile-time
+lints: the cross-option consistency linter (b1 #6 — asymmetric
+aggression thresholds poison every instance) and a flag on
+hero-conditional branches keyed to raw HCP where honor placement decides
+(`me_hearts_hcp`, controls).
 
-### 3. Where families come from (three feeders, in trust order)
+## Family schema
 
-1. **Owner-authored** (~20 to start): the decisions he actually cares
-   about, written in an afternoon each with the authoring guide
-   (`docs/authoring_guide.md` exists); expert-reviewed once, b1-panel
-   style, at the *family* level — meanings, options, projections.
-2. **Classics from memory**: a remembered great problem becomes a family
-   by generalizing its hero hand into a class (the compiler's isomorph
-   mode: spot-card shuffles and honor jitter *within the class*; suit
-   swaps only where the auction's level relationships survive the swap —
-   a nontrivial legality check, e.g. 1♠–(2♥) does NOT survive ♠↔♥ because
-   2♠ over 1♥ would be a jump).
-3. **Mined candidates** (later): R2-1/R2-3 spots that score well get
-   *proposed* as families; the owner inducts or rejects. Discovery
-   proposes, the catalogue disposes — no unreviewed family ever compiles.
+Existing problem schema + `family_id`, hero hand-class with suit-quality
+bands, conditional options (`live_when:` + per-option trees), principle
+text, tags (genre, vulnerability, scoring form), instance-gate
+thresholds. Semantics rulesets and the projection language are reused.
 
-### 4. Family-level product surfaces
+## Where families come from (trust order)
 
-- **Verdict distribution page** per family: "across 500 instances of this
-  raise decision: 3♠ best 46%, X 31%, Pass 18%, toss-up 5%" — this *is*
-  the lesson ("mostly bid game with this type; the exceptions share wasted
-  heart values"), and it is a self-audit of the family's realism.
-- **Spaced repetition keyed by family** (not by board): a lapse on the
-  raise decision schedules *fresh instances* of that family — repetition
-  without repeating a single card, which no fixed problem bank can do.
-- **"Deal me a hand"** across families, weighted by SRS state and owner
-  tags — the existing webapp flow, unchanged.
+1. **Owner-authored** — the panel's proposed starter catalogue (20
+   families, quota ≈ 60/25/15 competitive / constructive / high-level) is
+   recorded in `docs/panel/plans_round1.md` §R2-5: twelve
+   competitive/raise families (raise structure after 1♠–(2♥); 3-over-3
+   pushes; balancing after 1M–P–2M; 5-level/forcing-pass [exists];
+   negative double vs penalty pass; support-double positions; "they push
+   us" sequences; action doubles; 1M–(X) responder structure; …), five
+   constructive 2/1 judgment families (3NT vs 4M with 5-3-3-2; opener's
+   awkward 5-4-3-1 rebid; semi-forcing 1NT decisions; minimum-GF slam
+   try; fourth-suit vs raise), three high-level/preempt families.
+2. **Classics from memory** — generalized by drawing a tight class around
+   the remembered hand; the ordinary compiler generates the variety.
+   (v1's suit-swap isomorphs are **cut**: the panel showed a legal swap
+   must preserve the rank order of every suit mentioned in stem, options
+   and trees — which forces the identity permutation. Spot shuffles and
+   honor jitter are just class dealing, already free.)
+3. **Mined candidates** — R2-1 spots proposed as families; the owner
+   inducts or rejects. Discovery proposes, the catalogue disposes.
+
+## Family product surfaces
+
+- **Verdict-distribution page**, fixed per the panel: the *taught*
+  distribution is computed over **all compiled instances, pre-gate** (the
+  gate filters what is *served*, never what is *taught* — a post-gate
+  distribution would systematically understate the majority action and
+  teach a false prior); within-CI instances land in a toss-up bucket;
+  one-line caveat that percentages are over the sampled class, not
+  at-the-table frequency; `breakdowns:` extended to hero features
+  (wastage, controls, trump quality) so exception clusters are computed,
+  not asserted.
+- **SRS keyed by family**: a lapse schedules *fresh instances* of the
+  same decision — repetition that never repeats a board. Toss-up
+  instances grade as "exposure," not pass/fail.
+- **Explanations** (every instance): family principle + **instance
+  delta** — the concrete features that put this hand on this side of the
+  line ("your ♥QJ sits under the raise — wasted; that's why this 11-count
+  passes while 64% of the family bids"); margin-calibrated vocabulary
+  (b1 #18: sub-CI edges say "the panel would split", never "clearly
+  right"); near-boundary instance pairs surfaced as twins — the
+  contradiction becomes the lesson; no doubling lesson asserted without
+  the penalty-branch DD discount (b1 #12).
 
 ## Pipeline
 
 ```
-family YAML (authored once, reviewed once)
-   → compiler: deal hero from class → deal concealed from meanings
-   → full existing sim (projections, DD, INV1–8)
-   → INSTANCE GATE (dominance / degenerate options / CI+fog)
-   → publish instance (family_id, principle, per-instance verdict)
+family YAML (authored once; panel-reviewed over compiled corners)
+   → compiler: hero from class → concealed from meanings → full sim
+   → INSTANCE GATE: missing-option audit / hero-stem validator /
+     EV-gap+stakes+CI dilemma test / menu compilation (live_when)
+   → publish (family_id, principle, instance delta, verdict or toss-up)
 ```
 
-No new engines, no APIs, no network. New code is the instance gate, the
-family schema fields, and catalogue/webapp surfaces; the heavy machinery
-(dealing, semantics, projection, DD, scoring, publish) exists.
+No engines, no APIs. New code: the gate's four checks, conditional
+options, corner-compile review support, family/catalogue surfaces.
 
-## Phases
+## Phases (re-budgeted per the panel)
 
-- **P0 — Promote the existing five (~3–4 days).** Wrap `problems/*.yaml`
-  as families; implement the instance gate; compile 20 instances of each;
-  measure gate rejection rates. Gate: owner plays 10 instances,
-  rubric Q1–Q5 — this tests the *compiler*, since these five recipes are
-  already trusted.
-- **P1 — Catalogue sprint (~1–2 weeks, mostly owner-paced).** Authoring
-  guide refresh; owner writes ~10 families; one expert-panel review pass
-  over the batch (documents, not code). Gate: panel verdicts per family.
-- **P2 — Product surfaces (~1 week).** Family pages with verdict
-  distributions; SRS by family; catalogue browsing in the webapp.
-- **P3 — Feeders.** Isomorph mode for classics; mined-candidate induction
-  queue from R2-1/R2-3.
+- **P0 — Promote the existing five + build the gate (~1.5–2 weeks).**
+  Family wrapper; the four gate checks (hero-stem validator and
+  cross-option linter promoted from b1 backlog to deliverables here);
+  compile 20 instances each; measure gate rejection rates. Gate: owner
+  plays 10 instances, rubric Q1–Q5.
+- **P1 — Catalogue sprint (~3–5 weeks calendar, owner-paced).** Honest
+  authoring economics: **1–2 days per family end-to-end**
+  (author → panel over corner instances → revise), not "an afternoon";
+  constructive/slam families cost 2–3× the competitive ones — quota
+  weighted accordingly. ~10 families.
+- **P2 — Product surfaces (~1 week).** Family pages (pre-gate taught
+  distribution), SRS by family, catalogue browsing.
+- **P3 — Feeders.** Mined-candidate induction queue from R2-1; classics
+  intake.
 
 ## Risks
 
-1. **Variety ceiling** — the catalogue only drills what it names.
-   Accepted consciously: 20 good families beat 17 random problems (the
-   current pool); the mined feeders (P3) grow breadth over time.
-2. **Family review quality is load-bearing** — a wrong meaning band or
-   unrealistic projection tree poisons every instance. Same exposure as
-   today's authored path, but paid once per family and guarded by the b1
-   panel process + V1–V7 shell; the verdict-distribution page also makes a
-   sick family visible (a "raise or pass" family where Pass wins 92% of
-   instances is mis-specified).
-3. **Instance-gate thresholds** — too strict starves output, too loose
-   ships auto-bids; tuned in P0 against the five trusted recipes.
-4. **Concealed-hand realism** — inherited from the semantics engine
-   (exclusion completeness); unchanged from the current authored path.
-5. **Owner authoring stamina** — ~10 families is the P1 ask; the feeders
-   exist precisely so the catalogue doesn't depend on his output forever.
+1. **Variety ceiling** — accepted consciously; mined feeders grow breadth.
+2. **Family review is load-bearing** — mitigated by corner-instance
+   review, the two lints, and the pre-gate distribution page making a
+   sick family visible (a "raise-or-pass" family where Pass wins 92% is
+   mis-specified on its face).
+3. **Gate strictness trade-off** — tuned in P0 on the five trusted
+   recipes; rejection *reasons* are logged and reported per family.
+4. **Conditional-option authoring weight** — the escape hatch is
+   subfamily splitting, which trades authoring effort for catalogue size,
+   both bounded.
+5. **Owner stamina** — ~10 families at the honest budget is the P1 ask;
+   feeders exist so the catalogue never depends on his output forever.
 
 ## What the owner gets
 
-The strongest quality guarantee available — *every* published decision
-was reviewed by an expert (once, at family level) — combined with what he
-asked for in round 2: a true generator (fresh cards every time), fully
-offline, in his system only, with per-deal honest verdicts and a
-spaced-repetition loop no fixed bank can offer.
+The strongest quality guarantee in the portfolio — every published
+decision reviewed by an expert once, *at its class corners* — combined
+with everything he asked for in round 2: a true generator, fully
+offline, his system only, per-deal honest verdicts, and spaced
+repetition on fresh cards that no fixed bank can imitate.
