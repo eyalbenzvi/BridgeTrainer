@@ -60,3 +60,12 @@ GOLDEN_IMPS = [
 @pytest.mark.parametrize("diff,expected", GOLDEN_IMPS)
 def test_imp_table(diff, expected):
     assert imps(diff) == expected
+
+
+def test_imps_array_matches_scalar():
+    import numpy as np
+    from bridge_trainer.scoring.tables import imps_array
+    diffs = np.array([d for d, _ in GOLDEN_IMPS]
+                     + list(range(-5000, 5000, 37)))
+    expected = np.array([imps(int(d)) for d in diffs])
+    np.testing.assert_array_equal(imps_array(diffs), expected)

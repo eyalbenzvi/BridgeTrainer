@@ -124,6 +124,7 @@ def cmd_produce(args: argparse.Namespace) -> int:
         max_seconds=args.max_seconds,
         base_seed=seed,
         n_deals=args.n,
+        jobs=args.jobs,
     )
     print(f"\n{len(made)} problems added to {args.pool} (base seed {seed})")
     return 0
@@ -181,6 +182,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="base seed (default: derived from time)")
     prod_p.add_argument("--n", type=int, default=600,
                         help="simulated layouts per problem")
+    prod_p.add_argument("--jobs", type=int, default=1,
+                        help="parallel worker processes (each DD solve "
+                             "already uses ~4 cores; raise this on "
+                             "many-core machines)")
     prod_p.set_defaults(func=cmd_produce)
 
     args = parser.parse_args(argv)
