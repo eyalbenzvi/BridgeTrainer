@@ -63,27 +63,50 @@ def judge_spot(spot: dict, doc: dict, *, n_deals: int = 600) -> dict:
         })
 
 
+def dedupe_deals(records: list[dict]) -> tuple[list[dict], list[str]]:
+    """F25: one problem per physical deal. When the same board appears
+    from two perspectives, keep the closer decision; the other is spoiled
+    the moment the first one shows its full deal."""
+    best: dict[str, dict] = {}
+    dropped = []
+    for rec in records:
+        key = rec.get("deal_hash") or rec["id"]
+        cur = best.get(key)
+        if cur is None:
+            best[key] = rec
+        elif abs(rec["difficulty"]) < abs(cur["difficulty"]):
+            dropped.append(cur["id"])
+            best[key] = rec
+        else:
+            dropped.append(rec["id"])
+    return list(best.values()), dropped
+
+
 def select_batch(records: list[dict], keep: int) -> list[dict]:
     """Keep the `keep` best problems: genuine dilemmas first.
 
     Ranking: smaller DD margin = closer decision = better training
     value. Equivalence-collapsed toss-ups rank after true close calls
     at the same margin (the options genuinely differ there). Spread
-    across source matches (lin file) before taking seconds from one.
+    across source matches (lin file) and problem categories (F26)
+    before taking more from one bucket.
     """
     def margin(rec):
         return abs(rec["difficulty"])
 
+    cat_cap = max(2, -(-keep // 2))  # no category may exceed half the batch
     ranked = sorted(records, key=lambda r: (margin(r),
                                             bool(r["quality"]["equivalent_pairs"])))
-    picked, per_lin, backlog = [], {}, []
+    picked, per_lin, per_cat, backlog = [], {}, {}, []
     for rec in ranked:
         lin = rec["id"].split("-")[0]
-        if per_lin.get(lin, 0) >= 2:
+        cat = rec.get("category", "other")
+        if per_lin.get(lin, 0) >= 2 or per_cat.get(cat, 0) >= cat_cap:
             backlog.append(rec)
             continue
         picked.append(rec)
         per_lin[lin] = per_lin.get(lin, 0) + 1
+        per_cat[cat] = per_cat.get(cat, 0) + 1
         if len(picked) == keep:
             return picked
     return (picked + backlog)[:keep]
@@ -106,9 +129,10 @@ def assemble(spots_path: str | Path, proposals_path: str | Path,
     for key, doc in docs.items():
         try:
             records.append(judge_spot(spots[key], doc, n_deals=n_deals))
-        except FinalizationError as exc:  # too-tight meanings etc.
+        except FinalizationError as exc:  # hard shell or gates
             failures[key] = str(exc)
 
+    records, duplicates = dedupe_deals(records)
     batch = select_batch(records, keep)
     pool = ProblemPool(pool_root)
     for rec in batch:
@@ -119,6 +143,7 @@ def assemble(spots_path: str | Path, proposals_path: str | Path,
         "judged": len(records),
         "rejected": sorted(set(proposals) - set(docs)),
         "failures": failures,
+        "duplicates_dropped": duplicates,
         "spare": sorted({r["id"] for r in records} -
                         {r["id"] for r in batch}),
     }

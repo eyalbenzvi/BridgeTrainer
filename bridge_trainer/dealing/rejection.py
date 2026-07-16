@@ -109,7 +109,7 @@ class RejectionDealSource:
             weights[idx[ok]] *= w[ok]
             alive[idx[~ok]] = False
 
-        # Stage 2: suit-length band weights.
+        # Stage 2: suit-length + suit-quality band weights + denials.
         for seat in self.hidden_seats:
             sc = constraints.seats.get(seat)
             if sc is None:
@@ -121,6 +121,11 @@ class RejectionDealSource:
             w = np.ones(len(idx), dtype=np.float64)
             for suit in SUITS:
                 w *= sc.suit_weights[suit][f.suit_lengths[suit]]
+                w *= sc.suit_hcp_weights[suit][f.suit_hcp[suit]]
+            for d in sc.denials:
+                hit = ((f.hcp >= d.hcp_lo) & (f.hcp <= d.hcp_hi)
+                       & (f.suit_lengths[d.suit] >= d.min_len))
+                w *= np.where(hit, d.weight, 1.0)
             ok = w > 0
             weights[idx[ok]] *= w[ok]
             alive[idx[~ok]] = False

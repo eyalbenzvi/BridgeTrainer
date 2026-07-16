@@ -15,6 +15,30 @@ import numpy as np
 SUITS = ("S", "H", "D", "C")
 MAX_HCP = 40
 MAX_LEN = 13
+MAX_SUIT_HCP = 10  # AKQJ of one suit
+
+
+@dataclass(frozen=True)
+class Denial:
+    """A conditional negative inference: hands with HCP in [hcp_lo, hcp_hi]
+    AND at least min_len cards in `suit` are discounted to `weight` (0 =
+    rejected outright). This expresses what a call DENIES relative to the
+    actions not taken — e.g. a seat that passed over an enemy opening
+    rarely holds a decent 5-card suit with overcalling values."""
+
+    hcp_lo: int
+    hcp_hi: int
+    suit: str
+    min_len: int
+    weight: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.suit not in SUITS:
+            raise ValueError(f"denial suit must be one of {SUITS}")
+        if self.hcp_lo > self.hcp_hi:
+            raise ValueError("denial hcp_lo > hcp_hi")
+        if not (0.0 <= self.weight < 1.0):
+            raise ValueError("denial weight must be in [0, 1)")
 
 
 @dataclass(frozen=True)
@@ -54,6 +78,10 @@ class SeatConstraints:
         default_factory=lambda: _unconstrained(MAX_HCP + 1))
     suit_weights: dict[str, np.ndarray] = field(
         default_factory=lambda: {s: _unconstrained(MAX_LEN + 1) for s in SUITS})
+    suit_hcp_weights: dict[str, np.ndarray] = field(
+        default_factory=lambda: {s: _unconstrained(MAX_SUIT_HCP + 1)
+                                 for s in SUITS})
+    denials: list[Denial] = field(default_factory=list)
     exclusions: list[str] = field(default_factory=list)
 
     @classmethod
@@ -61,6 +89,8 @@ class SeatConstraints:
         cls,
         hcp: list[Band] | None = None,
         suits: dict[str, list[Band]] | None = None,
+        suit_hcp: dict[str, list[Band]] | None = None,
+        denials: list[Denial] | None = None,
         exclusions: list[str] | None = None,
     ) -> "SeatConstraints":
         sc = cls()
@@ -68,6 +98,10 @@ class SeatConstraints:
             sc.hcp_weights = bands_to_weights(hcp, MAX_HCP + 1)
         for suit, bands in (suits or {}).items():
             sc.suit_weights[suit] = bands_to_weights(bands, MAX_LEN + 1)
+        for suit, bands in (suit_hcp or {}).items():
+            sc.suit_hcp_weights[suit] = bands_to_weights(
+                bands, MAX_SUIT_HCP + 1)
+        sc.denials = list(denials or [])
         sc.exclusions = list(exclusions or [])
         return sc
 
@@ -77,6 +111,10 @@ class SeatConstraints:
             hcp_weights=self.hcp_weights * other.hcp_weights,
             suit_weights={s: self.suit_weights[s] * other.suit_weights[s]
                           for s in SUITS},
+            suit_hcp_weights={
+                s: self.suit_hcp_weights[s] * other.suit_hcp_weights[s]
+                for s in SUITS},
+            denials=self.denials + other.denials,
             exclusions=sorted(set(self.exclusions) | set(other.exclusions)),
         )
         return merged
@@ -86,6 +124,10 @@ class SeatConstraints:
         return {
             "hcp": self.hcp_weights.round(6).tolist(),
             "suits": {s: self.suit_weights[s].round(6).tolist() for s in SUITS},
+            "suit_hcp": {s: self.suit_hcp_weights[s].round(6).tolist()
+                         for s in SUITS},
+            "denials": [[d.hcp_lo, d.hcp_hi, d.suit, d.min_len,
+                         round(d.weight, 6)] for d in self.denials],
             "exclusions": list(self.exclusions),
         }
 

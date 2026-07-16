@@ -150,3 +150,23 @@ class ConditionalTreeProjector:
             if pred is None or pred(features):
                 return leaf
         raise AssertionError("unreachable: trees end with else")
+
+    def branch_masses(self, features_list: list[dict],
+                      weights) -> dict[str, list[float]]:
+        """Weighted fraction of layouts each tree node captures, per action.
+
+        The overfit detector's raw data (backlog B8): a when-branch that
+        almost never fires exists to route one specific layout — usually
+        the actual deal the author was not supposed to see.
+        """
+        wsum = float(sum(weights)) or 1.0
+        out: dict[str, list[float]] = {}
+        for action, nodes in self._compiled.items():
+            mass = [0.0] * len(nodes)
+            for f, w in zip(features_list, weights):
+                for i, (pred, _leaf) in enumerate(nodes):
+                    if pred is None or pred(f):
+                        mass[i] += float(w)
+                        break
+            out[action] = [round(m / wsum, 4) for m in mass]
+        return out

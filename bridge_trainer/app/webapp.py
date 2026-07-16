@@ -70,6 +70,7 @@ button.cand.chosen { border-color: #3673b5; }
 button.cand.good { border-color: #2c9e5f; background: #2c9e5f22; }
 button.cand.bad { border-color: #d3455b; background: #d3455b22; }
 #verdict { display: none; }
+#explanation { white-space: pre-line; }
 .headline { font-size: 1.2em; font-weight: bold; margin: .4em 0; }
 .fog { background: #ffdd5733; border: 1px solid #cca42f88; border-radius: 8px;
        padding: .6em .8em; margin: .6em 0; }
@@ -261,12 +262,9 @@ function reveal(chosen) {{
   if (P.explanation)
     document.getElementById("explanation").textContent = P.explanation;
   if (P.source) {{
-    const s = P.source, rc = s.room_calls || {{}}, ct = s.room_contracts || {{}},
-          rr = s.room_results || {{}};
+    const s = P.source;
     document.getElementById("source").innerHTML =
-      `Real deal: <b>${{s.teams}}</b>, ${{s.event}}, board ${{s.board}}.<br>` +
-      `At the tables: ${{rc.o}} \\u2192 ${{ct.o}} (${{rr.o || "?"}}) \\u00b7 ` +
-      `${{rc.c}} \\u2192 ${{ct.c}} (${{rr.c || "?"}})`;
+      `Real deal: <b>${{s.teams}}</b>, ${{s.event}}, board ${{s.board}}.`;
   }}
   if (P.meanings && P.meanings.length) {{
     document.getElementById("meanings").innerHTML = P.meanings.map(m =>
@@ -292,7 +290,8 @@ async function init() {{
                 "Problem not found."; return; }}
   P = await r.json();
   document.getElementById("meta").textContent =
-    `Dealer ${{P.dealer}} \\u00b7 Vul ${{P.vul}} \\u00b7 IMPs \\u00b7 you are ${{P.seat}}`;
+    `Dealer ${{P.dealer}} \\u00b7 Vul ${{P.vul}} \\u00b7 IMPs \\u00b7 you are ${{P.seat}}` +
+    (P.category && P.category !== "other" ? ` \\u00b7 ${{P.category}}` : "");
   document.getElementById("problem").innerHTML =
     `<div class="card">${{auctionTableHtml(P)}}` +
     `<div class="hand">${{handHtml(P.hand)}}</div></div>`;
