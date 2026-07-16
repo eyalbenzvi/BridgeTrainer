@@ -1,0 +1,1537 @@
+{
+ "50000-12": {
+  "dealer": "W",
+  "vul": "NS",
+  "hero": "W",
+  "hero_hand": "QT75.AT762.4.Q42",
+  "stem": [
+   "P",
+   "1D",
+   "P",
+   "1S",
+   "P",
+   "2C",
+   "P",
+   "2D"
+  ],
+  "room_calls_at_decision": {
+   "o": "2H",
+   "c": "P"
+  },
+  "current_doc": {
+   "dilemma": true,
+   "options": [
+    "X",
+    "2H",
+    "P"
+   ],
+   "deviations": {
+    "X": "a competitive double on 8 HCP is light; the card wants genuine values in a live auction",
+    "2H": "a direct two-level overcall promises 11+ with a good suit; this is 8 HCP and a shabby suit"
+   },
+   "meanings": {
+    "N": {
+     "note": "1D opening then 2C rebid: 11-16 (no reverse), diamonds at least as long as clubs, four-plus clubs",
+     "hcp": [
+      11,
+      15,
+      [
+       [
+        16,
+        17,
+        0.2
+       ]
+      ]
+     ],
+     "suits": {
+      "D": [
+       4,
+       6,
+       []
+      ],
+      "C": [
+       4,
+       5,
+       [
+        [
+         3,
+         3,
+         0.25
+        ],
+        [
+         6,
+         6,
+         0.15
+        ]
+       ]
+      ]
+     }
+    },
+    "S": {
+     "note": "1S response then 2D preference: 6-9 with four-plus spades and diamond tolerance, no game interest",
+     "hcp": [
+      6,
+      9,
+      [
+       [
+        5,
+        5,
+        0.25
+       ],
+       [
+        10,
+        10,
+        0.3
+       ]
+      ]
+     ],
+     "suits": {
+      "S": [
+       4,
+       6,
+       []
+      ],
+      "D": [
+       2,
+       4,
+       [
+        [
+         5,
+         5,
+         0.2
+        ]
+       ]
+      ]
+     }
+    },
+    "E": {
+     "note": "passed over 1D and over 2C: no overcall, no takeout double",
+     "hcp": [
+      0,
+      11,
+      [
+       [
+        12,
+        13,
+        0.15
+       ]
+      ]
+     ]
+    }
+   },
+   "projections": {
+    "X": [
+     {
+      "when": "partner_diamonds >= 5 and partner_diamonds_hcp >= 4",
+      "contract": "2DNx"
+     },
+     {
+      "when": "lho_diamonds >= 5 and lho_hcp >= 15",
+      "contract": "3DN"
+     },
+     {
+      "when": "partner_hearts >= 4 and partner_hcp >= 10",
+      "contract": "3HE"
+     },
+     {
+      "else": {
+       "contract": "2HE"
+      }
+     }
+    ],
+    "2H": [
+     {
+      "when": "lho_diamonds >= 5 and lho_hcp >= 14",
+      "contract": "3DN"
+     },
+     {
+      "when": "partner_hearts >= 4 and partner_hcp >= 9",
+      "contract": "3HW"
+     },
+     {
+      "else": {
+       "contract": "2HW"
+      }
+     }
+    ],
+    "P": [
+     {
+      "when": "partner_hcp >= 12 and partner_diamonds <= 2",
+      "contract": "2HW"
+     },
+     {
+      "else": {
+       "contract": "2DN"
+      }
+     }
+    ]
+   },
+   "explanation": "The opponents have limped into 2D on a minimum opener facing a weak preference, the classic moment to fight for the partscore, and the singleton diamond screams that partner has some values sitting quietly. But the ammunition is thin: 8 HCP, a mangy five-card heart suit, and both black-suit queens of doubtful worth. 2H puts the long suit on the table directly and makes West the declarer; the double is the flexible route, letting partner bid hearts from his side or even sit for penalties with fat diamonds behind the opening bidder. Both actions are lighter than the card allows and are flagged as such, so partner may compete a level higher expecting more. Passing is safe and sometimes right when the red-suit finesses are offside, but selling out to cozy two-level contracts is how imps leak away."
+  },
+  "fix_directives": {
+   "meanings": [
+    "E (silent) needs shape denials beyond the HCP cap (defaults now auto-apply; add sharper ones if warranted)",
+    "S's 1S response denies 4 hearts (up-the-line): cap S hearts at 3",
+    "N's bands must honour the stated 'diamonds at least as long as clubs' (current bands admit C=5/D=4)"
+   ],
+   "projections": [
+    "X tree must let partner advance 2S (double shows both majors, hero holds 4 spades) \u2014 currently partner is forced into hearts",
+    "opener N must be able to compete 3C/3D with real shape at plausible strength, not only with 15+",
+    "add doubles of 2HE/2HW at the right strengths \u2014 the explanation warns partner may compete expecting more but the trees never price it",
+    "P tree needs a balancing branch for E beyond the narrow 12+/short-diamond gate"
+   ],
+   "deviations": [
+    "X is NOT a card violation: a shape-perfect competitive double of a limped 2D is mainstream at 8 HCP \u2014 either unflag it or downgrade to a 'judgment' note",
+    "2H overcall genuinely light: keep flagged, kind judgment or card_violation as appropriate"
+   ],
+   "category": "partscore"
+  }
+ },
+ "50004-24": {
+  "dealer": "W",
+  "vul": "None",
+  "hero": "N",
+  "hero_hand": "KQJ76.Q83.7.QJ94",
+  "stem": [
+   "P",
+   "1S",
+   "P",
+   "1NT",
+   "P",
+   "2C",
+   "P",
+   "P",
+   "X"
+  ],
+  "room_calls_at_decision": {
+   "o": "P",
+   "c": "3C"
+  },
+  "current_doc": {
+   "dilemma": true,
+   "options": [
+    "3C",
+    "P",
+    "2S"
+   ],
+   "deviations": {
+    "2S": "suggests a sixth spade after the 1S opening and 2C rebid; here only five to the KQJ"
+   },
+   "meanings": {
+    "S": {
+     "note": "1NT response to 1S (6-10, at most two spades), then passed 2C to show club preference, usually four but sometimes three",
+     "hcp": [
+      6,
+      10,
+      []
+     ],
+     "suits": {
+      "S": [
+       0,
+       2,
+       [
+        [
+         3,
+         3,
+         0.2
+        ]
+       ]
+      ],
+      "C": [
+       4,
+       6,
+       [
+        [
+         3,
+         3,
+         0.5
+        ]
+       ]
+      ]
+     }
+    },
+    "W": {
+     "note": "passed hand; balancing-style takeout double of 2C showing both red suits and club shortness, roughly 9-11 (the card's balancing floor), occasionally lighter",
+     "hcp": [
+      9,
+      11,
+      [
+       [
+        7,
+        8,
+        0.3
+       ]
+      ]
+     ],
+     "suits": {
+      "H": [
+       4,
+       5,
+       [
+        [
+         3,
+         3,
+         0.3
+        ],
+        [
+         6,
+         6,
+         0.2
+        ]
+       ]
+      ],
+      "D": [
+       4,
+       5,
+       [
+        [
+         3,
+         3,
+         0.4
+        ]
+       ]
+      ],
+      "C": [
+       0,
+       2,
+       [
+        [
+         3,
+         3,
+         0.2
+        ]
+       ]
+      ]
+     }
+    },
+    "E": {
+     "note": "passed over 1S and took no action later: no 1NT overcall, no suitable suit bid or takeout double; up to a bad 14",
+     "hcp": [
+      0,
+      13,
+      [
+       [
+        14,
+        15,
+        0.3
+       ]
+      ]
+     ]
+    }
+   },
+   "projections": {
+    "3C": [
+     {
+      "when": "lho_hearts >= 4 and rho_hearts >= 4",
+      "contract": "3HE"
+     },
+     {
+      "when": "lho_diamonds >= 5",
+      "contract": "3DE"
+     },
+     {
+      "else": {
+       "contract": "3CN"
+      }
+     }
+    ],
+    "P": [
+     {
+      "when": "lho_clubs >= 4 and lho_clubs_hcp >= 3",
+      "contract": "2CNx"
+     },
+     {
+      "when": "lho_hearts >= 4",
+      "contract": "2HE"
+     },
+     {
+      "else": {
+       "contract": "2DE"
+      }
+     }
+    ],
+    "2S": [
+     {
+      "when": "lho_hearts >= 5",
+      "contract": "3HE"
+     },
+     {
+      "when": "lho_diamonds >= 5",
+      "contract": "3DE"
+     },
+     {
+      "else": {
+       "contract": "2SN"
+      }
+     }
+    ]
+   },
+   "explanation": "West's balancing double announces the red suits and club shortness, so the deal belongs to whoever judges the trump situation best. Passing keeps 2C doubled in play when East holds club length behind dummy, but it also invites East to escape to a red suit at a comfortable level. 3C uses the fourth trump to buy the contract cheaply and puts maximum pressure on East, whose values are limited by the earlier passes. 2S is tempting with KQJ76, yet it advertises a sixth spade opposite a partner who has already denied a fit, so it stakes the board on suit quality rather than fit. The question is whether fighting for the partscore with the known nine-card club fit beats defending or retreating to the strong five-card suit."
+  },
+  "fix_directives": {
+   "meanings": [
+    "E (silent over 1S and the run of the auction) needs shape denials: with a decent 6-card red suit and 10-13 E would have acted (defaults auto-apply; consider sharper)",
+    "W's balancing double: keep red-suit emphasis; spade shortness implied"
+   ],
+   "projections": [
+    "3C must have a doubled branch: E is allowed up to 15 HCP with 4+ clubs sitting over the club bidder (T2 will also demand this if 3C were flagged; add it regardless for realism)",
+    "E's competitive bids over 3C/2S need strength floors (T1 enforces)",
+    "add W re-competition over 3C where sane"
+   ],
+   "deviations": [
+    "2S flag correct (five carding as six): kind card_violation"
+   ],
+   "explanation_facts": [
+    "the club fit is EIGHT cards (QJ94 + typical 4-card preference), never 'nine-card'",
+    "in 2C doubled by N, EAST sits behind declarer and WEST behind dummy \u2014 do not repeat the reversed claim"
+   ],
+   "category": "partscore"
+  }
+ },
+ "50004-30": {
+  "dealer": "E",
+  "vul": "None",
+  "hero": "S",
+  "hero_hand": "AJ742.AK.32.8753",
+  "stem": [
+   "P",
+   "1S",
+   "P",
+   "2H",
+   "P",
+   "2S",
+   "P",
+   "2NT",
+   "P"
+  ],
+  "room_calls_at_decision": {
+   "o": "3NT",
+   "c": "3H"
+  },
+  "current_doc": {
+   "dilemma": true,
+   "options": [
+    "3H",
+    "3NT"
+   ],
+   "deviations": {
+    "3H": "shows three-card heart support; here it is a doubleton AK"
+   },
+   "meanings": {
+    "N": {
+     "note": "2H game-force with five-plus hearts, then a natural 2NT: balanced-ish, at most two spades, minimum 12 up to a big balanced hand of 20",
+     "hcp": [
+      12,
+      16,
+      [
+       [
+        17,
+        20,
+        0.45
+       ]
+      ]
+     ],
+     "suits": {
+      "H": [
+       5,
+       6,
+       []
+      ],
+      "S": [
+       1,
+       2,
+       [
+        [
+         3,
+         3,
+         0.2
+        ]
+       ]
+      ],
+      "D": [
+       2,
+       4,
+       [
+        [
+         5,
+         5,
+         0.15
+        ]
+       ]
+      ],
+      "C": [
+       2,
+       4,
+       [
+        [
+         5,
+         5,
+         0.15
+        ]
+       ]
+      ]
+     }
+    },
+    "E": {
+     "note": "passed throughout as dealer",
+     "hcp": [
+      0,
+      10,
+      [
+       [
+        11,
+        11,
+        0.2
+       ]
+      ]
+     ]
+    },
+    "W": {
+     "note": "passed throughout with no overcall or action",
+     "hcp": [
+      0,
+      11,
+      [
+       [
+        12,
+        12,
+        0.15
+       ]
+      ]
+     ]
+    }
+   },
+   "projections": {
+    "3H": [
+     {
+      "when": "partner_hcp >= 18",
+      "contract": "6NTN"
+     },
+     {
+      "else": {
+       "contract": "4HN"
+      }
+     }
+    ],
+    "3NT": [
+     {
+      "when": "partner_hcp >= 18",
+      "contract": "4NTN"
+     },
+     {
+      "else": {
+       "contract": "3NTN"
+      }
+     }
+    ]
+   },
+   "explanation": "In a two-over-one auction the game force is already established, so the real question is which strain and how much room to leave. 3NT is the honest, fast-arrival call with a 5-2-2-3 twelve-count and soft minor-suit holdings, but it slams the door: partner with the big balanced rebid can only guess with a quantitative raise. The false preference to 3H, on AK doubleton, keeps the auction alive below game; those two trumps are worth more than many three-card holdings, and hearing partner's next move may be the only route to a laydown slam when the 2NT rebid conceals a big balanced hand. The risk is playing a 5-2 fit at the four level, or higher, when partner is minimum and notrump was the spot. Note the deviation: partner will genuinely believe in the eight-card fit, and the simulation will price both the slams gained and the misfits suffered."
+  },
+  "fix_directives": {
+   "options": [
+    "ADD the textbook 3C (natural, pattern-out below 3NT with 5=2=2=4) as a third option \u2014 a real panel gives it serious votes"
+   ],
+   "meanings": [
+    "N's 2NT: 12-20 with 45% tail weight on 17-20 is implausibly wide/heavy; use a sensible 2/1 2NT rebid range (roughly 12-14 or 18-19 balanced styles differ \u2014 pick one, note it) and make the actual 20-count a margin tail, not nearly half the mass"
+   ],
+   "projections": [
+    "slam exploration must be SYMMETRIC: if partner drives over 3H with 18+, the same partner must drive over 3NT (and over 3C) \u2014 no option may be denied games/slams the others reach by construction",
+    "after 3H with partner 12-17 and only 2 hearts, allow a route back to 3NT (partner offers 3NT with 5332 soft hands)",
+    "3C continuations: partner bids 3NT with minimum balanced, raises clubs with 4, shows 3-card heart support, drives with 18+ \u2014 same gates as the other options"
+   ],
+   "deviations": [
+    "3H (2 cards, shows 3): keep, kind card_violation",
+    "note the STEM 2S rebid on five as a stem annotation in the explanation, not a deviation of an option"
+   ],
+   "hero_stem": "2S rebid on 5-2-2-4 often promises six \u2014 acknowledge in prose",
+   "category": "game"
+  }
+ },
+ "50005-26": {
+  "dealer": "E",
+  "vul": "Both",
+  "hero": "E",
+  "hero_hand": "T862.4.KQ93.J653",
+  "stem": [
+   "P",
+   "P",
+   "1C",
+   "X"
+  ],
+  "room_calls_at_decision": {
+   "o": "P",
+   "c": "1D"
+  },
+  "current_doc": {
+   "dilemma": true,
+   "options": [
+    "1D",
+    "1S",
+    "P",
+    "2C"
+   ],
+   "deviations": {},
+   "meanings": {
+    "W": {
+     "note": "third-seat 1C opening: 11-20 with three-plus clubs, occasionally shaded a point or two in third chair",
+     "hcp": [
+      11,
+      17,
+      [
+       [
+        9,
+        10,
+        0.4
+       ],
+       [
+        18,
+        20,
+        0.1
+       ]
+      ]
+     ],
+     "suits": {
+      "C": [
+       3,
+       6,
+       []
+      ]
+     }
+    },
+    "N": {
+     "note": "takeout double of 1C: opening values with club shortness and support for the majors and diamonds, or any hand of 17+",
+     "hcp": [
+      12,
+      16,
+      [
+       [
+        11,
+        11,
+        0.25
+       ],
+       [
+        17,
+        20,
+        0.4
+       ]
+      ]
+     ],
+     "suits": {
+      "S": [
+       3,
+       5,
+       [
+        [
+         2,
+         2,
+         0.3
+        ]
+       ]
+      ],
+      "H": [
+       3,
+       6,
+       [
+        [
+         2,
+         2,
+         0.3
+        ]
+       ]
+      ],
+      "D": [
+       3,
+       5,
+       [
+        [
+         1,
+         2,
+         0.3
+        ]
+       ]
+      ],
+      "C": [
+       0,
+       2,
+       [
+        [
+         3,
+         4,
+         0.3
+        ]
+       ]
+      ]
+     }
+    },
+    "S": {
+     "note": "passed in second seat: no opening bid",
+     "hcp": [
+      0,
+      10,
+      [
+       [
+        11,
+        11,
+        0.3
+       ]
+      ]
+     ]
+    }
+   },
+   "projections": {
+    "1D": [
+     {
+      "when": "rho_hcp >= 18 and rho_hearts >= 6",
+      "contract": "4HN"
+     },
+     {
+      "when": "rho_hcp >= 16 and rho_hearts >= 5",
+      "contract": "2HN"
+     },
+     {
+      "when": "rho_hearts >= 5",
+      "contract": "1HN"
+     },
+     {
+      "else": {
+       "contract": "1DE"
+      }
+     }
+    ],
+    "1S": [
+     {
+      "when": "rho_hcp >= 18 and rho_hearts >= 6 and lho_hearts >= 3",
+      "contract": "4HN"
+     },
+     {
+      "when": "rho_hcp >= 16 and rho_hearts >= 5",
+      "contract": "2HN"
+     },
+     {
+      "when": "partner_spades >= 4",
+      "contract": "2SE"
+     },
+     {
+      "else": {
+       "contract": "1SE"
+      }
+     }
+    ],
+    "P": [
+     {
+      "when": "lho_clubs >= 5 and lho_clubs_hcp >= 4",
+      "contract": "1CWx"
+     },
+     {
+      "when": "lho_hearts >= 4 and rho_hcp >= 18 and rho_hearts >= 5",
+      "contract": "4HS"
+     },
+     {
+      "when": "lho_hearts >= 4",
+      "contract": "1HS"
+     },
+     {
+      "when": "rho_hcp >= 18 and rho_hearts >= 6",
+      "contract": "4HN"
+     },
+     {
+      "when": "lho_spades >= 4",
+      "contract": "1SS"
+     },
+     {
+      "else": {
+       "contract": "1DS"
+      }
+     }
+    ],
+    "2C": [
+     {
+      "when": "rho_hcp >= 18 and rho_hearts >= 6",
+      "contract": "4HN"
+     },
+     {
+      "when": "rho_hcp >= 16 and rho_hearts >= 5",
+      "contract": "3HN"
+     },
+     {
+      "when": "rho_hearts >= 5 and rho_hcp >= 14",
+      "contract": "2HN"
+     },
+     {
+      "else": {
+       "contract": "2CW"
+      }
+     }
+    ]
+   },
+   "explanation": "Over a takeout double, this 6-count has four plausible roads and each tells partner something different. 1S gets the major in first, the classic priority, but T862 may be walking into a strong doubler sitting over it. 1D is cheaper and names the hand's real values, keeping the auction low while suggesting a lead. 2C raises with four trumps and takes away the doubler's easy one-level advances, though the raise consumes your side's only plus-showing calls. Passing is not a crime with a balanced six, but it hands the doubling side a free run, and if they can be outbid later it will be at a higher level. All four are card-legal; the interest is in which loses least when the doubler turns out to hold the big major-suit hand he is allowed to have."
+  },
+  "fix_directives": {
+   "meanings": [
+    "S (passed in second seat) keeps HCP cap; defaults now deny preempt shapes automatically",
+    "N's takeout double: unlimited; nothing encodes that a 17+ doubler introduces his OWN suit later \u2014 reflect in projections instead"
+   ],
+   "projections": [
+    "CRITICAL: opponent aggression must be symmetric across options (T3 enforces): the doubler's rebids need the SAME strength gates whether hero bid 1D, 1S, 2C or passed",
+    "the doubler must be able to bid SPADES or notrump with the right hands, not only hearts (hearts-only continuation was overfit to the actual deal)",
+    "opener W (11-17, rebiddable clubs) may not sell out to 1-level contracts: add W club rebids/competition at plausible strengths in ALL trees including P and 1D",
+    "add X of the 2C raise where it makes sense"
+   ],
+   "deviations": [
+    "consider flagging 2C (4 small trumps raise of a possibly 3-card club suit) as judgment"
+   ],
+   "explanation_facts": [
+    "the hand is 4=1=4=4 with a singleton heart \u2014 never 'balanced'",
+    "the doubler (North) is hero's RHO and sits UNDER hero in a spade contract by East \u2014 do not claim the doubler sits over hero"
+   ],
+   "category": "partscore"
+  }
+ },
+ "50006-24": {
+  "dealer": "W",
+  "vul": "None",
+  "hero": "W",
+  "hero_hand": "854.A9762.J432.A",
+  "stem": [
+   "P",
+   "1S",
+   "P",
+   "1NT",
+   "P",
+   "2C",
+   "P",
+   "P"
+  ],
+  "room_calls_at_decision": {
+   "o": "X",
+   "c": "2H"
+  },
+  "current_doc": {
+   "dilemma": true,
+   "options": [
+    "X",
+    "2H",
+    "P"
+   ],
+   "deviations": {
+    "2H": "meets the balancing point floor but A9762 falls well short of a good five-card suit"
+   },
+   "meanings": {
+    "N": {
+     "note": "1S opening then 2C rebid: 11-16 with five-plus spades and four-plus clubs (occasionally three)",
+     "hcp": [
+      11,
+      15,
+      [
+       [
+        16,
+        17,
+        0.25
+       ]
+      ]
+     ],
+     "suits": {
+      "S": [
+       5,
+       6,
+       [
+        [
+         7,
+         7,
+         0.15
+        ]
+       ]
+      ],
+      "C": [
+       4,
+       5,
+       [
+        [
+         3,
+         3,
+         0.3
+        ],
+        [
+         6,
+         6,
+         0.2
+        ]
+       ]
+      ]
+     }
+    },
+    "S": {
+     "note": "1NT response (6-10, at most two spades), then passed 2C showing club preference",
+     "hcp": [
+      6,
+      10,
+      []
+     ],
+     "suits": {
+      "S": [
+       0,
+       2,
+       [
+        [
+         3,
+         3,
+         0.2
+        ]
+       ]
+      ],
+      "C": [
+       3,
+       6,
+       [
+        [
+         2,
+         2,
+         0.3
+        ]
+       ]
+      ]
+     }
+    },
+    "E": {
+     "note": "passed over 1S and passed over 2C in direct seat: no overcall, no 1NT, no immediate double; up to a bad 14",
+     "hcp": [
+      0,
+      13,
+      [
+       [
+        14,
+        15,
+        0.3
+       ]
+      ]
+     ]
+    }
+   },
+   "projections": {
+    "X": [
+     {
+      "when": "lho_spades_hcp >= 5",
+      "contract": "2SN"
+     },
+     {
+      "when": "partner_clubs >= 4 and partner_clubs_hcp >= 4",
+      "contract": "2CNx"
+     },
+     {
+      "when": "partner_hearts >= 4",
+      "contract": "2HE"
+     },
+     {
+      "else": {
+       "contract": "2DE"
+      }
+     }
+    ],
+    "2H": [
+     {
+      "when": "lho_spades >= 6 or lho_hcp >= 14",
+      "contract": "2SN"
+     },
+     {
+      "when": "partner_hearts >= 4 and partner_hcp >= 10",
+      "contract": "3HW"
+     },
+     {
+      "else": {
+       "contract": "2HW"
+      }
+     }
+    ],
+    "P": [
+     {
+      "else": {
+       "contract": "2CN"
+      }
+     }
+    ]
+   },
+   "explanation": "The auction is dying in 2C and the balancing seat carries its traditional license: partner is marked with values when the opponents stop low in a semi-fit. With 9 HCP and 3-5-4-1 shape this double is a textbook balance \u2014 it meets the card's balancing floor exactly, with the singleton sitting in their suit \u2014 and it lets partner choose a red suit or convert for penalties with club length behind the bidder, though opener may simply run to 2S. The alternative 2H names the five-card suit directly and wins the declaration for this hand, but it stakes everything on a moth-eaten A9762, well short of the good suit even a balancing two-level bid wants, and it is flagged as such. Passing avoids the doubled minuses that punish balancing into a bad lie of the cards, but it sells out to a comfortable partscore whenever partner was sitting on the balance of the deck."
+  },
+  "fix_directives": {
+   "meanings": [
+    "E silence: with a 6-card heart suit and 10+ E would have overcalled 2H over 1S \u2014 the defaults cover part; add sharper caps if warranted"
+   ],
+   "projections": [
+    "minor: consider a double of 2HW branch and S 3C competition; current trees otherwise rated TRUSTWORTHY"
+   ],
+   "deviations": [
+    "2H suit-quality note: kind judgment; X is NOT a deviation (9 HCP meets the balancing floor)"
+   ],
+   "explanation_facts": [
+    "verdict is an X/2H toss-up: the text must NOT crown X 'textbook' while trashing 2H ('moth-eaten') \u2014 balanced advocacy required",
+    "teach why they tie: the fifth heart and right-siding offset X's flexibility; the stiff ACE is a mild takeout-double flaw worth one sentence",
+    "say why P costs ~1.4 IMPs: partner is marked with values when opponents die in 2C"
+   ],
+   "category": "partscore"
+  }
+ },
+ "50018-10": {
+  "dealer": "E",
+  "vul": "Both",
+  "hero": "S",
+  "hero_hand": "KQT.T53.6.KJT652",
+  "stem": [
+   "P",
+   "P",
+   "P",
+   "1D",
+   "P",
+   "2C",
+   "P",
+   "2D",
+   "P"
+  ],
+  "room_calls_at_decision": {
+   "o": "P",
+   "c": "2S"
+  },
+  "current_doc": {
+   "dilemma": true,
+   "options": [
+    "2S",
+    "P",
+    "3C"
+   ],
+   "deviations": {
+    "2S": "only three spades; a fresh suit at the two level implies four"
+   },
+   "meanings": {
+    "N": {
+     "note": "fourth-seat 1D opening then a 2D rebid over 2C: sound minimum opener, roughly 11-14, five-plus diamonds, no five-card major",
+     "hcp": [
+      11,
+      14,
+      [
+       [
+        15,
+        15,
+        0.25
+       ]
+      ]
+     ],
+     "suits": {
+      "D": [
+       5,
+       6,
+       [
+        [
+         4,
+         4,
+         0.25
+        ],
+        [
+         7,
+         7,
+         0.1
+        ]
+       ]
+      ],
+      "S": [
+       0,
+       4,
+       []
+      ],
+      "H": [
+       0,
+       4,
+       []
+      ]
+     }
+    },
+    "E": {
+     "note": "passed as dealer and stayed silent",
+     "hcp": [
+      0,
+      10,
+      [
+       [
+        11,
+        11,
+        0.25
+       ]
+      ]
+     ]
+    },
+    "W": {
+     "note": "passed in third seat and stayed silent",
+     "hcp": [
+      0,
+      10,
+      [
+       [
+        11,
+        11,
+        0.25
+       ]
+      ]
+     ]
+    }
+   },
+   "projections": {
+    "2S": [
+     {
+      "when": "partner_spades >= 4 and partner_hcp >= 14",
+      "contract": "3SS"
+     },
+     {
+      "when": "partner_spades >= 3",
+      "contract": "2SS"
+     },
+     {
+      "when": "partner_diamonds >= 6",
+      "contract": "3DN"
+     },
+     {
+      "else": {
+       "contract": "2NTN"
+      }
+     }
+    ],
+    "P": [
+     {
+      "else": {
+       "contract": "2DN"
+      }
+     }
+    ],
+    "3C": [
+     {
+      "when": "partner_diamonds >= 6 and partner_clubs <= 1",
+      "contract": "3DN"
+     },
+     {
+      "else": {
+       "contract": "3CS"
+      }
+     }
+    ]
+   },
+   "explanation": "As a passed hand the 2C response was already a maximum effort, and partner's 2D rebid paints a minimum opener with long diamonds and, on this hand, a likely misfit: a singleton diamond opposite five or six of them. Passing takes the sure small minus or plus in 2D and avoids compounding a possible misfit. 2S with KQT is a three-card lie, but it is wonderfully economical: it shows where the values are, keeps 2NT and 3C in the frame, and often improves the contract a full level when partner has four spades. 3C insists on the self-sufficient-looking six-carder, which plays well opposite a small doubleton but commits to the three level opposite possible shortness. The hand is a lesson in escaping misfit auctions cheaply, and the double-dummy verdict will show which escape hatch pays."
+  },
+  "fix_directives": {
+   "meanings": [
+    "E and W passed-hand bands: defaults now deny preempt shapes; W passing in third seat denies even a light opener \u2014 cap W's tail accordingly",
+    "N's 2D rebid: with 4 spades opener often bids 2S over 2C \u2014 depress N spade length (e.g. cap 3 at full weight, 4 as a small tail)"
+   ],
+   "projections": [
+    "rated TRUSTWORTHY: keep the 2S psyche-cost branch (partner raising on 3); add a reopening branch after P where sane; keep strength floors"
+   ],
+   "deviations": [
+    "2S (3 cards): kind card_violation"
+   ],
+   "explanation_facts": [
+    "3C is the accepted winner (+2.3): the prose must argue FOR 3C (run to your longest suit in a misfit) and explain 2S's trap (partner raises on 3-card support into a 4-3 at the three level) and why P is worst (singleton opposite 5+ diamonds, no source of tricks)",
+    "no future-tense 'the verdict will show'"
+   ],
+   "category": "partscore"
+  }
+ },
+ "50023-18": {
+  "dealer": "E",
+  "vul": "NS",
+  "hero": "E",
+  "hero_hand": "QJ.QJ8.J62.KQT54",
+  "stem": [
+   "1C",
+   "P",
+   "1D",
+   "1S"
+  ],
+  "room_calls_at_decision": {
+   "o": "P",
+   "c": "X"
+  },
+  "current_doc": {
+   "dilemma": true,
+   "options": [
+    "X",
+    "P",
+    "1NT",
+    "2C"
+   ],
+   "deviations": {
+    "X": "opener's takeout-shaped double here normally delivers four hearts; QJ8 is only three",
+    "1NT": "the 1NT rebid over interference wants a real spade stopper; bare QJ is a coin-flip",
+    "2C": "a free 2C rebid over the overcall typically shows six clubs; this is a good five"
+   },
+   "meanings": {
+    "W": {
+     "note": "1D response to 1C: 6+ points with four-plus diamonds, occasionally shaded, strength unlimited but usually a modest hand",
+     "hcp": [
+      6,
+      11,
+      [
+       [
+        4,
+        5,
+        0.35
+       ],
+       [
+        12,
+        16,
+        0.2
+       ]
+      ]
+     ],
+     "suits": {
+      "D": [
+       4,
+       6,
+       []
+      ]
+     }
+    },
+    "N": {
+     "note": "1S overcall: 8-16 with a decent five-plus spade suit",
+     "hcp": [
+      9,
+      15,
+      [
+       [
+        7,
+        8,
+        0.35
+       ],
+       [
+        16,
+        17,
+        0.25
+       ]
+      ]
+     ],
+     "suits": {
+      "S": [
+       5,
+       6,
+       [
+        [
+         7,
+         7,
+         0.2
+        ]
+       ]
+      ]
+     }
+    },
+    "S": {
+     "note": "passed over 1C: no immediate action",
+     "hcp": [
+      0,
+      10,
+      [
+       [
+        11,
+        12,
+        0.2
+       ]
+      ]
+     ]
+    }
+   },
+   "projections": {
+    "X": [
+     {
+      "when": "rho_hcp >= 14 and rho_spades >= 6 and lho_hcp >= 8",
+      "contract": "4SN"
+     },
+     {
+      "when": "partner_hearts >= 4",
+      "contract": "2HW"
+     },
+     {
+      "when": "lho_spades >= 3 and lho_hcp >= 6",
+      "contract": "2SN"
+     },
+     {
+      "else": {
+       "contract": "2DW"
+      }
+     }
+    ],
+    "P": [
+     {
+      "when": "rho_hcp >= 14 and rho_spades >= 6 and lho_hcp >= 8",
+      "contract": "4SN"
+     },
+     {
+      "when": "lho_spades >= 3 and lho_hcp >= 6",
+      "contract": "2SN"
+     },
+     {
+      "when": "partner_diamonds >= 6 and partner_hcp >= 8",
+      "contract": "2DW"
+     },
+     {
+      "else": {
+       "contract": "1SN"
+      }
+     }
+    ],
+    "1NT": [
+     {
+      "when": "rho_hcp >= 14 and rho_spades >= 6 and lho_hcp >= 8",
+      "contract": "4SN"
+     },
+     {
+      "when": "rho_spades >= 6 and rho_hcp >= 11",
+      "contract": "2SN"
+     },
+     {
+      "when": "partner_hcp >= 12",
+      "contract": "3NTE"
+     },
+     {
+      "else": {
+       "contract": "1NTE"
+      }
+     }
+    ],
+    "2C": [
+     {
+      "when": "rho_hcp >= 14 and rho_spades >= 6 and lho_hcp >= 8",
+      "contract": "4SN"
+     },
+     {
+      "when": "lho_spades >= 3 and lho_hcp >= 6",
+      "contract": "2SN"
+     },
+     {
+      "else": {
+       "contract": "2CE"
+      }
+     }
+    ]
+   },
+   "explanation": "Opener has a comfortable minimum with clubs and scattered values, and North's 1S overcall has stolen the convenient rebid. The takeout-flavored double shows this skeleton, doubleton spade with heart support and diamond tolerance, and keeps both red suits in play at the two level, though with only three hearts it is a card light of the classic shape and partner may leap in hearts expecting four. 1NT describes the balanced 12-count and the general strength but leans on QJ tight as a stopper, which wins when the lead runs to the closed hand and loses ugly when spades come pouring in. 2C retreats to the chunky five-card suit, the least committal noise, but it normally promises a sixth club and can bury a red-suit fit. Pass is the disciplined minimum action, planning to compete later, but the auction may return at an uncomfortable height with the fit still unfound. The choice is really about how hard a minimum balanced opener should work once the opponents own the boss suit."
+  },
+  "fix_directives": {
+   "meanings": [
+    "CRITICAL: X here is a SUPPORT DOUBLE on a standard modern 2/1 card \u2014 it shows exactly three diamonds, which hero (J62) HAS. Model X as the support double: meaning for partner's reading, and REMOVE its card_violation flag entirely (it is the card-perfect call)",
+    "S (passed over 1C) gets default denials; add: no decent 5-card major at 8-10 if warranted"
+   ],
+   "projections": [
+    "keep the shared 4SN world-event branch in every option (good pattern)",
+    "P tree: E-W may NOT sell out to 1S \u2014 responder W with 8+ acts again (1NT, 2D, negative-double-ish); rebuild the P continuations so P's cost is real, not fictional",
+    "X tree: partner now reads 3-card diamond support \u2014 continuations must follow support-double logic (rebids 2D with 5, passes conversions, etc.)",
+    "1NT tree: add a double of 1NT branch for N with 15+ sitting over the QJ stopper"
+   ],
+   "deviations": [
+    "X: REMOVE (support double, card-perfect)",
+    "1NT (QJ-tight stopper): kind judgment",
+    "2C (5th club promise): kind card_violation if the card says 5+; else judgment"
+   ],
+   "category": "partscore"
+  }
+ },
+ "50023-20": {
+  "dealer": "W",
+  "vul": "Both",
+  "hero": "N",
+  "hero_hand": "T93.AT873.742.K9",
+  "stem": [
+   "P",
+   "P",
+   "1D",
+   "X",
+   "P"
+  ],
+  "room_calls_at_decision": {
+   "o": "1H",
+   "c": "2H"
+  },
+  "current_doc": {
+   "dilemma": true,
+   "options": [
+    "2H",
+    "1H"
+   ],
+   "deviations": {
+    "2H": "only 7 HCP; the jump advance of a takeout double shows 9-11"
+   },
+   "meanings": {
+    "E": {
+     "note": "1D opening, 11-21 with three-plus diamonds",
+     "hcp": [
+      11,
+      17,
+      [
+       [
+        10,
+        10,
+        0.3
+       ],
+       [
+        18,
+        20,
+        0.15
+       ]
+      ]
+     ],
+     "suits": {
+      "D": [
+       3,
+       6,
+       []
+      ]
+     }
+    },
+    "S": {
+     "note": "takeout double of 1D: opening values with diamond shortness and support for the unbid suits, or a hand of 17+ with any shape",
+     "hcp": [
+      12,
+      16,
+      [
+       [
+        11,
+        11,
+        0.2
+       ],
+       [
+        17,
+        20,
+        0.35
+       ]
+      ]
+     ],
+     "suits": {
+      "D": [
+       0,
+       2,
+       [
+        [
+         3,
+         3,
+         0.25
+        ]
+       ]
+      ],
+      "S": [
+       3,
+       5,
+       [
+        [
+         2,
+         2,
+         0.2
+        ]
+       ]
+      ],
+      "H": [
+       3,
+       5,
+       [
+        [
+         2,
+         2,
+         0.2
+        ]
+       ]
+      ],
+      "C": [
+       3,
+       5,
+       [
+        [
+         2,
+         2,
+         0.3
+        ]
+       ]
+      ]
+     }
+    },
+    "W": {
+     "note": "passed as dealer, then passed again as responder over the double: no redouble, no bid, no diamond raise; nearly always under six points",
+     "hcp": [
+      0,
+      5,
+      [
+       [
+        6,
+        8,
+        0.35
+       ]
+      ]
+     ],
+     "suits": {
+      "D": [
+       0,
+       4,
+       [
+        [
+         5,
+         5,
+         0.15
+        ]
+       ]
+      ]
+     }
+    }
+   },
+   "projections": {
+    "2H": [
+     {
+      "when": "partner_hcp >= 14 and partner_hearts >= 4",
+      "contract": "4HN"
+     },
+     {
+      "when": "partner_hcp >= 16",
+      "contract": "4HN"
+     },
+     {
+      "when": "lho_diamonds >= 6 and lho_hcp >= 14",
+      "contract": "3DE"
+     },
+     {
+      "else": {
+       "contract": "2HN"
+      }
+     }
+    ],
+    "1H": [
+     {
+      "when": "partner_hcp >= 17",
+      "contract": "4HN"
+     },
+     {
+      "when": "partner_hcp >= 14",
+      "contract": "3HN"
+     },
+     {
+      "when": "lho_diamonds >= 6 and lho_hcp >= 13",
+      "contract": "2DE"
+     },
+     {
+      "else": {
+       "contract": "1HN"
+      }
+     }
+    ]
+   },
+   "explanation": "Raw count says 7 HCP and a minimum 1H advance, but takeout-double evaluation is about tricks: a fifth trump, an ace, a working king behind the opening bidder, and a doubleton all argue the hand plays much better than it counts. The jump to 2H tells partner exactly that, and lets a sound doubler with a shapely 14-15 bid a vulnerable game that the quiet 1H may bury, since the doubler needs real extras to move over 1H. The cost is equally clear: when partner is a flat minimum double, 2H has overstated the hand by a trick and the three level may already be too high. Note that 2H is a card violation here, so partner will drive on hands that expect 9-11 opposite. The trade-off is missed vulnerable games against going plus quietly in a partscore."
+  },
+  "fix_directives": {
+   "meanings": [
+    "W's constraints (passed dealer, no action over the double) were praised \u2014 keep",
+    "E 1D opener 11-17 with 3+ diamonds: keep; no 5-card major"
+   ],
+   "projections": [
+    "CRITICAL: in the 1H tree, when the doubler invites with 3H (14-15), HERO MUST ACCEPT to 4H on this hand type a large fraction of the time (five trumps, an ace, a working king, a doubleton). Model hero's acceptance \u2014 use me_* features or simply route those layouts to 4HN \u2014 so 1H is not structurally denied the games 2H reaches",
+    "add a double of 4HN branch at both-vul where E has the right trap hand"
+   ],
+   "deviations": [
+    "2H jump on 7 HCP vs the card's 9-11: keep flagged, kind card_violation, and the explanation must reconcile (what licenses the upgrade: 5th trump, ace, K9 combination, doubleton)"
+   ],
+   "explanation_facts": [
+    "hero (North) plays BEFORE the opener (East): the club king K9 sits IN FRONT OF the opener and is finessable \u2014 never claim it sits 'behind the opening bidder'",
+    "fix the garbled 'hands that expect 9-11 opposite'"
+   ],
+   "category": "raise-choice"
+  }
+ }
+}
