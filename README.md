@@ -24,11 +24,16 @@ produce` deals a random board, has a deterministic rule-of-thumb bot
 the bot's call signatures into constraints for the concealed hands, runs the
 usual simulate/DD/compare pipeline with the bot bidding out every candidate's
 continuation per layout, and keeps the problem only if the verdict is close
-(≤3 IMPs between the top candidates) and statistically sound. Each problem
-takes ~20-30s to build and lands in a JSON pool (`data/` on gh-pages) that
-the static app (`trainer webapp`) reads: index.html "deals" a random unseen
-problem; answers are stored in localStorage. Batches are generated manually
-for now (`trainer produce --pool ... --count N`); no scheduled jobs.
+(≤3 IMPs between the top candidates) and statistically sound. DD solving is
+adaptive (deals are solved in prefix increments and the verdict stops as
+soon as the accept/reject decision is CI-resolved), so a problem takes
+~10-15s of 4-core compute to build; it lands in a JSON pool (`data/` on
+gh-pages) that the static app (`trainer webapp`) reads: index.html "deals" a
+random unseen problem; answers are stored in localStorage. Batches are
+generated with `trainer produce --pool ... --count N` (add `--jobs` on
+many-core machines), or in parallel on CI via the "Produce problem bank"
+workflow, which shards generation across runners and merges the result into
+the pool on gh-pages (a 100-problem bank in a few minutes).
 
 The bot is deliberately simple (no Stayman/transfers, no 2C, no slam
 machinery — see `bridge_trainer/bot/bidder.py` docstring) and every call's

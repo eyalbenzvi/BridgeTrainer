@@ -45,6 +45,34 @@ def test_generation_is_deterministic():
     assert a == b
 
 
+def test_adaptive_dd_checkpoints(monkeypatch):
+    """With interim checkpoints active the record stays schema-valid and
+    reports how many deals the verdict actually used."""
+    import bridge_trainer.generate.random_problem as rp
+    monkeypatch.setattr(rp, "DD_CHECKPOINTS", (30, 50))
+    seed, rec = _first_accepted(0, n_deals=80)
+    assert 30 <= rec["generator"]["n_deals"] <= 80
+    assert set(rec["verdict"]["accepted"]) <= set(rec["candidates"])
+    # Deterministic under the same checkpoint schedule.
+    rec2, _ = generate_problem(seed=seed, n_deals=80)
+    rec, rec2 = dict(rec), dict(rec2)
+    rec.pop("created_at"), rec2.pop("created_at")
+    assert rec == rec2
+
+
+def test_produce_batch_parallel(tmp_path):
+    """jobs>1 fills the pool with valid records (which seed lands first
+    legitimately depends on completion order)."""
+    from bridge_trainer.generate.producer import produce_batch
+    made = produce_batch(tmp_path / "par", count=1, max_seconds=300.0,
+                         base_seed=0, n_deals=60, jobs=2)
+    assert len(made) == 1
+    rec = ProblemPool(tmp_path / "par").get(made[0])
+    assert set(rec["verdict"]["accepted"]) <= set(rec["candidates"])
+    index = json.loads((tmp_path / "par" / "index.json").read_text())
+    assert index["count"] == 1
+
+
 def test_pool_roundtrip(tmp_path, problem):
     pool = ProblemPool(tmp_path)
     pid = pool.add(problem)

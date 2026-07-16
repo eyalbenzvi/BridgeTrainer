@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from .stats import weighted_ci, weighted_probability
-from .tables import imps
+from .tables import imps_array
 
 TOSS_UP_IMPS = 0.5
 
@@ -47,13 +47,12 @@ class ComparisonResult:
 
 def pairwise_imps(scores: dict[str, np.ndarray]) -> dict[tuple[str, str], np.ndarray]:
     """Per-deal IMPs of action a over action b, for every ordered pair."""
-    vimps = np.vectorize(imps, otypes=[np.int64])
     out = {}
     actions = list(scores)
     for a in actions:
         for b in actions:
             if a != b:
-                out[(a, b)] = vimps(scores[a] - scores[b])
+                out[(a, b)] = imps_array(scores[a] - scores[b])
     return out
 
 

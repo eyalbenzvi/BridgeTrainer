@@ -16,6 +16,7 @@ bridge_trainer/dd/correction_table.yaml to taste.
 """
 from __future__ import annotations
 
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -45,6 +46,8 @@ class CorrectionTable:
         return self.deltas["nt" if denom == "NT" else "suit"]
 
 
+@lru_cache(maxsize=1)
 def load_default_correction() -> CorrectionTable:
+    """Cached: the table is read-only and the producer calls this per seed."""
     with open(DEFAULT_TABLE) as f:
         return CorrectionTable(yaml.safe_load(f), source=str(DEFAULT_TABLE))

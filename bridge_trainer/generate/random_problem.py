@@ -13,6 +13,16 @@ Pipeline per seed:
      real hand). DD + paired IMP comparison as usual (INV1..INV8).
   5. The problem is kept only if it is genuinely close (difficulty filter)
      and statistically sound; otherwise the seed is rejected.
+
+DD solving — ~98% of the wall clock — is adaptive: deals are solved in
+prefix increments (DD_CHECKPOINTS, then the full set) and after each
+increment the corrected comparison decides whether to stop. A seed whose
+top action already beats the difficulty gap by more than its CI is rejected
+without solving the rest; a verdict that is safely inside every gate with a
+tight CI is accepted on the prefix (the record's n_deals says how many were
+used). All candidates always share the identical prefix (INV1). The solver
+additionally routes strains that only rare contracts reach to per-board
+solving instead of paying for them in every table (see dd/solver.py).
 """
 from __future__ import annotations
 
@@ -43,6 +53,12 @@ MIN_ESS = 100.0
 MAX_SHORTFALL_FRAC = 0.4
 MAX_PUSH_RATE = 0.90       # all-candidates-transpose problems are boring
 MIN_INTEREST = 5           # expert_review_v2 §3.3 threshold
+
+# Adaptive DD (see module docstring). Interim decisions at these prefix
+# sizes; gates there are CI-guarded so a borderline seed keeps sampling.
+DD_CHECKPOINTS = (200, 300)
+EARLY_ACCEPT_CI = 0.8      # IMPs: CI tight enough to publish on a prefix
+EARLY_PUSH_MARGIN = 0.05   # buffer on MAX_PUSH_RATE for interim decisions
 
 
 def signature_to_constraints(sigs: list[Signature]) -> SeatConstraints:
@@ -261,23 +277,59 @@ def generate_problem(seed: int, n_deals: int = 600,
         contracts_by_candidate[cand] = contracts
 
     evaluator = ScoreEvaluator(hero, vul, load_default_correction())
-    evaluator.prepare(deals, contracts_by_candidate)
-    weights = np.array([wd.weight for wd in deals])
-    raw_scores, corr_scores = {}, {}
-    for cand, contracts in contracts_by_candidate.items():
-        raw_scores[cand], corr_scores[cand] = evaluator.evaluate(
-            deals, contracts)
-
+    weights_all = np.array([wd.weight for wd in deals])
     ci_widen = float(np.sqrt(n_deals / len(deals))) if diag.shortfall else 1.0
-    raw_cmp = compare_candidates(raw_scores, weights, ci_widen=ci_widen)
-    corr_cmp = compare_candidates(corr_scores, weights, ci_widen=ci_widen)
 
-    # 5. Interestingness filter on the verdict itself.
-    top = corr_cmp.candidates[0]
-    if top.ev_vs_best_alt > MAX_DIFFICULTY_GAP:
-        return None, f"too one-sided ({top.ev_vs_best_alt:+.1f} IMPs)"
-    if top.p_push > MAX_PUSH_RATE:
-        return None, "candidates transpose (all push)"
+    # 5. Adaptive DD + interestingness filter: solve prefix increments and
+    # stop as soon as the accept/reject decision is resolved.
+    denoms = needed_denoms(contracts_by_candidate)
+    needed_pairs = [
+        {(contracts[i].denom, contracts[i].declarer)
+         for contracts in contracts_by_candidate.values()
+         if not contracts[i].passed_out}
+        for i in range(len(deals))
+    ]
+    n_avail = len(deals)
+    checkpoints = sorted({min(c, n_avail) for c in DD_CHECKPOINTS}
+                         | {n_avail})
+    tricks: dict[tuple[str, str], np.ndarray] = {}
+    solved = 0
+    for k in checkpoints:
+        new = evaluator.solver.solve(deals[solved:k], denoms,
+                                     needed=needed_pairs[solved:k])
+        for key, arr in new.items():
+            tricks[key] = (np.concatenate([tricks[key], arr])
+                           if key in tricks else arr)
+        solved = k
+        evaluator.set_tricks(tricks, k)
+        weights = weights_all[:k]
+        raw_scores, corr_scores = {}, {}
+        for cand, contracts in contracts_by_candidate.items():
+            raw_scores[cand], corr_scores[cand] = evaluator.evaluate(
+                deals[:k], contracts[:k])
+        raw_cmp = compare_candidates(raw_scores, weights, ci_widen=ci_widen)
+        corr_cmp = compare_candidates(corr_scores, weights, ci_widen=ci_widen)
+        top = corr_cmp.candidates[0]
+
+        if k == n_avail:  # full set: the original point-estimate gates
+            if top.ev_vs_best_alt > MAX_DIFFICULTY_GAP:
+                return None, f"too one-sided ({top.ev_vs_best_alt:+.1f} IMPs)"
+            if top.p_push > MAX_PUSH_RATE:
+                return None, "candidates transpose (all push)"
+            break
+        # Interim: reject only when the gate is cleared by more than the CI.
+        if top.ev_vs_best_alt - top.ci_half_width > MAX_DIFFICULTY_GAP:
+            return None, (f"too one-sided ({top.ev_vs_best_alt:+.1f} IMPs, "
+                          f"n={k})")
+        if top.p_push > MAX_PUSH_RATE + EARLY_PUSH_MARGIN:
+            return None, f"candidates transpose (all push, n={k})"
+        # Accept early only when every gate is safely resolved AND the
+        # stats are publication-tight.
+        if (top.ev_vs_best_alt + top.ci_half_width <= MAX_DIFFICULTY_GAP
+                and top.ci_half_width <= EARLY_ACCEPT_CI
+                and top.p_push <= MAX_PUSH_RATE - EARLY_PUSH_MARGIN):
+            break
+    n_used = solved
 
     def rows(comp):
         return [{
@@ -303,7 +355,7 @@ def generate_problem(seed: int, n_deals: int = 600,
         "generator": {
             "bot_version": BOT_VERSION,
             "seed": seed,
-            "n_deals": len(deals),
+            "n_deals": n_used,
             "trainer_version": trainer_version,
         },
         "dealer": dealer,
@@ -321,7 +373,7 @@ def generate_problem(seed: int, n_deals: int = 600,
         },
         "difficulty": round(float(top.ev_vs_best_alt), 3),
         "quality": {
-            "ess": round(diag.effective_sample_size, 1),
+            "ess": round(float(weights.sum() ** 2 / (weights ** 2).sum()), 1),
             "acceptance": round(diag.acceptance_rate, 6),
             "shortfall": diag.shortfall,
             "interest": interest,
