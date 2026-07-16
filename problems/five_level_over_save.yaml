@@ -74,3 +74,11 @@ candidates:
       # A second pass ends the auction: 5H plays undoubled. (Under forcing-
       # pass agreements this option should not exist — the drill shows why.)
       - else: {contract: "5HE", terminal: false}
+
+family:
+  principle: >-
+    At the five level over their save, the forcing-pass structure means the
+    real choice is X vs 5S: pass opens a conversation, it is not a final
+    action; the offense-to-defense ratio of the hand decides.
+  publish: false      # v0: 5-level/sac genre quarantined (DD penalty bias)
+  never_verdict: ["P"]   # never crown a forcing-pass violation

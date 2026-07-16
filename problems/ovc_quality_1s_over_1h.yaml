@@ -121,3 +121,16 @@ candidates:
         contract: "2DN"
         terminal: true
       - else: {contract: "2CN", terminal: true}
+
+family:
+  principle: >-
+    A vulnerable one-level overcall is a bid of suit quality as much as
+    values: with a bad suit the overcall stakes lead-direction and
+    obstruction against -200 and lost flexibility; the hand's outside
+    strength and texture decide whether the bid or the discipline wins.
+  publish: true
+  audit:
+    - when: "me_spades_hcp >= 7"
+      reason: "suit is self-sufficient — 1S is automatic, not this lesson"
+    - when: "me_spades_hcp <= 1"
+      reason: "suit is degenerate — the problem collapses to P vs X"

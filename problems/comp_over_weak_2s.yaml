@@ -108,3 +108,13 @@ candidates:
         contract: "3SE"
         terminal: true
       - else: {contract: "3HS", terminal: true}
+
+family:
+  principle: >-
+    Direct-seat action over a weak two is a three-way choice where the
+    suit's quality and the hand's defensive shape decide between the
+    flexible double, the natural 3H, and the disciplined pass.
+  publish: true
+  audit:
+    - when: "me_hearts_hcp <= 3"
+      reason: "broken suit — 3H is not a candidate; different decision"

@@ -106,12 +106,26 @@ candidates:
         contract: "4SN"
         terminal: true
       # Default: partner signs off in 3S. The vulnerable opponents push to
-      # 4H only with the big fit opposite a sound opening; we double with
-      # defence.
-      - when: "opps_combined_hearts >= 10 and west_hcp >= 16 and me_hcp >= 9 and me_hearts >= 3"
+      # 4H on the same holdings as over a direct 3S (opener cannot tell
+      # whether 3S was direct or an X pulled to 3S): big fit opposite a
+      # sound opening, or a 7-card suit. We double with defence.
+      - when: "(opps_combined_hearts >= 10 and west_hcp >= 16 or west_hearts >= 7 and west_hcp >= 14) and me_hcp >= 9 and me_hearts >= 3"
         contract: "4HWx"
         terminal: false
-      - when: "opps_combined_hearts >= 10 and west_hcp >= 16"
+      - when: "opps_combined_hearts >= 10 and west_hcp >= 16 or west_hearts >= 7 and west_hcp >= 14"
         contract: "4HW"
         terminal: true
       - else: {contract: "3SN", terminal: true}
+
+family:
+  principle: >-
+    In competitive part-score battles with exactly three trumps, the choice
+    between selling out, competing to 3S, and a value-showing double turns on
+    where your high cards live: working aces with heart tolerance make X
+    attractive at favorable vulnerability, wasted heart honours argue for
+    defending undoubled, and pure offensive shape argues for 3S on the
+    eight-card fit.
+  publish: true
+  audit:
+    - when: "me_diamonds >= 6 or me_clubs >= 6"
+      reason: "long-minor hand — fit-jump/preempt decision, not this menu"

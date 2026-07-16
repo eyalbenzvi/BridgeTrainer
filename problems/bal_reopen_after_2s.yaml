@@ -86,9 +86,10 @@ candidates:
   - call: "3H"
     label: "Balance with 3H (natural)"
     projection:
-      # They take the Law push with the 9-card fit or a 6th trump in opener's
-      # hand; we are done at Both vulnerable.
-      - when: "west_spades >= 6 or opps_combined_spades >= 9 and east_hcp >= 8"
+      # They take the Law push on the same holdings as over an X-then-3H
+      # (they cannot tell the routes apart): the 9-card fit or a 6th trump
+      # in opener's hand; we are done at Both vulnerable.
+      - when: "west_spades >= 6 or east_spades >= 4 and opps_combined_spades >= 9"
         contract: "3SW"
         terminal: true
       # Partner raises a balancing 3H to game only with a fitting maximum.
@@ -100,3 +101,15 @@ candidates:
         contract: "3HNx"
         terminal: false
       - else: {contract: "3HN", terminal: true}
+
+family:
+  principle: >-
+    In the balancing seat protection borrows a king: whether to reopen with
+    X, bid a natural 3H, or sell out to 2S turns on trump texture, the
+    misfit risk when partner is broke, and the Law at the three level.
+  publish: true
+  audit:
+    - when: "me_diamonds >= 5 or me_clubs >= 5"
+      reason: "second suit live — two-suited actions enter; not this menu"
+    - when: "me_hcp >= 10 and me_hearts_hcp >= 6"
+      reason: "would have overcalled 2H directly — the stem pass is fictional"
