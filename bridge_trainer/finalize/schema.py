@@ -132,6 +132,17 @@ def validate_finalization(doc: dict, hero: str) -> None:
         raise FinalizationError(f"category must be one of {CATEGORIES}")
     if not (doc.get("explanation") or "").strip():
         raise FinalizationError("explanation is required")
+    opt_notes = doc.get("option_explanations")
+    if opt_notes is not None:
+        if set(opt_notes) != set(options):
+            raise FinalizationError(
+                "option_explanations must cover exactly the options")
+        for opt, spec in opt_notes.items():
+            if not (spec.get("shows") or "").strip() \
+                    or not (spec.get("partner") or "").strip():
+                raise FinalizationError(
+                    f"option_explanations[{opt!r}] needs 'shows' and "
+                    f"'partner' texts")
 
 
 def meanings_to_profile(meanings: dict) -> ConstraintProfile:
@@ -202,6 +213,11 @@ def build_record(
     validate_finalization(doc, hero)
     options = list(doc["options"])
     deviations = normalize_deviations(doc)
+    stem_notes = doc.get("stem_explanations")
+    if stem_notes is not None and len(stem_notes) != len(stem):
+        raise FinalizationError(
+            f"stem_explanations must have one entry per stem call "
+            f"({len(stem_notes)} notes for {len(stem)} calls)")
     # V1 hard shell: mechanical auction legality of every option and every
     # continuation leaf. Never trusted to an author.
     validate_options_against_state(dealer, stem, hero, options,
@@ -365,6 +381,8 @@ def build_record(
         "candidates": options,
         "category": doc.get("category", "other"),
         "deviations": deviations,
+        "auction_notes": stem_notes,
+        "option_notes": doc.get("option_explanations"),
         "verdict": {
             "accepted": accepted,
             "toss_up": toss_up,

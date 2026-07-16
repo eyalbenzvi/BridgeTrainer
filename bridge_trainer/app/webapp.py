@@ -71,6 +71,9 @@ button.cand.good { border-color: #2c9e5f; background: #2c9e5f22; }
 button.cand.bad { border-color: #d3455b; background: #d3455b22; }
 #verdict { display: none; }
 #explanation { white-space: pre-line; }
+.notes ul { margin: 8px 0 0; padding-left: 18px; }
+.notes li { margin: 7px 0; line-height: 1.35; }
+.notes summary { cursor: pointer; }
 .headline { font-size: 1.2em; font-weight: bold; margin: .4em 0; }
 .fog { background: #ffdd5733; border: 1px solid #cca42f88; border-radius: 8px;
        padding: .6em .8em; margin: .6em 0; }
@@ -210,6 +213,12 @@ def _problem_html() -> str:
 <span class="muted" id="meta"></span>
 </div>
 <div id="problem"></div>
+<details class="card notes" id="auction-notes" style="display:none">
+<summary class="muted">What the auction showed, bid by bid</summary>
+<ul id="auction-notes-list"></ul></details>
+<details class="card notes" id="option-notes" style="display:none">
+<summary class="muted">What would each bid show?</summary>
+<ul id="option-notes-list"></ul></details>
 <div class="candidates" id="cands"></div>
 <div id="verdict" class="card">
 <div class="headline" id="headline"></div>
@@ -302,6 +311,29 @@ async function init() {{
     b.innerHTML = c === "X" ? "Double" : callHtml(c);
     b.onclick = () => choose(b);
     cands.appendChild(b);
+  }}
+  if (P.auction_notes && P.auction_notes.length === P.auction.length) {{
+    const seats = ["N", "E", "S", "W"];
+    let seat = P.dealer, items = "";
+    P.auction.forEach((tok, i) => {{
+      const who = seat === P.seat ? "You" : seat;
+      items += `<li><b>${{who}} ${{callHtml(tok)}}</b> \\u2014 ` +
+               `${{P.auction_notes[i]}}</li>`;
+      seat = seats[(seats.indexOf(seat) + 1) % 4];
+    }});
+    document.getElementById("auction-notes-list").innerHTML = items;
+    document.getElementById("auction-notes").style.display = "block";
+  }}
+  if (P.option_notes) {{
+    document.getElementById("option-notes-list").innerHTML =
+      P.candidates.map(c => {{
+        const n = P.option_notes[c];
+        if (!n) return "";
+        return `<li><b>${{c === "X" ? "Double" : callHtml(c)}}</b> \\u2014 ` +
+               `${{n.shows}}<br><small class="muted">Partner: ` +
+               `${{n.partner}}</small></li>`;
+      }}).join("");
+    document.getElementById("option-notes").style.display = "block";
   }}
   document.getElementById("next").onclick = async () => {{
     if (!INDEX) INDEX = await fetchIndex();

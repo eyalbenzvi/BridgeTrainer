@@ -1,0 +1,532 @@
+[
+ {
+  "lin": "50011",
+  "board": 14,
+  "dealer": "E",
+  "vul": "None",
+  "hero": "S",
+  "hands": {
+   "S": "954.AKT976.AQ7.5",
+   "W": "A3.Q85.KJ3.QJT86",
+   "N": "KQ862..642.AK943",
+   "E": "JT7.J432.T985.72"
+  },
+  "stem": [
+   "P",
+   "1H",
+   "P",
+   "1S",
+   "P",
+   "2H",
+   "P",
+   "3C",
+   "P"
+  ],
+  "event": "BBO4-2017WBTC,BB-RR5",
+  "teams": "INDIA v INDONESIA",
+  "room_calls": {
+   "o": "3S",
+   "c": "3NT"
+  },
+  "room_contracts": {
+   "o": "4SN",
+   "c": "3NTS"
+  },
+  "room_results": {
+   "o": "4SN=",
+   "c": "3NS+1"
+  }
+ },
+ {
+  "lin": "50007",
+  "board": 23,
+  "dealer": "S",
+  "vul": "Both",
+  "hero": "S",
+  "hands": {
+   "S": "KT962.6.AK75.Q87",
+   "W": "AQ843.K32.632.64",
+   "N": ".AJ97.QJ94.KJT92",
+   "E": "J75.QT854.T8.A53"
+  },
+  "stem": [
+   "1S",
+   "P",
+   "2C",
+   "P",
+   "2D",
+   "P",
+   "3D",
+   "P"
+  ],
+  "event": "FB5-2017WBTC,VC-RR4",
+  "teams": "BRAZIL v FRANCE",
+  "room_calls": {
+   "o": "3H",
+   "c": "3S"
+  },
+  "room_contracts": {
+   "o": "6DS",
+   "c": "5DS"
+  },
+  "room_results": {
+   "o": "",
+   "c": ""
+  }
+ },
+ {
+  "lin": "50015",
+  "board": 7,
+  "dealer": "S",
+  "vul": "Both",
+  "hero": "S",
+  "hands": {
+   "S": "T8542.T986.AQ4.6",
+   "W": "Q6.K742.T63.A953",
+   "N": "A973.QJ53.KJ5.KJ",
+   "E": "KJ.A.9872.QT8742"
+  },
+  "stem": [
+   "P",
+   "P",
+   "1NT",
+   "P",
+   "2C",
+   "P",
+   "2H",
+   "P"
+  ],
+  "event": "FB6-2017WBTC,BB-RR5",
+  "teams": "ITALY v NETHERLANDS",
+  "room_calls": {
+   "o": "3H",
+   "c": "4H"
+  },
+  "room_contracts": {
+   "o": "3HN",
+   "c": "4HN"
+  },
+  "room_results": {
+   "o": "3HN+1",
+   "c": "4HN-1"
+  }
+ },
+ {
+  "lin": "50000",
+  "board": 8,
+  "dealer": "W",
+  "vul": "None",
+  "hero": "S",
+  "hands": {
+   "S": "Q42.KJT86.T82.T3",
+   "W": "K876.52.AQ9743.4",
+   "N": "T953.AQ.KJ5.AQ92",
+   "E": "AJ.9743.6.KJ8765"
+  },
+  "stem": [
+   "P",
+   "1NT",
+   "P",
+   "2D",
+   "X",
+   "P",
+   "P"
+  ],
+  "event": "FB6-2017WBTC,VC-RR3",
+  "teams": "FRANCE v ISRAEL",
+  "room_calls": {
+   "o": "2H",
+   "c": "XX"
+  },
+  "room_contracts": {
+   "o": "2HS",
+   "c": "2SW"
+  },
+  "room_results": {
+   "o": "2HS-3",
+   "c": "2SW-3"
+  }
+ },
+ {
+  "lin": "50003",
+  "board": 32,
+  "dealer": "W",
+  "vul": "EW",
+  "hero": "E",
+  "hands": {
+   "S": "KJT7.T92.8654.QT",
+   "W": "9643.85.KQ3.6543",
+   "N": "A2.764.JT72.KJ97",
+   "E": "Q85.AKQJ3.A9.A82"
+  },
+  "stem": [
+   "P",
+   "P",
+   "2NT",
+   "P",
+   "3C",
+   "P"
+  ],
+  "event": "BBO3-2017WBTC,BB-RR4",
+  "teams": "AUSTRALIA v BRAZIL",
+  "room_calls": {
+   "o": "3NT",
+   "c": "3H"
+  },
+  "room_contracts": {
+   "o": "3NTE",
+   "c": "3NTE"
+  },
+  "room_results": {
+   "o": "",
+   "c": ""
+  }
+ },
+ {
+  "lin": "50007",
+  "board": 31,
+  "dealer": "S",
+  "vul": "NS",
+  "hero": "N",
+  "hands": {
+   "S": "862.T3.AT6.AKJ93",
+   "W": "K5.AJ7.QJ84.T875",
+   "N": "AJ943.Q85.93.Q64",
+   "E": "QT7.K9642.K752.2"
+  },
+  "stem": [
+   "1C",
+   "P",
+   "1S",
+   "P",
+   "1NT",
+   "P"
+  ],
+  "event": "FB5-2017WBTC,VC-RR4",
+  "teams": "BRAZIL v FRANCE",
+  "room_calls": {
+   "o": "P",
+   "c": "2S"
+  },
+  "room_contracts": {
+   "o": "1NTS",
+   "c": "2SN"
+  },
+  "room_results": {
+   "o": "",
+   "c": ""
+  }
+ },
+ {
+  "lin": "50024",
+  "board": 25,
+  "dealer": "N",
+  "vul": "EW",
+  "hero": "S",
+  "hands": {
+   "S": "J2.K632.AK62.973",
+   "W": "A64.987.T873.T84",
+   "N": "QT873.QJT5.Q.KQ2",
+   "E": "K95.A4.J954.AJ65"
+  },
+  "stem": [
+   "1S",
+   "P",
+   "1NT",
+   "P",
+   "2H",
+   "P"
+  ],
+  "event": "OG8-2017WBTC,VC-RR6",
+  "teams": "CHINA v SWEDEN",
+  "room_calls": {
+   "o": "3H",
+   "c": "4H"
+  },
+  "room_contracts": {
+   "o": "3HN",
+   "c": "4HN"
+  },
+  "room_results": {
+   "o": "",
+   "c": ""
+  }
+ },
+ {
+  "lin": "50006",
+  "board": 27,
+  "dealer": "S",
+  "vul": "None",
+  "hero": "W",
+  "hands": {
+   "S": "KQ7653.KT3.943.3",
+   "W": "AJT9.9.AQJ762.64",
+   "N": "4.J8652.K85.T987",
+   "E": "82.AQ74.T.AKQJ52"
+  },
+  "stem": [
+   "2S",
+   "3D",
+   "P",
+   "4C",
+   "P"
+  ],
+  "event": "BBO4-2017WBTC,OT-RR4",
+  "teams": "JAPAN v CANADA",
+  "room_calls": {
+   "o": "4D",
+   "c": "4S"
+  },
+  "room_contracts": {
+   "o": "5CE",
+   "c": "6CE"
+  },
+  "room_results": {
+   "o": "",
+   "c": ""
+  }
+ },
+ {
+  "lin": "50000",
+  "board": 7,
+  "dealer": "S",
+  "vul": "Both",
+  "hero": "W",
+  "hands": {
+   "S": "KJT86.6.J962.854",
+   "W": "975.A973.K543.A6",
+   "N": "42.T52.AT8.QJT32",
+   "E": "AQ3.KQJ84.Q7.K97"
+  },
+  "stem": [
+   "P"
+  ],
+  "event": "FB6-2017WBTC,VC-RR3",
+  "teams": "FRANCE v ISRAEL",
+  "room_calls": {
+   "o": "P",
+   "c": "1D"
+  },
+  "room_contracts": {
+   "o": "4HE",
+   "c": "4HE"
+  },
+  "room_results": {
+   "o": "4HE=",
+   "c": "4HE="
+  }
+ },
+ {
+  "lin": "50000",
+  "board": 13,
+  "dealer": "N",
+  "vul": "Both",
+  "hero": "E",
+  "hands": {
+   "S": "43.A53.9753.9853",
+   "W": "QJT9872.7.KT.AJ6",
+   "N": "6.QT9864.J86.T42",
+   "E": "AK5.KJ2.AQ42.KQ7"
+  },
+  "stem": [
+   "P"
+  ],
+  "event": "FB6-2017WBTC,VC-RR3",
+  "teams": "FRANCE v ISRAEL",
+  "room_calls": {
+   "o": "2NT",
+   "c": "2D"
+  },
+  "room_contracts": {
+   "o": "6SE",
+   "c": "6SE"
+  },
+  "room_results": {
+   "o": "6SE+1",
+   "c": "6SE+1"
+  }
+ },
+ {
+  "lin": "50006",
+  "board": 19,
+  "dealer": "S",
+  "vul": "EW",
+  "hero": "W",
+  "hands": {
+   "S": "Q743.J9.QJ75.T54",
+   "W": "AK98.A865.K64.K2",
+   "N": "JT2.QT3.A983.AQJ",
+   "E": "65.K742.T2.98763"
+  },
+  "stem": [
+   "P"
+  ],
+  "event": "BBO4-2017WBTC,OT-RR4",
+  "teams": "JAPAN v CANADA",
+  "room_calls": {
+   "o": "1D",
+   "c": "1NT"
+  },
+  "room_contracts": {
+   "o": "1NTN",
+   "c": "1NTW"
+  },
+  "room_results": {
+   "o": "",
+   "c": ""
+  }
+ },
+ {
+  "lin": "50012",
+  "board": 16,
+  "dealer": "W",
+  "vul": "EW",
+  "hero": "N",
+  "hands": {
+   "S": "Q53.KJ5.A82.T965",
+   "W": "KJ976.93.764.J43",
+   "N": "T84.AT2.KJT5.A72",
+   "E": "A2.Q8764.Q93.KQ8"
+  },
+  "stem": [
+   "P"
+  ],
+  "event": "VG1-2017WBTC,BB-RR5",
+  "teams": "CHINA v FRANCE",
+  "room_calls": {
+   "o": "1D",
+   "c": "1NT"
+  },
+  "room_contracts": {
+   "o": "1NTS",
+   "c": "1NTN"
+  },
+  "room_results": {
+   "o": "1NS+1",
+   "c": "1NN="
+  }
+ },
+ {
+  "lin": "50020",
+  "board": 17,
+  "dealer": "N",
+  "vul": "None",
+  "hero": "E",
+  "hands": {
+   "S": "J62.QT8642.A.876",
+   "W": "KQT.A3.J9652.KT2",
+   "N": "A98754.K97.73.A5",
+   "E": "3.J5.KQT84.QJ943"
+  },
+  "stem": [
+   "1S"
+  ],
+  "event": "FB7-2017WBTC,BB-RR6",
+  "teams": "MEXICO v FRANCE",
+  "room_calls": {
+   "o": "P",
+   "c": "2NT"
+  },
+  "room_contracts": {
+   "o": "5DWx",
+   "c": "5DW"
+  },
+  "room_results": {
+   "o": "",
+   "c": ""
+  }
+ },
+ {
+  "lin": "50007",
+  "board": 22,
+  "dealer": "E",
+  "vul": "EW",
+  "hero": "W",
+  "hands": {
+   "S": "QJ2.8743.AKQ5.A7",
+   "W": "T7.AJT952.J.6432",
+   "N": "9643.K.98763.QJ5",
+   "E": "AK85.Q6.T42.KT98"
+  },
+  "stem": [
+   "1C",
+   "1NT"
+  ],
+  "event": "FB5-2017WBTC,VC-RR4",
+  "teams": "BRAZIL v FRANCE",
+  "room_calls": {
+   "o": "2D",
+   "c": "P"
+  },
+  "room_contracts": {
+   "o": "3DS",
+   "c": "1NTS"
+  },
+  "room_results": {
+   "o": "",
+   "c": ""
+  }
+ },
+ {
+  "lin": "50011",
+  "board": 12,
+  "dealer": "W",
+  "vul": "NS",
+  "hero": "E",
+  "hands": {
+   "S": "T.8652.KT976.K95",
+   "W": "Q97654.K.Q3.AJT3",
+   "N": "AK.QJT43.J52.864",
+   "E": "J832.A97.A84.Q72"
+  },
+  "stem": [
+   "1S",
+   "P"
+  ],
+  "event": "BBO4-2017WBTC,BB-RR5",
+  "teams": "INDIA v INDONESIA",
+  "room_calls": {
+   "o": "3H",
+   "c": "3S"
+  },
+  "room_contracts": {
+   "o": "4SW",
+   "c": "4SW"
+  },
+  "room_results": {
+   "o": "4SW+1",
+   "c": "4SW+1"
+  }
+ },
+ {
+  "lin": "50012",
+  "board": 6,
+  "dealer": "E",
+  "vul": "EW",
+  "hero": "W",
+  "hands": {
+   "S": "KJ765.Q72.A6.A52",
+   "W": "T98.9653.JT2.964",
+   "N": "A32.84.KQ93.JT73",
+   "E": "Q4.AKJT.8754.KQ8"
+  },
+  "stem": [
+   "1NT",
+   "P"
+  ],
+  "event": "VG1-2017WBTC,BB-RR5",
+  "teams": "CHINA v FRANCE",
+  "room_calls": {
+   "o": "P",
+   "c": "2C"
+  },
+  "room_contracts": {
+   "o": "1NTE",
+   "c": "2HE"
+  },
+  "room_results": {
+   "o": "1NE-4",
+   "c": "2HE-1"
+  }
+ }
+]

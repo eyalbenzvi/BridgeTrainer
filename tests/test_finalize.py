@@ -24,6 +24,13 @@ DOC = dict(
                {"else": {"contract": "3SN"}}],
     },
     explanation="Compete or defend on the eight-card fit.",
+    stem_explanations=["11-19, 5+ hearts", "8-16, 5+ spades",
+                       "weak raise, 4+ hearts"],
+    option_explanations={
+        "P": {"shows": "nothing to add", "partner": "the auction ends"},
+        "3S": {"shows": "competing on the fit",
+               "partner": "passes almost always; 4S with a max and shape"},
+    },
 )
 
 
@@ -59,6 +66,25 @@ def test_build_record_end_to_end():
     assert {r["action"] for r in v["corrected"]} == {"P", "3S"}
     assert rec["explanation"]
     assert rec["meanings"][0]["meaning"]
+    assert rec["auction_notes"] == DOC["stem_explanations"]
+    assert rec["option_notes"]["3S"]["partner"].startswith("passes")
+
+
+def test_notes_validation():
+    bad_len = {**DOC, "stem_explanations": ["one note only"]}
+    with pytest.raises(FinalizationError):
+        build_record(problem_id="t1", dealer="W", vul="EW", hero="S",
+                     hands=HANDS, stem=["1H", "1S", "3H"], doc=bad_len,
+                     n_deals=60, seed=5)
+    with pytest.raises(FinalizationError):  # must cover exactly the options
+        validate_finalization(
+            {**DOC, "option_explanations": {"P": {"shows": "x",
+                                                  "partner": "y"}}}, "S")
+    with pytest.raises(FinalizationError):  # both texts required
+        validate_finalization(
+            {**DOC, "option_explanations": {
+                "P": {"shows": "x", "partner": "y"},
+                "3S": {"shows": "", "partner": "y"}}}, "S")
 
 
 def test_build_record_deterministic():

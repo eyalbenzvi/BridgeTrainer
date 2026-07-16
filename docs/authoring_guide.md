@@ -97,3 +97,21 @@ bounce it unless the margin is genuinely close.
   it in prose: what licenses the lie, and what partner will assume.
 - Teach one transferable principle per problem, in a strong club
   player's language.
+
+## Bid-by-bid and option notes (shown to the user BEFORE answering)
+
+Every document carries two more fields; both are table-legal
+information (opponents' meanings are disclosed at the table, and the
+hero knows their own system):
+
+- `stem_explanations` — one short note per stem call, in order,
+  including passes ("nothing to say — could still hold up to 11").
+  Each note states what the CALL showed/denied, not what the hand is.
+- `option_explanations` — `{option: {"shows": ..., "partner": ...}}`.
+  `shows` is the systemic meaning of the call from partner's seat;
+  `partner` is the expected continuation pattern ("invitational —
+  partner passes a minimum, bids game with 14+"). For deviating
+  options, `shows` states what partner will BELIEVE (the card meaning),
+  which is exactly the risk being priced.
+These are pre-answer text: they must never hint at the verdict, the
+margins, or which option the simulation prefers.

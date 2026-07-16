@@ -1,6 +1,6 @@
-"""Judge the fixer's rebuilt docs (batch b2) through the hardened shell.
+"""Judge finalization docs through the hardened shell + DD stack.
 
-Usage: python3 scripts/judge_fixed.py <fixed_docs.json> <out_dir>
+Usage: python3 scripts/judge_docs.py <spots.json> <docs.json> <out_dir>
 Writes one record JSON per surviving problem plus a report to stdout.
 Explanations on these records are DRAFTS — the post-verdict writer +
 prose linter installs the shipping text before deployment.
@@ -12,10 +12,11 @@ from pathlib import Path
 from bridge_trainer.finalize.batch import dedupe_deals, judge_spot
 from bridge_trainer.finalize.schema import FinalizationError
 
-fixed_path, out_dir = Path(sys.argv[1]), Path(sys.argv[2])
-docs = json.loads(fixed_path.read_text())
+spots_path, docs_path, out_dir = (Path(sys.argv[1]), Path(sys.argv[2]),
+                                  Path(sys.argv[3]))
+docs = json.loads(docs_path.read_text())
 spots = {f"{s['lin']}-{s['board']}": s
-         for s in json.load(open("batches/b1/spots.json"))}
+         for s in json.loads(spots_path.read_text())}
 
 records, failures = [], {}
 for key, doc in docs.items():
