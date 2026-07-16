@@ -1,0 +1,1908 @@
+{
+ "50000-13": {
+  "dilemma": true,
+  "options": [
+   "2NT",
+   "2C"
+  ],
+  "category": "game",
+  "meanings": {
+   "N": {
+    "note": "Dealt and passed: no opening bid, roughly 0-11 HCP.",
+    "hcp": [
+     0,
+     11,
+     [
+      [
+       12,
+       12,
+       0.2
+      ]
+     ]
+    ]
+   }
+  },
+  "projections": {
+   "2NT": [
+    {
+     "when": "partner_hcp >= 11",
+     "contract": "6NTE"
+    },
+    {
+     "when": "partner_hcp >= 5 and partner_hearts >= 5",
+     "contract": "4HE"
+    },
+    {
+     "when": "partner_hcp >= 5 and partner_spades >= 5",
+     "contract": "4SE"
+    },
+    {
+     "when": "partner_hcp >= 5",
+     "contract": "3NTE"
+    },
+    {
+     "when": "partner_hearts >= 5",
+     "contract": "3HE"
+    },
+    {
+     "when": "partner_spades >= 5",
+     "contract": "3SE"
+    },
+    {
+     "when": "partner_hcp <= 1 and opps_combined_hcp >= 17",
+     "contract": "2NTEx"
+    },
+    {
+     "else": {
+      "contract": "2NTE"
+     }
+    }
+   ],
+   "2C": [
+    {
+     "when": "partner_hcp >= 10",
+     "contract": "6NTE"
+    },
+    {
+     "when": "partner_hcp >= 3 and partner_hearts >= 5",
+     "contract": "4HE"
+    },
+    {
+     "when": "partner_hcp >= 3 and partner_spades >= 5",
+     "contract": "4SE"
+    },
+    {
+     "when": "partner_hcp >= 3",
+     "contract": "3NTE"
+    },
+    {
+     "when": "partner_hearts >= 5",
+     "contract": "3HE"
+    },
+    {
+     "when": "partner_spades >= 5",
+     "contract": "3SE"
+    },
+    {
+     "else": {
+      "contract": "2NTE"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "2NT": {
+    "note": "22 HCP is a point above the 20-21 card range; partner will value game and slam tries a point light.",
+    "kind": "judgment"
+   }
+  },
+  "stem_explanations": [
+   "Pass \u2014 North has no opening bid (roughly 0-11 HCP)."
+  ],
+  "option_explanations": {
+   "2NT": {
+    "shows": "20-21 balanced.",
+    "partner": "Partner passes with a bust, uses transfers/Stayman with a suit, raises to game with about 5+, and tries for slam with 11+."
+   },
+   "2C": {
+    "shows": "Artificial and strong; the planned 2NT rebid shows 22-24 balanced.",
+    "partner": "Partner must reply once (2D waiting); after the 2NT rebid partner bids game with as little as 3 and looks for slam with about 10+."
+   }
+  },
+  "explanation": "East holds a balanced 22-count (A-K-5, K-J-2, A-Q-4-2, K-Q-7) after North passes. 2NT (20-21) is a one-point underbid that saves a round of space and right-sides the hand immediately; the cost is missing thin games when partner holds 3-4 HCP and slightly light slam auctions. 2C followed by 2NT shows the full 22-24 but consumes bidding room and invites more aggressive continuations from partner."
+ },
+ "50000-7": {
+  "dilemma": true,
+  "options": [
+   "P",
+   "1D"
+  ],
+  "category": "opening-style",
+  "meanings": {
+   "S": {
+    "note": "Dealt and passed: no opening bid, roughly 0-11 HCP.",
+    "hcp": [
+     0,
+     11,
+     [
+      [
+       12,
+       12,
+       0.2
+      ]
+     ]
+    ]
+   }
+  },
+  "projections": {
+   "P": [
+    {
+     "when": "opps_combined_hcp >= 25 and north_hcp >= 12",
+     "contract": "3NTN"
+    },
+    {
+     "when": "north_hcp >= 12 and north_spades >= 5",
+     "contract": "2SN"
+    },
+    {
+     "when": "north_hcp >= 12 and north_hearts >= 5",
+     "contract": "2HN"
+    },
+    {
+     "when": "north_hcp >= 12",
+     "contract": "1NTN"
+    },
+    {
+     "when": "east_hcp >= 14",
+     "contract": "3NTE"
+    },
+    {
+     "when": "east_hcp >= 12 and east_spades >= 5",
+     "contract": "2SE"
+    },
+    {
+     "when": "east_hcp >= 12 and east_hearts >= 5",
+     "contract": "2HE"
+    },
+    {
+     "when": "east_hcp >= 12",
+     "contract": "2NTE"
+    },
+    {
+     "else": {
+      "contract": "P"
+     }
+    }
+   ],
+   "1D": [
+    {
+     "when": "east_hcp >= 14",
+     "contract": "3NTE"
+    },
+    {
+     "when": "east_hcp >= 11 and east_spades >= 5",
+     "contract": "2SE"
+    },
+    {
+     "when": "east_hcp >= 11 and east_hearts >= 5",
+     "contract": "2HE"
+    },
+    {
+     "when": "east_hcp >= 11",
+     "contract": "2NTE"
+    },
+    {
+     "when": "north_hcp >= 12 and north_spades >= 5",
+     "contract": "2SN"
+    },
+    {
+     "when": "north_hcp >= 12 and north_hearts >= 5",
+     "contract": "2HN"
+    },
+    {
+     "when": "east_hcp >= 6",
+     "contract": "1NTE"
+    },
+    {
+     "else": {
+      "contract": "1DW"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "1D": {
+    "note": "11 HCP is below a sound opening bid; partner will play West for 12+ and may drive too high.",
+    "kind": "judgment"
+   }
+  },
+  "stem_explanations": [
+   "Pass \u2014 South has no opening bid (roughly 0-11 HCP)."
+  ],
+  "option_explanations": {
+   "P": {
+    "shows": "No opening bid in second seat \u2014 fewer than 12 HCP or unsuitable shape.",
+    "partner": "Partner will place West with under opening values; East may still open in fourth seat and West must then limit the hand."
+   },
+   "1D": {
+    "shows": "An opening bid, 12-21 HCP with 3+ (usually 4+) diamonds.",
+    "partner": "Partner responds normally and will invite or drive toward game with 11-12+, expecting a full opener."
+   }
+  },
+  "explanation": "Second seat, both vulnerable, with a square 11-count: 9-7-5 spades, A-9-7-3 hearts, K-5-4-3 diamonds, A-6 clubs. Two aces and a working king argue for opening 1D despite the raw count; the flat 3-4-4-2 shape and lack of spot texture argue for passing and letting the auction come back. Passing risks being shut out or misjudging a later balance; opening risks partner overvaluing the hand at both-vulnerable."
+ },
+ "50000-8": {
+  "dilemma": true,
+  "options": [
+   "2H",
+   "XX"
+  ],
+  "category": "partscore",
+  "meanings": {
+   "N": {
+    "note": "1NT: 15-17 balanced. Pass of the lead-directing double: systemic - denies three-card heart support (with three+ hearts opener completes the transfer; with good diamonds opener redoubles).",
+    "hcp": [
+     15,
+     17
+    ],
+    "suits": {
+     "H": [
+      2,
+      2,
+      [
+       [
+        3,
+        3,
+        0.15
+       ]
+      ]
+     ],
+     "S": [
+      2,
+      5
+     ],
+     "D": [
+      2,
+      5
+     ],
+     "C": [
+      2,
+      5
+     ]
+    }
+   },
+   "W": {
+    "note": "Passed hand; double of the 2D transfer is lead-directing, showing length and real honor strength in diamonds.",
+    "hcp": [
+     5,
+     11
+    ],
+    "suits": {
+     "D": [
+      4,
+      6,
+      [
+       [
+        3,
+        3,
+        0.2
+       ]
+      ]
+     ]
+    },
+    "suit_hcp": {
+     "D": [
+      3,
+      10,
+      [
+       [
+        2,
+        2,
+        0.3
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  "projections": {
+   "2H": [
+    {
+     "when": "east_diamonds >= 4 and east_hcp >= 7 and opps_combined_diamonds >= 9",
+     "contract": "3DE"
+    },
+    {
+     "else": {
+      "contract": "2HS"
+     }
+    }
+   ],
+   "XX": [
+    {
+     "when": "east_diamonds >= 4 and east_hcp >= 7 and opps_combined_diamonds >= 9",
+     "contract": "3DE"
+    },
+    {
+     "else": {
+      "contract": "2HN"
+     }
+    }
+   ]
+  },
+  "deviations": {},
+  "stem_explanations": [
+   "Nothing to open.",
+   "15-17 balanced.",
+   "No action over 1NT.",
+   "Transfer to hearts - five or more hearts, any strength.",
+   "Lead-directing: length and honors in diamonds, wants a diamond lead.",
+   "Systemic pass - only two hearts (completing would promise three).",
+   "Nothing to add over the double."
+  ],
+  "option_explanations": {
+   "2H": {
+    "shows": "Sign-off: a weak hand with five-plus hearts, content to declare 2H from responder's side.",
+    "partner": "Partner passes; the opening lead comes through the strong 1NT hand."
+   },
+   "XX": {
+    "shows": "Re-transfer: demands that opener bid 2H so the strong balanced hand declares and the lead runs up to it.",
+    "partner": "Partner is forced to bid 2H, which hero will pass; opener declares."
+   }
+  },
+  "explanation": "After a transfer to hearts is doubled for a diamond lead and opener's pass denies three hearts, responder holds Q42 KJT86 T82 T3 and must still play 2H. The only real question is which side declares: bidding 2H directly puts the weak hand at the wheel, while the systemic redouble re-transfers so the 15-17 hand is protected from the marked diamond lead through it. Both rooms chose differently (2H vs XX), and the opponents may still compete in diamonds."
+ },
+ "50003-32": {
+  "dilemma": true,
+  "options": [
+   "3H",
+   "3NT"
+  ],
+  "category": "other",
+  "meanings": {
+   "W": {
+    "note": "Passed hand. 3C over 2NT: Puppet Stayman - game-going values opposite 20-21, normally at least one four-card major, checking for a 4-4 or 5-3 major fit.",
+    "hcp": [
+     4,
+     11
+    ],
+    "suits": {
+     "S": [
+      1,
+      5
+     ],
+     "H": [
+      1,
+      5
+     ]
+    }
+   }
+  },
+  "projections": {
+   "3H": [
+    {
+     "when": "west_hearts >= 3",
+     "contract": "4HE"
+    },
+    {
+     "else": {
+      "contract": "3NTE"
+     }
+    }
+   ],
+   "3NT": [
+    {
+     "when": "south_spades >= 6 and south_spades_hcp >= 7 and south_hcp >= 9",
+     "contract": "3NTEx"
+    },
+    {
+     "else": {
+      "contract": "3NTE"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "3NT": {
+    "note": "The Puppet 3NT response denies any four- or five-card major; hero conceals a five-card heart suit headed by AKQJ, so a 5-3 or 5-4 heart fit will be lost.",
+    "kind": "card_violation"
+   }
+  },
+  "stem_explanations": [
+   "Nothing to open as a passed hand.",
+   "No action.",
+   "20-21 balanced; may contain a five-card major.",
+   "Silent.",
+   "Puppet Stayman - looking for a four- or five-card major, game values.",
+   "Silent throughout."
+  ],
+  "option_explanations": {
+   "3H": {
+    "shows": "The systemic answer: exactly five hearts.",
+    "partner": "Partner raises to 4H with three-card (or better) support, signs off in 3NT without it."
+   },
+   "3NT": {
+    "shows": "No four-card and no five-card major - a pure notrump hand.",
+    "partner": "Partner passes; any heart fit stays hidden and the strong hand declares 3NT with its majors undisclosed."
+   }
+  },
+  "explanation": "A 20-count with AKQJ3 of hearts opened 2NT and now faces Puppet Stayman from a passed-hand partner. The book call is 3H, finding every 5-3 fit; the alternative is a deliberate 3NT, denying a major, on the theory that a 5332 with a running suit and three outside aces plays notrump well and keeps the lead coming up to the tenaces. The two world-class rooms split exactly this way (3H vs 3NT)."
+ },
+ "50006-19": {
+  "dilemma": true,
+  "options": [
+   "1NT",
+   "1D"
+  ],
+  "category": "opening-style",
+  "meanings": {
+   "S": {
+    "note": "Dealt and passed: no opening bid, roughly 0-11 HCP.",
+    "hcp": [
+     0,
+     11,
+     [
+      [
+       12,
+       12,
+       0.2
+      ]
+     ]
+    ]
+   }
+  },
+  "projections": {
+   "1NT": [
+    {
+     "when": "partner_hcp >= 8 and partner_hearts >= 4",
+     "contract": "4HW"
+    },
+    {
+     "when": "partner_hcp >= 8 and partner_spades >= 4",
+     "contract": "4SW"
+    },
+    {
+     "when": "partner_hcp >= 8",
+     "contract": "3NTW"
+    },
+    {
+     "when": "north_hcp >= 11 and north_spades >= 6",
+     "contract": "2SN"
+    },
+    {
+     "when": "north_hcp >= 11 and north_hearts >= 6",
+     "contract": "2HN"
+    },
+    {
+     "when": "partner_hearts >= 5",
+     "contract": "2HW"
+    },
+    {
+     "when": "partner_spades >= 5",
+     "contract": "2SW"
+    },
+    {
+     "else": {
+      "contract": "1NTW"
+     }
+    }
+   ],
+   "1D": [
+    {
+     "when": "partner_hcp >= 8 and partner_hearts >= 4",
+     "contract": "4HE"
+    },
+    {
+     "when": "partner_hcp >= 8 and partner_spades >= 4",
+     "contract": "4SE"
+    },
+    {
+     "when": "partner_hcp >= 8",
+     "contract": "3NTE"
+    },
+    {
+     "when": "partner_hcp >= 5 and partner_hearts >= 4",
+     "contract": "3HE"
+    },
+    {
+     "when": "partner_hcp >= 5 and partner_spades >= 4",
+     "contract": "3SE"
+    },
+    {
+     "when": "north_hcp >= 10 and north_spades >= 5",
+     "contract": "2SN"
+    },
+    {
+     "when": "north_hcp >= 10 and north_hearts >= 5",
+     "contract": "2HN"
+    },
+    {
+     "when": "partner_hcp >= 5",
+     "contract": "1NTE"
+    },
+    {
+     "else": {
+      "contract": "1DW"
+     }
+    }
+   ]
+  },
+  "deviations": {},
+  "stem_explanations": [
+   "Pass \u2014 South has no opening bid (roughly 0-11 HCP)."
+  ],
+  "option_explanations": {
+   "1NT": {
+    "shows": "15-17 balanced; may contain one or two 4-card majors.",
+    "partner": "Partner passes weak balanced hands, transfers with a 5-card major, and raises toward 3NT/game with about 8+."
+   },
+   "1D": {
+    "shows": "An opening bid, 12-21 HCP, 3+ diamonds (exactly three only with 4-4-3-2).",
+    "partner": "Partner responds a 4-card major up the line; opener raises with 4-card support and shows 17 by inviting or driving on."
+   }
+  },
+  "explanation": "West holds A-K-9-8, A-8-6-5, K-6-4, K-2 \u2014 17 HCP, 4-4 in the majors, 4-4-3-2 \u2014 after South passes. Opening 1NT describes the strength in one bid and protects the tenaces, but can bury a 4-4 major fit unless partner can use Stayman. Opening 1D (convenient three-card suit) keeps both majors in play via cheap raises, but the hand has no comfortable rebid over a 2-level response and may get overboard or underbid later."
+ },
+ "50006-27": {
+  "dilemma": true,
+  "options": [
+   "4D",
+   "4S",
+   "5D"
+  ],
+  "category": "slam",
+  "meanings": {
+   "S": {
+    "note": "Weak two: six spades (occasionally a good five), 5-10 HCP, nonvulnerable.",
+    "hcp": [
+     5,
+     10
+    ],
+    "suits": {
+     "S": [
+      6,
+      6,
+      [
+       [
+        5,
+        5,
+        0.3
+       ]
+      ]
+     ]
+    }
+   },
+   "E": {
+    "note": "4C over the 3D overcall: natural, good five-plus (usually six) clubs, forcing one round, constructive values - roughly opening strength, typically diamond tolerance.",
+    "hcp": [
+     11,
+     17,
+     [
+      [
+       10,
+       10,
+       0.4
+      ]
+     ]
+    ],
+    "suits": {
+     "C": [
+      5,
+      7
+     ],
+     "S": [
+      0,
+      3
+     ],
+     "H": [
+      0,
+      4
+     ]
+    }
+   }
+  },
+  "projections": {
+   "4D": [
+    {
+     "when": "east_hcp >= 14 and east_diamonds >= 3",
+     "contract": "5DW"
+    },
+    {
+     "when": "east_clubs >= 7 and east_hcp >= 12",
+     "contract": "5CE"
+    },
+    {
+     "else": {
+      "contract": "4DW"
+     }
+    }
+   ],
+   "4S": [
+    {
+     "when": "east_hcp >= 14 and east_diamonds >= 3",
+     "contract": "6DW"
+    },
+    {
+     "when": "east_hcp >= 14 and east_clubs >= 6",
+     "contract": "6CE"
+    },
+    {
+     "when": "east_clubs >= 7 and east_hcp >= 12",
+     "contract": "5CE"
+    },
+    {
+     "else": {
+      "contract": "5DW"
+     }
+    }
+   ],
+   "5D": [
+    {
+     "when": "east_hcp >= 14 and east_diamonds >= 3",
+     "contract": "6DW"
+    },
+    {
+     "else": {
+      "contract": "5DW"
+     }
+    }
+   ]
+  },
+  "deviations": {},
+  "stem_explanations": [
+   "Weak two: six spades, 5-10 HCP.",
+   "Overcall: good five-plus diamonds, opening values or better.",
+   "Nothing to say over 3D.",
+   "Natural clubs, forcing - a good suit and constructive values opposite the overcall.",
+   "Nothing to add."
+  ],
+  "option_explanations": {
+   "4D": {
+    "shows": "Rebiddable six-card diamonds, a minimum overcall - the mildest continuation, passable by agreement.",
+    "partner": "Partner passes with an ordinary 4C bid, raises to 5D or insists on clubs with extras."
+   },
+   "4S": {
+    "shows": "A cue-bid of the enemy suit: first-round spade control and slam interest with a minor-suit fit - it cannot be natural facing a weak two on hero's right.",
+    "partner": "Partner is forced onward: cue-bids or drives to six with extras, otherwise signs off at the five level in a minor."
+   },
+   "5D": {
+    "shows": "A self-sufficient diamond suit and a hand upgraded by the club fit - game bid, mild slam suggestion.",
+    "partner": "Partner passes normally, raising to 6D only with clear extras and diamond support."
+   }
+  },
+  "explanation": "Over South's nonvulnerable weak 2S, hero overcalled 3D on AJT9 9 AQJ762 64 and partner forced with 4C. The spade AJT9 sits over the preempter and the hand has six strong diamonds with a singleton heart: the choice is a minimum-sounding 4D, a spade cue-bid agreeing a minor and inviting slam, or a direct jump to 5D. Both world-class rooms chose differently (4D vs 4S)."
+ },
+ "50007-22": {
+  "dilemma": true,
+  "options": [
+   "P",
+   "2H",
+   "X"
+  ],
+  "category": "partscore",
+  "meanings": {
+   "E": {
+    "note": "1C: natural, 3+ clubs, 11-21 HCP; denies a 5-card major.",
+    "hcp": [
+     11,
+     21,
+     [
+      [
+       10,
+       10,
+       0.3
+      ]
+     ]
+    ],
+    "suits": {
+     "C": [
+      3,
+      8,
+      []
+     ]
+    },
+    "denials": [
+     [
+      11,
+      21,
+      "S",
+      5,
+      0.15
+     ],
+     [
+      11,
+      21,
+      "H",
+      5,
+      0.15
+     ]
+    ]
+   },
+   "S": {
+    "note": "1NT overcall: 15-18 balanced with at least one club stopper.",
+    "hcp": [
+     15,
+     18,
+     [
+      [
+       14,
+       14,
+       0.3
+      ],
+      [
+       19,
+       19,
+       0.3
+      ]
+     ]
+    ],
+    "suits": {
+     "S": [
+      2,
+      5,
+      []
+     ],
+     "H": [
+      2,
+      5,
+      []
+     ],
+     "D": [
+      2,
+      5,
+      []
+     ],
+     "C": [
+      2,
+      6,
+      []
+     ]
+    },
+    "suit_hcp": {
+     "C": [
+      3,
+      10,
+      [
+       [
+        2,
+        2,
+        0.4
+       ]
+      ]
+     ]
+    }
+   }
+  },
+  "projections": {
+   "P": [
+    {
+     "when": "north_hcp >= 8",
+     "contract": "3NTS"
+    },
+    {
+     "when": "north_hcp >= 5 and north_spades >= 5",
+     "contract": "2SN"
+    },
+    {
+     "when": "partner_hcp >= 17 and partner_clubs >= 6",
+     "contract": "2CE"
+    },
+    {
+     "else": {
+      "contract": "1NTS"
+     }
+    }
+   ],
+   "2H": [
+    {
+     "when": "north_hcp >= 8",
+     "contract": "3NTS"
+    },
+    {
+     "when": "north_hcp >= 5 and north_spades >= 5",
+     "contract": "2SN"
+    },
+    {
+     "when": "south_hcp >= 17 and north_hcp >= 6",
+     "contract": "2HWx"
+    },
+    {
+     "when": "partner_hcp >= 16 and partner_hearts >= 3",
+     "contract": "4HW"
+    },
+    {
+     "else": {
+      "contract": "2HW"
+     }
+    }
+   ],
+   "X": [
+    {
+     "when": "north_hcp >= 6 and north_spades >= 5",
+     "contract": "2SN"
+    },
+    {
+     "when": "north_hcp >= 6 and north_diamonds >= 6",
+     "contract": "2DN"
+    },
+    {
+     "else": {
+      "contract": "1NTSx"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "X": {
+    "note": "The penalty double normally shows about 9+ HCP; this is 6 with a long suit \u2014 it banks on the hearts running and partner's opening values.",
+    "kind": "judgment"
+   }
+  },
+  "stem_explanations": [
+   "1C \u2014 natural, 3+ clubs, 11-21 HCP; no 5-card major.",
+   "1NT \u2014 direct overcall, 15-18 balanced with a club stopper."
+  ],
+  "option_explanations": {
+   "P": {
+    "shows": "No suit worth showing and no interest in penalizing 1NT.",
+    "partner": "Partner will pass or reopen only with a shapely maximum; 1NT is likely to end the auction."
+   },
+   "2H": {
+    "shows": "Natural and competitive: a 5-6 card heart suit in a weak hand, not forcing.",
+    "partner": "Partner passes with most hands and raises only with a fitting maximum; the auction usually dies in 2H."
+   },
+   "X": {
+    "shows": "Penalty, about 9+ HCP sitting over the 1NT bidder, suggesting our side holds the balance of strength.",
+    "partner": "Partner is expected to pass and defend 1NT doubled with any balanced hand; opponents may run to a suit."
+   }
+  },
+  "explanation": "Partner opens 1C and RHO overcalls a strong 1NT (15-18); West holds T-7, A-J-T-9-5-2, J, 6-4-3-2 \u2014 6 HCP but a six-card heart suit headed by A-J-T-9. 2H is natural and competitive, taking the save-haven partscore while the suit is biddable at the two level. Pass sells out to 1NT, hoping to beat it on heart leads. The penalty double maximizes the score when 1NT is going down but is made two to three points light and East-West are vulnerable if the runout or redouble goes wrong."
+ },
+ "50007-23": {
+  "dilemma": true,
+  "options": [
+   "3S",
+   "3H",
+   "4D"
+  ],
+  "category": "game",
+  "meanings": {
+   "N": {
+    "note": "2C: game-forcing, 4+ clubs, 12+ HCP (good 11 possible). 3D: 4+ diamond support, minor-oriented, typically at most two spades (three-card support usually shows spade preference instead).",
+    "hcp": [
+     12,
+     20,
+     [
+      [
+       11,
+       11,
+       0.4
+      ]
+     ]
+    ],
+    "suits": {
+     "C": [
+      4,
+      6
+     ],
+     "D": [
+      4,
+      6
+     ],
+     "S": [
+      0,
+      2,
+      [
+       [
+        3,
+        3,
+        0.3
+       ]
+      ]
+     ],
+     "H": [
+      0,
+      4
+     ]
+    }
+   }
+  },
+  "projections": {
+   "3S": [
+    {
+     "when": "north_spades >= 2 and north_spades_hcp >= 2 and north_hcp >= 12",
+     "contract": "4SS"
+    },
+    {
+     "when": "north_hearts_hcp >= 4 and north_hcp >= 12",
+     "contract": "3NTN"
+    },
+    {
+     "else": {
+      "contract": "5DS"
+     }
+    }
+   ],
+   "3H": [
+    {
+     "when": "west_hearts >= 6 and west_hearts_hcp >= 6 and north_hearts_hcp >= 4 and north_hcp >= 12",
+     "contract": "3NTNx"
+    },
+    {
+     "when": "north_hearts_hcp >= 4 and north_hcp >= 12",
+     "contract": "3NTN"
+    },
+    {
+     "else": {
+      "contract": "5DS"
+     }
+    }
+   ],
+   "4D": [
+    {
+     "when": "north_hcp >= 15 and north_diamonds >= 4",
+     "contract": "6DS"
+    },
+    {
+     "else": {
+      "contract": "5DS"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "3H": {
+    "note": "In a game-forcing minor-fit auction a new suit at the three level shows a stopper or real values there for 3NT; hero holds a singleton heart, so partner will bid 3NT with as little as Qx of hearts.",
+    "kind": "card_violation"
+   }
+  },
+  "stem_explanations": [
+   "Five or more spades, 11-21 HCP.",
+   "No action over 1S.",
+   "Game-forcing, four or more clubs.",
+   "Nothing to say.",
+   "Second suit - four or more diamonds, unlimited.",
+   "Still silent.",
+   "Diamond raise, setting the minor-suit fit; game force continues.",
+   "Silent throughout."
+  ],
+  "option_explanations": {
+   "3S": {
+    "shows": "Extra spade length/quality - a five-card suit good enough to suggest spades as trumps despite partner's minor orientation.",
+    "partner": "Partner raises to 4S with a doubleton honor, bids 3NT with hearts under control, or falls back on the diamond fit."
+   },
+   "3H": {
+    "shows": "Heart values or a stopper, inviting partner to bid 3NT with complementary help there.",
+    "partner": "Partner bids 3NT with any heart help, otherwise continues describing toward 5D or a spade contract."
+   },
+   "4D": {
+    "shows": "A clear diamond raise with slam-suitable values - prime cards and no interest in 3NT.",
+    "partner": "Partner cue-bids toward 6D with extras, signs off in 5D with a balanced game force. Note 3NT is no longer available."
+   }
+  },
+  "explanation": "After 1S-2C; 2D-3D (game forcing), opener holds KT962 6 AK75 Q87. The strain question is acute: 3S offers the five-card major, 3H probes for 3NT despite the singleton heart, and 4D commits to the 4-4 diamond fit with slam interest. Both world-class rooms chose differently (3H vs 3S)."
+ },
+ "50007-31": {
+  "dilemma": true,
+  "options": [
+   "P",
+   "2S",
+   "2D",
+   "2NT"
+  ],
+  "category": "partscore",
+  "meanings": {
+   "S": {
+    "note": "1C: 3+ clubs, 11-21. 1NT rebid: 12-14 balanced, fewer than four spades (would raise 1S), no four-card heart reverse shape.",
+    "hcp": [
+     12,
+     14,
+     [
+      [
+       11,
+       11,
+       0.3
+      ]
+     ]
+    ],
+    "suits": {
+     "S": [
+      1,
+      3
+     ],
+     "H": [
+      1,
+      4
+     ],
+     "D": [
+      2,
+      4
+     ],
+     "C": [
+      2,
+      6
+     ]
+    }
+   }
+  },
+  "projections": {
+   "P": [
+    {
+     "when": "east_hcp >= 10 and east_hearts >= 5",
+     "contract": "2HE"
+    },
+    {
+     "else": {
+      "contract": "1NTS"
+     }
+    }
+   ],
+   "2S": [
+    {
+     "when": "east_hcp >= 10 and east_hearts >= 6",
+     "contract": "3HE"
+    },
+    {
+     "else": {
+      "contract": "2SN"
+     }
+    }
+   ],
+   "2D": [
+    {
+     "when": "south_spades >= 3 and south_hcp >= 13",
+     "contract": "4SN"
+    },
+    {
+     "when": "south_spades >= 3",
+     "contract": "3SN"
+    },
+    {
+     "when": "south_hcp >= 13",
+     "contract": "3NTS"
+    },
+    {
+     "else": {
+      "contract": "2NTS"
+     }
+    }
+   ],
+   "2NT": [
+    {
+     "when": "south_hcp >= 13",
+     "contract": "3NTS"
+    },
+    {
+     "else": {
+      "contract": "2NTS"
+     }
+    }
+   ]
+  },
+  "deviations": {},
+  "stem_explanations": [
+   "3+ clubs, 11-21 HCP.",
+   "No action over 1C.",
+   "Four or more spades, 6+ HCP.",
+   "No action over 1S.",
+   "12-14 balanced, fewer than four spades.",
+   "Still silent."
+  ],
+  "option_explanations": {
+   "P": {
+    "shows": "A hand with no game interest opposite 12-14 and no urge to look for a better partscore.",
+    "partner": "The auction ends unless fourth seat balances."
+   },
+   "2S": {
+    "shows": "To play: five or more spades in a hand not worth an invitation.",
+    "partner": "Partner passes essentially always; only the opponents can revive the auction."
+   },
+   "2D": {
+    "shows": "New-minor forcing: invitational or better values, usually five spades, asking for three-card support and range.",
+    "partner": "Partner shows three spades (minimum or maximum) or denies support and shows range; hero can stop in 2NT/3S or reach game."
+   },
+   "2NT": {
+    "shows": "A natural balanced invitation, about 10-11 points, only four spades promised.",
+    "partner": "Partner passes with 12 and poor 13-counts, bids 3NT with a maximum."
+   }
+  },
+  "explanation": "Responder holds AJ943 Q85 93 Q64 after 1C-1S; 1NT (12-14). Nine soft HCP with a chunky-ish five-card spade suit: the menu runs from quitting in 1NT, through the safety play of 2S, to inviting - either with natural 2NT or via new-minor 2D to check on three-card spade support first. The two rooms split between pass and 2S, and the invitational routes are the textbook third and fourth calls."
+ },
+ "50011-12": {
+  "dilemma": true,
+  "options": [
+   "2S",
+   "3S",
+   "2NT"
+  ],
+  "category": "raise-choice",
+  "meanings": {
+   "W": {
+    "note": "1S opening: natural, 5+ spades, 11-21 HCP.",
+    "hcp": [
+     11,
+     21,
+     [
+      [
+       10,
+       10,
+       0.3
+      ]
+     ]
+    ],
+    "suits": {
+     "S": [
+      5,
+      8,
+      []
+     ]
+    }
+   }
+  },
+  "projections": {
+   "2S": [
+    {
+     "when": "partner_hcp >= 15",
+     "contract": "4SW"
+    },
+    {
+     "when": "south_hcp >= 12 and south_hearts >= 6",
+     "contract": "4HS"
+    },
+    {
+     "else": {
+      "contract": "2SW"
+     }
+    }
+   ],
+   "3S": [
+    {
+     "when": "partner_hcp >= 14",
+     "contract": "4SW"
+    },
+    {
+     "when": "south_hcp >= 12 and south_hearts >= 6",
+     "contract": "4HS"
+    },
+    {
+     "else": {
+      "contract": "3SW"
+     }
+    }
+   ],
+   "2NT": [
+    {
+     "when": "partner_hcp >= 18",
+     "contract": "6SW"
+    },
+    {
+     "when": "opps_combined_hcp >= 16 and north_spades >= 4",
+     "contract": "4SWx"
+    },
+    {
+     "else": {
+      "contract": "4SW"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "2NT": {
+    "note": "Jacoby 2NT is a game force, normally 13+; this is an 11-count upgraded on two aces \u2014 partner will drive to game and evaluate slam a king light.",
+    "kind": "judgment"
+   }
+  },
+  "stem_explanations": [
+   "1S \u2014 natural, 5+ spades, 11-21 HCP.",
+   "Pass \u2014 North denies a sound overcall or takeout double of 1S."
+  ],
+  "option_explanations": {
+   "2S": {
+    "shows": "A single raise: 6-10 support points with 3+ spades.",
+    "partner": "Partner passes most minimums, makes a game try with about 16-17, and drives to game with 18+."
+   },
+   "3S": {
+    "shows": "A limit raise: 10-12 support points with 4 trumps, invitational.",
+    "partner": "Partner passes a minimum and bids 4S with about 14+ or extra shape."
+   },
+   "2NT": {
+    "shows": "Jacoby: 4+ spades and game-forcing values (13+).",
+    "partner": "Partner shows shortness or extras and never stops below 4S; with a strong hand partner will look for slam."
+   }
+  },
+  "explanation": "Partner opens 1S, North passes, and East holds J-8-3-2, A-9-7, A-8-4, Q-7-2: 11 HCP, four trumps, both red aces, 4-3-3-3 shape. 3S is the textbook limit raise, inviting game. 2S treats the flat shape and soft queen-jack points as a downgrade, keeping the auction low. Jacoby 2NT upgrades the two aces and fourth trump into an outright game force, gaining when opener is minimum-plus but shapely, and risking a hopeless game or an overcooked slam auction when opener is dead minimum."
+ },
+ "50011-14": {
+  "dilemma": true,
+  "options": [
+   "3S",
+   "3NT",
+   "3H"
+  ],
+  "category": "game",
+  "meanings": {
+   "N": {
+    "note": "1S: 4+ spades, 6+ HCP, one round force. 3C: natural 4+ clubs, forcing, game interest opposite a minimum 2H rebid; usually fewer than three hearts and no primary diamond suit.",
+    "hcp": [
+     11,
+     18,
+     [
+      [
+       10,
+       10,
+       0.3
+      ]
+     ]
+    ],
+    "suits": {
+     "S": [
+      4,
+      6
+     ],
+     "C": [
+      4,
+      6
+     ],
+     "H": [
+      0,
+      3
+     ],
+     "D": [
+      0,
+      4
+     ]
+    }
+   }
+  },
+  "projections": {
+   "3S": [
+    {
+     "when": "north_spades >= 5 and north_hcp >= 11",
+     "contract": "4SN"
+    },
+    {
+     "when": "north_hcp >= 13 and north_hearts <= 2",
+     "contract": "3NTN"
+    },
+    {
+     "when": "north_hcp >= 12",
+     "contract": "4SN"
+    },
+    {
+     "else": {
+      "contract": "3SN"
+     }
+    }
+   ],
+   "3NT": [
+    {
+     "when": "north_spades >= 5 and north_hcp >= 12 and north_hearts <= 1",
+     "contract": "4SN"
+    },
+    {
+     "else": {
+      "contract": "3NTS"
+     }
+    }
+   ],
+   "3H": [
+    {
+     "when": "north_hearts >= 2 and north_hcp >= 12",
+     "contract": "4HS"
+    },
+    {
+     "when": "north_hcp >= 13",
+     "contract": "3NTN"
+    },
+    {
+     "else": {
+      "contract": "3HS"
+     }
+    }
+   ]
+  },
+  "deviations": {},
+  "stem_explanations": [
+   "Nothing to say as dealer.",
+   "11-21 HCP, five or more hearts.",
+   "No action over 1H.",
+   "Four or more spades, 6+ HCP, one round force.",
+   "Still nothing to say.",
+   "Minimum-range rebid showing six hearts.",
+   "No entry to the auction.",
+   "Natural clubs, forcing - game interest, looking for the right strain.",
+   "Silent throughout."
+  ],
+  "option_explanations": {
+   "3S": {
+    "shows": "Exactly three-card spade support (1S may have been four), minimum shape-suitable hand.",
+    "partner": "Partner picks the game: raises to 4S with five spades or extra values, offers 3NT with hearts stopped elsewhere, or stops in 3S with a dead minimum."
+   },
+   "3NT": {
+    "shows": "A minimum with the unbid suit (diamonds) under control and no three-card spade support message; offers to play right there.",
+    "partner": "Partner normally passes; only extreme spade-oriented shape pulls to 4S."
+   },
+   "3H": {
+    "shows": "Extra heart length and quality - a suit playable opposite a small doubleton or less.",
+    "partner": "Partner raises to 4H with a doubleton honor or better, tries 3NT with a singleton heart and extras, or passes with a misfitting minimum."
+   }
+  },
+  "explanation": "Opener holds 954 AKT976 AQ7 5 after 1H-1S; 2H-3C (forcing). Three strains are live: three-card spade support for partner's possible five, 3NT on the diamond AQ plus partner's clubs, or 4H on the self-sufficient six-card suit. The singleton club and three small spades pull in different directions; both world-class rooms chose differently (3S vs 3NT)."
+ },
+ "50012-16": {
+  "dilemma": true,
+  "options": [
+   "P",
+   "1D",
+   "1NT"
+  ],
+  "category": "opening-style",
+  "meanings": {
+   "W": {
+    "note": "Dealt and passed: no opening bid, roughly 0-11 HCP.",
+    "hcp": [
+     0,
+     11,
+     [
+      [
+       12,
+       12,
+       0.2
+      ]
+     ]
+    ]
+   }
+  },
+  "projections": {
+   "P": [
+    {
+     "when": "east_hcp >= 12 and opps_combined_hcp >= 25",
+     "contract": "3NTE"
+    },
+    {
+     "when": "east_hcp >= 12 and east_spades >= 5",
+     "contract": "2SE"
+    },
+    {
+     "when": "east_hcp >= 12 and east_hearts >= 5",
+     "contract": "2HE"
+    },
+    {
+     "when": "east_hcp >= 12",
+     "contract": "1NTE"
+    },
+    {
+     "when": "partner_hcp >= 13",
+     "contract": "3NTS"
+    },
+    {
+     "when": "partner_hcp >= 12",
+     "contract": "2NTS"
+    },
+    {
+     "else": {
+      "contract": "P"
+     }
+    }
+   ],
+   "1D": [
+    {
+     "when": "partner_hcp >= 13",
+     "contract": "3NTN"
+    },
+    {
+     "when": "partner_hcp >= 11",
+     "contract": "2NTN"
+    },
+    {
+     "when": "east_hcp >= 10 and east_spades >= 5",
+     "contract": "2SE"
+    },
+    {
+     "when": "east_hcp >= 10 and east_hearts >= 5",
+     "contract": "2HE"
+    },
+    {
+     "when": "partner_hcp >= 6",
+     "contract": "1NTN"
+    },
+    {
+     "else": {
+      "contract": "1DN"
+     }
+    }
+   ],
+   "1NT": [
+    {
+     "when": "east_hcp >= 14 and partner_hcp <= 7",
+     "contract": "1NTNx"
+    },
+    {
+     "when": "partner_hcp >= 17",
+     "contract": "6NTN"
+    },
+    {
+     "when": "partner_hcp >= 9",
+     "contract": "3NTN"
+    },
+    {
+     "when": "partner_hcp >= 8",
+     "contract": "2NTN"
+    },
+    {
+     "when": "partner_hearts >= 5",
+     "contract": "2HN"
+    },
+    {
+     "when": "partner_spades >= 5",
+     "contract": "2SN"
+    },
+    {
+     "else": {
+      "contract": "1NTN"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "1NT": {
+    "note": "12 HCP is a full zone below the 15-17 card range; partner will invite and raise games three points light.",
+    "kind": "card_violation"
+   }
+  },
+  "stem_explanations": [
+   "Pass \u2014 West has no opening bid (roughly 0-11 HCP)."
+  ],
+  "option_explanations": {
+   "P": {
+    "shows": "No opening bid \u2014 fewer than 12 HCP or a hand judged too weak to open.",
+    "partner": "Partner will not expect opening values; East gets a free run in third seat and South may open in fourth."
+   },
+   "1D": {
+    "shows": "An opening bid, 12-21 HCP, 3+ diamonds.",
+    "partner": "Partner responds a major up the line or bids notrump; opener's 1NT rebid limits the hand to 12-14."
+   },
+   "1NT": {
+    "shows": "15-17 balanced.",
+    "partner": "Partner passes weak hands, transfers with a 5-card major, invites with about 8 and raises to 3NT with 9+ \u2014 all counting North for 15-17."
+   }
+  },
+  "explanation": "Second seat after West's pass, North holds T-8-4, A-T-2, K-J-T-5, A-7-2: a square 12-count with two aces and strong intermediates. Opening 1D is the textbook action with a planned 12-14 1NT rebid. Passing treats the 3-3-4-3 shape and soft partscore potential as a sub-minimum. Opening 1NT is a weak-notrump-style bid that is three points below the partnership's 15-17 range: it preempts the opponents and right-sides notrump, but partner's invitations and raises will all be made a zone light."
+ },
+ "50012-6": {
+  "dilemma": true,
+  "options": [
+   "P",
+   "2C"
+  ],
+  "category": "other",
+  "meanings": {
+   "E": {
+    "note": "1NT opening: 15-17 balanced.",
+    "hcp": [
+     15,
+     17,
+     [
+      [
+       14,
+       14,
+       0.3
+      ],
+      [
+       18,
+       18,
+       0.3
+      ]
+     ]
+    ],
+    "suits": {
+     "S": [
+      2,
+      5,
+      []
+     ],
+     "H": [
+      2,
+      5,
+      []
+     ],
+     "D": [
+      2,
+      6,
+      []
+     ],
+     "C": [
+      2,
+      6,
+      []
+     ]
+    }
+   },
+   "S": {
+    "note": "Passed over 1NT: no conventional or natural action; can still hold a fair balanced hand with no long suit.",
+    "hcp": [
+     0,
+     12,
+     [
+      [
+       13,
+       15,
+       0.4
+      ]
+     ]
+    ]
+   }
+  },
+  "projections": {
+   "P": [
+    {
+     "when": "north_hcp >= 15",
+     "contract": "1NTEx"
+    },
+    {
+     "when": "north_hcp >= 11 and north_spades >= 6",
+     "contract": "2SN"
+    },
+    {
+     "when": "north_hcp >= 11 and north_hearts >= 6",
+     "contract": "2HN"
+    },
+    {
+     "else": {
+      "contract": "1NTE"
+     }
+    }
+   ],
+   "2C": [
+    {
+     "when": "north_hcp >= 11 and north_spades >= 6",
+     "contract": "2SN"
+    },
+    {
+     "when": "north_hcp >= 11 and north_hearts >= 6",
+     "contract": "2HN"
+    },
+    {
+     "when": "east_hcp >= 15 and east_hearts >= 4",
+     "contract": "2HE"
+    },
+    {
+     "when": "east_hcp >= 15 and east_spades >= 4",
+     "contract": "2SE"
+    },
+    {
+     "when": "north_hcp >= 13 and north_diamonds >= 4",
+     "contract": "2DEx"
+    },
+    {
+     "else": {
+      "contract": "2DE"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "2C": {
+    "note": "Garbage Stayman on a 0-count: West intends to pass any response, including 2D on three small \u2014 partner may expect at least invitational interest.",
+    "kind": "judgment"
+   }
+  },
+  "stem_explanations": [
+   "1NT \u2014 15-17 balanced.",
+   "Pass \u2014 South takes no action over 1NT; with no shapely hand South can still hold up to a fair balanced count."
+  ],
+  "option_explanations": {
+   "P": {
+    "shows": "A weak hand with no 5-card major and no game interest; 1NT is where the auction rests unless the opponents act.",
+    "partner": "Partner has finished describing the hand; the passout seat decides whether 1NT plays or gets doubled/outbid."
+   },
+   "2C": {
+    "shows": "Stayman, asking for a 4-card major \u2014 usually with values or a weak hand prepared for any reply.",
+    "partner": "Partner answers 2D, 2H, or 2S; West passes whatever comes back, so the side plays a two-level partscore."
+   }
+  },
+  "explanation": "Partner opens a 15-17 1NT and South passes; West holds T-9-8, 9-6-5-3, J-T-2, 9-6-4 \u2014 a 0-count with 3-4-3-3 shape. The high cards are heavily with the other side (North and South hold 23-25 between them), so passing leaves partner to play 1NT, possibly doubled in the passout seat. Garbage Stayman escapes to a two-level suit partscore \u2014 any response can be passed, with 2D landing on three small trumps \u2014 trading declarer's extra notrump tricks for trump safety and auction interference."
+ },
+ "50015-7": {
+  "dilemma": true,
+  "options": [
+   "P",
+   "3H",
+   "4H"
+  ],
+  "category": "raise-choice",
+  "meanings": {
+   "N": {
+    "note": "1NT: 15-17 balanced (third seat). 2H: Stayman response, four hearts (occasionally five); with 4-4 majors hearts is bid first, so four spades is still possible.",
+    "hcp": [
+     15,
+     17
+    ],
+    "suits": {
+     "H": [
+      4,
+      5
+     ],
+     "S": [
+      2,
+      4
+     ],
+     "D": [
+      2,
+      5
+     ],
+     "C": [
+      2,
+      5
+     ]
+    }
+   }
+  },
+  "projections": {
+   "P": [
+    {
+     "when": "west_hcp >= 11 and west_spades >= 5",
+     "contract": "2SW"
+    },
+    {
+     "else": {
+      "contract": "2HN"
+     }
+    }
+   ],
+   "3H": [
+    {
+     "when": "north_hcp >= 16",
+     "contract": "4HN"
+    },
+    {
+     "else": {
+      "contract": "3HN"
+     }
+    }
+   ],
+   "4H": [
+    {
+     "else": {
+      "contract": "4HN"
+     }
+    }
+   ]
+  },
+  "deviations": {},
+  "stem_explanations": [
+   "Nothing to open - fewer than 11-12 HCP.",
+   "Also nothing to say.",
+   "15-17 balanced.",
+   "No action over 1NT.",
+   "Stayman - at least one four-card major (may be light, planning to pass any response).",
+   "Still silent.",
+   "Four hearts, possibly also four spades.",
+   "Silent throughout."
+  ],
+  "option_explanations": {
+   "P": {
+    "shows": "A weak hand that used Stayman only to escape 1NT - fit found, no game interest.",
+    "partner": "Partner passes; the auction ends unless fourth seat balances."
+   },
+   "3H": {
+    "shows": "An invitational raise with four-card heart support, roughly 7-8 points once shape is counted.",
+    "partner": "Partner passes with 15 and most 16-counts, bids 4H with a maximum."
+   },
+   "4H": {
+    "shows": "A raise to game - values or distribution that make 4H playable opposite any 15-17 with four hearts.",
+    "partner": "Partner always passes; hero has taken the final decision."
+   }
+  },
+  "explanation": "A passed hand with T8542 T986 AQ4 6 finds a 4-4 heart fit after Stayman over a 15-17 1NT. Only 6 HCP, but a fifth spade, a singleton club and a working AQ make the hand far bigger in support terms. The choice is how high to drive the fit: stop safely, invite, or blast game on shape. The two world-class rooms split between 3H and 4H."
+ },
+ "50020-17": {
+  "dilemma": true,
+  "options": [
+   "P",
+   "2D",
+   "2NT"
+  ],
+  "category": "partscore",
+  "meanings": {
+   "N": {
+    "note": "1S opening: natural, 5+ spades, 11-21 HCP.",
+    "hcp": [
+     11,
+     21,
+     [
+      [
+       10,
+       10,
+       0.3
+      ]
+     ]
+    ],
+    "suits": {
+     "S": [
+      5,
+      8,
+      []
+     ]
+    }
+   }
+  },
+  "projections": {
+   "P": [
+    {
+     "when": "opps_combined_hcp >= 25 and south_spades >= 3",
+     "contract": "4SN"
+    },
+    {
+     "when": "opps_combined_hcp >= 25",
+     "contract": "3NTS"
+    },
+    {
+     "when": "south_hcp >= 6 and south_spades >= 3",
+     "contract": "2SN"
+    },
+    {
+     "when": "south_hcp >= 6",
+     "contract": "1NTS"
+    },
+    {
+     "when": "west_hcp >= 10",
+     "contract": "2DE"
+    },
+    {
+     "else": {
+      "contract": "1SN"
+     }
+    }
+   ],
+   "2D": [
+    {
+     "when": "opps_combined_hcp >= 25 and south_spades >= 3",
+     "contract": "4SN"
+    },
+    {
+     "when": "opps_combined_hcp >= 25",
+     "contract": "3NTS"
+    },
+    {
+     "when": "south_hcp >= 10 and south_diamonds >= 4 and south_spades <= 2",
+     "contract": "2DEx"
+    },
+    {
+     "when": "south_hcp >= 6 and south_spades >= 3 and west_hcp >= 8 and west_diamonds >= 3",
+     "contract": "3DE"
+    },
+    {
+     "when": "south_hcp >= 6 and south_spades >= 3",
+     "contract": "2SN"
+    },
+    {
+     "else": {
+      "contract": "2DE"
+     }
+    }
+   ],
+   "2NT": [
+    {
+     "when": "opps_combined_hcp >= 25 and south_spades >= 3",
+     "contract": "4SN"
+    },
+    {
+     "when": "south_hcp >= 6 and south_spades >= 3",
+     "contract": "3SN"
+    },
+    {
+     "when": "west_hcp >= 12 and west_diamonds >= 4",
+     "contract": "5DW"
+    },
+    {
+     "when": "south_hcp >= 10 and south_spades <= 2 and west_diamonds >= west_clubs",
+     "contract": "3DWx"
+    },
+    {
+     "when": "south_hcp >= 10 and south_spades <= 2",
+     "contract": "3CWx"
+    },
+    {
+     "when": "west_hcp <= 11 and west_diamonds >= west_clubs",
+     "contract": "3DW"
+    },
+    {
+     "else": {
+      "contract": "3CW"
+     }
+    }
+   ]
+  },
+  "deviations": {
+   "2D": {
+    "note": "A two-level overcall on a fair 9-count; many partnerships want sounder values, and it hides the second suit.",
+    "kind": "judgment"
+   }
+  },
+  "stem_explanations": [
+   "1S \u2014 natural, 5+ spades, 11-21 HCP."
+  ],
+  "option_explanations": {
+   "P": {
+    "shows": "Nothing worth showing over 1S at this vulnerability.",
+    "partner": "Partner will not expect two playable suits; East may still balance later if the auction dies low."
+   },
+   "2D": {
+    "shows": "A sound natural two-level overcall, 5+ diamonds, roughly 10-16.",
+    "partner": "Partner raises diamonds or competes with a fit; the club suit stays hidden unless East can bid again."
+   },
+   "2NT": {
+    "shows": "Unusual notrump: at least 5-5 in the minors, typically weak or very strong, not a natural notrump bid.",
+    "partner": "Partner must pick a minor at the three level with weak hands and can invite/jump with a fit; the partnership is committed to the three level."
+   }
+  },
+  "explanation": "Nobody vulnerable, East holds 3, J-5, K-Q-T-8-4, Q-J-9-4-3 over a 1S opening: 9 HCP, 5-5 in the minors, a singleton spade. The unusual 2NT shows both suits at once and pre-empts, but commits the side to the three level on a hand with modest high cards. A simple 2D overcall shows the better suit at a safer level but loses the clubs. Pass avoids the vulnerability-free but still real penalty risk and waits, at the cost of silence on a shapely hand."
+ },
+ "50024-25": {
+  "dilemma": true,
+  "options": [
+   "3H",
+   "4H"
+  ],
+  "category": "raise-choice",
+  "meanings": {
+   "N": {
+    "note": "1S: five or more spades, 11-21. 2H: second suit, four or more hearts, non-jump so roughly 11-17 - unlimited shapes with 5-4 or longer.",
+    "hcp": [
+     11,
+     17
+    ],
+    "suits": {
+     "S": [
+      5,
+      7
+     ],
+     "H": [
+      4,
+      6
+     ]
+    }
+   }
+  },
+  "projections": {
+   "3H": [
+    {
+     "when": "north_hcp >= 14",
+     "contract": "4HN"
+    },
+    {
+     "else": {
+      "contract": "3HN"
+     }
+    }
+   ],
+   "4H": [
+    {
+     "else": {
+      "contract": "4HN"
+     }
+    }
+   ]
+  },
+  "deviations": {},
+  "stem_explanations": [
+   "Five or more spades, 11-21 HCP.",
+   "No action over 1S.",
+   "Semi-forcing 1NT: 6-12 HCP, fewer than three spades or a hand unsuited to a raise.",
+   "Silent.",
+   "Second suit: four or more hearts, minimum-to-medium range.",
+   "Still silent."
+  ],
+  "option_explanations": {
+   "3H": {
+    "shows": "An invitational heart raise: four-card support with a maximum 1NT response, around 10-12 points.",
+    "partner": "Partner passes with a minimum opening, bids 4H with about 14+ or extra shape."
+   },
+   "4H": {
+    "shows": "A raise to game: four trumps and a hand hero judges worth ten tricks opposite any 5-4 opener.",
+    "partner": "Partner always passes; the decision is taken out of opener's hands."
+   }
+  },
+  "explanation": "After 1S-1NT; 2H, responder holds J2 K632 AK62 973: a maximum 1NT response with four trumps, two working diamond honors and a doubleton spade for ruffs. Opener's 2H is wide-ranging (11-17), so the question is whether 11 prime-ish points opposite an unlimited 5-4 justify driving to game or only inviting. The two world-class rooms split between 3H and 4H."
+ }
+}
