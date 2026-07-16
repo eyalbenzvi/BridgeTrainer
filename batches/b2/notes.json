@@ -1,0 +1,180 @@
+{
+  "e50000-12": {
+    "stem_explanations": [
+      "no opening bid — fewer than about 11-12 points",
+      "opening values (11-16ish), diamonds — usually four-plus, no five-card major",
+      "no overcall and no takeout double of 1D",
+      "forcing one round: 6+ HCP, four-plus spades; bidding up-the-line, so denies four hearts",
+      "no sandwich action: nothing worth showing between the two bidders at this vulnerability",
+      "natural second suit: four-plus clubs with diamonds at least as long (usually 5-4 minors), 11-16 — no reverse, so not extra strength",
+      "still silent: no bid over either minor; discounts a decent five-card major with 10-13",
+      "simple preference: 6-9 with diamond tolerance and no game interest"
+    ],
+    "option_explanations": {
+      "X": {
+        "shows": "a takeout-shaped competitive double of the dying 2D: both majors, short diamonds, moderate values from a passed hand — asks partner to pick a suit",
+        "partner": "picks a major at the two level (2S with four spades and ~7+, a jump to 3H with four hearts and ~10+) or passes for penalties with fat diamonds; the opening side can still run to 3C or compete to 3D"
+      },
+      "2H": {
+        "shows": "on the card, a sound live-auction overcall: about 11+ HCP with a decent five-card heart suit — partner will play you for that hand",
+        "partner": "raises to 3H with four trumps and about 9+, expecting the announced values; the opening side may push to 3C or 3D, and a heart stack behind you can double"
+      },
+      "P": {
+        "shows": "nothing to say: no shape or values worth a call, willing to defend 2D",
+        "partner": "usually all pass and 2D plays; partner can still balance with a reopening double (~10+, short diamonds) or a five-card spade suit"
+      }
+    }
+  },
+  "e50004-24": {
+    "stem_explanations": [
+      "no opening bid — fewer than about 11-12 points",
+      "opening values, five-plus spades",
+      "no overcall and no double of 1S",
+      "6-10 HCP, at most two spades, no game interest yet",
+      "a passed hand with nothing to say over 1NT",
+      "natural rebid: five spades and four-plus clubs, minimum-range opener",
+      "still silent: no balancing action; discounts a decent six-card red suit with 10-14",
+      "club preference: content to play 2C, usually four clubs (sometimes three), still 6-10",
+      "balancing-style takeout double by a passed hand: both red suits, implied shortness in clubs and spades, roughly 9-11"
+    ],
+    "option_explanations": {
+      "3C": {
+        "shows": "a competitive raise of partner's chosen suit: 5-4 in the blacks with a minimum, outbidding the doubler's red suits — not invitational",
+        "partner": "passes throughout; the doubler's side frequently advances anyway to 3D or 3H in a red fit, and an opponent with club length and values can double"
+      },
+      "P": {
+        "shows": "no extra shape or strength: content to let the double stand and hear the advance",
+        "partner": "the doubler's partner picks a red suit (2D or 2H) or converts to penalties by passing with club length, so 2C rarely plays undoubled; your side has no forced second call"
+      },
+      "2S": {
+        "shows": "on the card, a sixth spade: having opened 1S and rebid 2C, retreating to 2S over the double announces extra spade length — partner will believe six",
+        "partner": "holding at most two spades, passes and plays you for the six-card suit; the doubler's side can still advance to 3D or 3H, and an opponent with four good spades can double"
+      }
+    }
+  },
+  "e50004-30": {
+    "stem_explanations": [
+      "no opening bid as dealer",
+      "opening values, five-plus spades",
+      "no overcall and no double of 1S",
+      "2/1 game force: five-plus hearts, about 12+ HCP — the partnership is committed to game",
+      "nothing to say over 2H",
+      "spade rebid: often a sixth spade, or the default with no more descriptive call; no heart fit and no second suit shown yet",
+      "still nothing to say",
+      "natural 2NT: balanced-ish with at most two spades, typically 12-14 (stronger balanced hands are rare here) — still forcing",
+      "silent throughout"
+    ],
+    "option_explanations": {
+      "3H": {
+        "shows": "delayed three-card heart support: offers the 5-3 heart fit as a strain for game or slam — partner will count eight trumps",
+        "partner": "believing in the fit, raises to 4H with a sixth heart or a side doubleton, offers 3NT with a square minimum, and drives toward a heart slam with a maximum; a heart stack over dummy can double a 4H that gets pushed"
+      },
+      "3NT": {
+        "shows": "a direct sign-off try: minimum game-force values, no three-card heart support, no sixth spade, nothing left to describe",
+        "partner": "passes with the normal 12-14; raises quantitatively to 4NT with about 16+, and carries on to a notrump slam with a genuine maximum"
+      },
+      "3C": {
+        "shows": "natural: four-plus clubs alongside the five spades, patterning out below 3NT and keeping every strain in play; still forcing",
+        "partner": "signs off in 3NT with the ordinary balanced 12-14; can rebid a sixth heart to reach 4H, raise clubs toward 5C with four-card support and extras, or drive to slam with a maximum"
+      }
+    }
+  },
+  "e50005-26": {
+    "stem_explanations": [
+      "no opening bid as dealer",
+      "no opening bid either — and no preempt shape",
+      "third-seat 1C: about 11-17 (occasionally shaded a point or two, occasionally a full 18-20), three-plus clubs",
+      "takeout double: opening values with club shortness and support for the majors and diamonds — or any 17+ hand planning to bid again"
+    ],
+    "option_explanations": {
+      "1D": {
+        "shows": "natural, four-plus diamonds; by not redoubling, roughly 6-9 — the hand's main feature named at the one level",
+        "partner": "opener usually passes or rebuys with 2C on a good six-card suit; the strong doubler comes again with 16+ — a major-suit bid or notrump, up to game with a huge hand"
+      },
+      "1S": {
+        "shows": "natural, four-plus spades; by not redoubling, roughly 6-9 — the cheapest major offered before the doubler's side finds it",
+        "partner": "opener raises with four spades or rebids a long club suit; a strong doubler bids on in hearts or notrump, and with good spades can double for penalties"
+      },
+      "P": {
+        "shows": "a weak responding hand with nothing convenient: denies 10+ (no redouble), a biddable suit worth naming, and a club raise",
+        "partner": "the doubler's partner advances cheaply in a major, and a strong doubler raises — up to game with the 17+ type; occasionally 1C doubled is passed out and opener plays it doubled"
+      },
+      "2C": {
+        "shows": "a single raise: club support with about 6-9 in support — partner will read a sounder, chunkier raise, and the third-seat 1C may be only three cards",
+        "partner": "opener passes almost always, so the raise often buys the contract; a strong doubler still introduces a major or notrump over it, and 2C can be doubled when the advancer has trumps sitting well"
+      }
+    }
+  },
+  "e50018-10": {
+    "stem_explanations": [
+      "no opening bid as dealer",
+      "no opening bid — fewer than about 11-12 points",
+      "no light third-seat opening either — a weak hand",
+      "fourth-seat opening: sound values expecting a plus score, diamonds",
+      "no overcall and no double",
+      "natural 2C by a passed hand: five-plus clubs, near-maximum pass (about 9-11), not forcing to game",
+      "still nothing to say",
+      "minimum rebid: roughly 11-14 with five-plus diamonds and no five-card major; with four spades opener usually bids 2S here, so that holding is unlikely",
+      "silent to the end"
+    ],
+    "option_explanations": {
+      "2S": {
+        "shows": "a fresh suit at the two level: four spades in a hand still trying for the right partscore — partner will place you with 4 of them",
+        "partner": "with three-card spade support passes and plays what he believes is a 4-3 fit, raising to 3S with four and a maximum; he retreats to diamonds only with extreme shape, and an opponent with five good spades can double"
+      },
+      "P": {
+        "shows": "acceptance of 2D: tolerance for diamonds or no safer spot to offer",
+        "partner": "the auction ends and 2D plays; the only variation is a late balance by the silent opponents into a major fit"
+      },
+      "3C": {
+        "shows": "rebiddable clubs: six-plus in a suit worth insisting on, no diamond fit, a sign-off from the passed hand",
+        "partner": "passes almost always and 3C plays; he returns to 3D only with six-plus diamonds, club shortness, and a maximum"
+      }
+    }
+  },
+  "e50023-18": {
+    "stem_explanations": [
+      "opening values, three-plus clubs, no five-card major",
+      "no overcall and no double of 1C; discounts a decent five-card major with 8-10",
+      "6+ points, four-plus diamonds, strength unlimited but usually a modest hand",
+      "overcall: roughly 8-16 with a decent five-plus spade suit"
+    ],
+    "option_explanations": {
+      "X": {
+        "shows": "a support double: exactly three-card diamond support, any strength within the opening — an accurate picture of the fit, promising nothing extra",
+        "partner": "reading three trumps, competes to 2D or invites with 3D as his strength allows, or passes the double for penalties with spades stacked; the overcaller's side often raises to 2S anyway"
+      },
+      "P": {
+        "shows": "a minimum with no clear second call: not three diamonds, no dependable spade stopper, no sixth club — the decision is deferred",
+        "partner": "acts again with about 8+ — repeating a five-card diamond suit, trying 1NT with spade values, or giving club preference; with less, the overcall often buys it, sometimes raised to 2S"
+      },
+      "1NT": {
+        "shows": "12-14 balanced with a spade stopper: the standard notrump rebid in competition, claiming the overcalled suit is held",
+        "partner": "passes with a modest hand or raises toward 3NT with about 13+; a strong hand over you can double 1NT, and the spade side may still compete to 2S"
+      },
+      "2C": {
+        "shows": "a free club rebid over the overcall: on the card this promises a sixth club in a minimum opener — partner will count six of them",
+        "partner": "mostly passes and 2C plays; he moves only with real extras, such as a 3D try on five-plus diamonds and 11+, while the overcaller's side often competes to 2S and a club stack behind you can double"
+      }
+    }
+  },
+  "e50023-20": {
+    "stem_explanations": [
+      "no opening bid — fewer than about 11-12 points",
+      "no opening bid either",
+      "opening: roughly 11-17 with three-plus diamonds, no five-card major",
+      "takeout double: opening values with diamond shortness and support for the unbid suits — or any 17+ hand",
+      "no redouble (so under about 10), no bid, no diamond raise — nearly always fewer than six points"
+    ],
+    "option_explanations": {
+      "2H": {
+        "shows": "a jump advance of the takeout double: four-plus hearts and about 9-11 in support points, invitational — partner will credit you with the full announced values",
+        "partner": "carries on to 4H with about 14+ or a shapely maximum, expecting your 9-11; opener can still compete to 3D with a long strong suit, and a heart stack can double a raised game"
+      },
+      "1H": {
+        "shows": "a minimum advance: hearts as the cheapest suit, anywhere from a near-bust to about 8 support points",
+        "partner": "passes with an ordinary balanced minimum; with about 14+ and four hearts he raises or invites — and this hand would accept an invitation — while opener may rebid 2D with six diamonds"
+      }
+    }
+  }
+}
