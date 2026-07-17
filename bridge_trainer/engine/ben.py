@@ -42,9 +42,8 @@ def pad(dealer_i: int, auction: list[str]) -> list[str]:
     return ["PAD_START"] * dealer_i + [to_ben(t) for t in auction]
 
 
-# -- card tokens (our "SK" = suit letter + rank) <-> ben card indices --------
+# -- card tokens: our "SK" = suit letter + rank -----------------------------
 _RANKS = "AKQJT98765432"
-_STRAIN_DDS = {"S": 0, "H": 1, "D": 2, "C": 3, "NT": 4}
 
 
 def cards_of(hand_pbn: str) -> list[str]:
@@ -55,13 +54,9 @@ def cards_of(hand_pbn: str) -> list[str]:
     return out
 
 
-def _card52(token: str) -> int:
-    return "SHDC".index(token[0]) * 13 + _RANKS.index(token[1])
-
-
-def _card32(token: str) -> int:
-    # ben's 32-card space keeps A,K,Q,J,T,9,8 distinct and folds 7..2 into a
-    # single spot slot (8 slots per suit). Fine for a policy lookup.
+def lead_code32(token: str) -> int:
+    """Ben's 32-card lead code: suit*8 + rank, with all spot cards (7..2)
+    folded into slot 7 (one 'low card' lead per suit). Suit order S,H,D,C."""
     return "SHDC".index(token[0]) * 8 + min(_RANKS.index(token[1]), 7)
 
 
@@ -190,93 +185,56 @@ class BenEngine:
         return BotLead(list(vuln), hand_pbn, self.models, self.sampler,
                        seat_i, dealer_i, self.dds, self.verbose)
 
-    def lead_softmax(self, hand_pbn: str, seat_i: int, dealer_i: int,
-                     vuln: tuple[bool, bool], auction: list[str]) -> dict:
-        """BEN's opening-lead POLICY mass per held card (criterion 1).
-
-        Cheap NN call, no double-dummy. Returns {card_token: p}. Cards BEN
-        does not surface carry ~0. The softmax index space (32- vs 52-card)
-        is read from the returned vector length.
-        """
-        held = cards_of(hand_pbn)
-        try:
-            bot = self.lead_bot(hand_pbn, seat_i, dealer_i, vuln)
-            _cands, softmax = bot.get_opening_lead_candidates(
-                pad(dealer_i, auction))
-            vec = np.asarray(softmax, dtype=float).reshape(-1)
-            m = vec.shape[0]
-            out = {}
-            for t in held:
-                idx = _card52(t) if m >= 52 else _card32(t)
-                out[t] = float(vec[idx]) if 0 <= idx < m else 0.0
-            return out
-        except Exception:
-            return {t: 0.0 for t in held}
-
-    def _defence_tricks(self, deals_pbn: list[str], denom: str,
-                        leader_i: int, held: list[str]) -> dict:
-        """Double-dummy defensive tricks for EVERY held card, one solve pass.
-
-        VERIFY IN CI SPIKE (SWE review P0): the exact return of ben's
-        DDSolver.solve at the opening lead. Assumed here to be
-        {card52: [defence tricks per sample]} with solutions=3 (every legal
-        lead scored) and current trick empty. If the binding returns declarer
-        tricks or a different container, adjust ONLY this method.
-        """
-        strain_i = _STRAIN_DDS[denom]
-        n = len(deals_pbn)
-        try:
-            dd = self.dds.solve(strain_i, leader_i, [], deals_pbn, 3)
-        except Exception:
-            return {t: np.zeros(n) for t in held}
-        out = {}
-        for t in held:
-            vals = None
-            if isinstance(dd, dict):
-                vals = dd.get(_card52(t), dd.get(str(_card52(t))))
-            if vals is None:
-                out[t] = np.zeros(n)
-            else:
-                out[t] = np.asarray(vals, dtype=float)[:n]
-        return out
-
     def lead_evaluate(self, hand_pbn: str, seat_i: int, dealer_i: int,
                       vuln: tuple[bool, bool], auction: list[str],
                       denom: str, contract: str, doubled: bool,
                       n_samples: int | None = None):
-        """Grade all 13 leads on layouts consistent with the full auction.
+        """Grade every opening lead by average double-dummy defensive tricks.
 
-        Samples hidden hands (reusing the proven BotBid sampler), runs one DD
-        pass per layout that scores every card, and attaches BEN's lead
-        policy. Returns a lead_verdict.LeadEvaluation (pure downstream).
+        Uses ben's own BotLead.simulate_outcomes_opening_lead, which samples
+        layouts consistent with the auction and double-dummies each candidate
+        lead. Its `tricks[:, j, 0]` is DECLARER tricks, so the defence takes
+        13 - that. Ben works in a 32-card lead space (spot cards fold into one
+        'low' lead per suit), so all low cards in a suit share a grade, which
+        is exactly the equivalence we want. Returns a LeadEvaluation.
         """
         from .lead_verdict import LeadEvaluation
 
         held = cards_of(hand_pbn)
         padded = pad(dealer_i, auction)
-        saved = self.sampler._sample_hands_auction
-        if n_samples:
-            self.sampler._sample_hands_auction = n_samples
+        bot = self.lead_bot(hand_pbn, seat_i, dealer_i, vuln)
+
+        # criterion-1 policy: ben's lead softmax over the 32-card space
         try:
-            sbot = self.bot(hand_pbn, seat_i, dealer_i, vuln)
-            hands_np, _s, _ph, _psh, quality = \
-                sbot.sample_hands_for_auction(padded, sbot.seat)
+            _cand, lead_softmax = bot.get_opening_lead_candidates(padded)
+            smx = np.asarray(lead_softmax, dtype=float).reshape(-1)
+        except Exception:
+            smx = np.zeros(32)
+        softmax = {t: (float(smx[lead_code32(t)])
+                       if lead_code32(t) < smx.shape[0] else 0.0)
+                   for t in held}
+
+        # grade every distinct lead option present in the hand
+        codes = sorted({lead_code32(t) for t in held})
+        saved = self.sampler.sample_hands_opening_lead
+        if n_samples:
+            self.sampler.sample_hands_opening_lead = n_samples
+        try:
+            _acc, _ss, tricks, _ph, _psh, quality = \
+                bot.simulate_outcomes_opening_lead(padded, codes, {})
         finally:
-            self.sampler._sample_hands_auction = saved
+            self.sampler.sample_hands_opening_lead = saved
 
-        n = hands_np.shape[0]
-        nc = self.models.n_cards_bidding
-        deals_pbn = []
-        for i in range(n):
-            hs = tuple(_hand_str(hands_np[i, j, :], nc) for j in range(4))
-            deals_pbn.append("N:%s E:%s S:%s W:%s" % hs)
-
-        def_tricks = self._defence_tricks(deals_pbn, denom, seat_i, held)
-        softmax = self.lead_softmax(hand_pbn, seat_i, dealer_i, vuln, auction)
+        n = int(tricks.shape[0]) if hasattr(tricks, "shape") else 0
+        by_code = {}
+        for j, code in enumerate(codes):
+            by_code[code] = (13.0 - np.asarray(tricks[:, j, 0], dtype=float)) \
+                if n > 0 else np.zeros(0)
+        def_tricks = {t: by_code[lead_code32(t)] for t in held}
         return LeadEvaluation(
             cards=held, def_tricks=def_tricks, softmax=softmax,
-            n_samples=n, quality=float(quality), contract=contract,
-            doubled=doubled, sample_deals=deals_pbn[:200])
+            n_samples=n, quality=float(quality) if n else 0.0,
+            contract=contract, doubled=doubled)
 
     # -- convention-card explanations (BBA/EPBot via ben) --------------------
     def explain_calls(self, bot, dealer_i: int,
