@@ -18,6 +18,7 @@ from .verdict import judge
 
 MAX_OPENING_DECISIONS = 3
 MAX_PER_THEME = 2
+MAX_TRAP = 3          # trap-class boards per batch (selectivity review)
 
 
 def _theme_key(spot) -> str:
@@ -144,7 +145,13 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
             continue
         t_verdict = time.perf_counter() - t_v
         stage_totals["verdict_s"] += t_verdict
-        v = judge(ev)
+        v = judge(ev, policy_top=spot.candidates[0][0],
+                  hero_i=spot.hero_i)
+        if v.accepted and v.measured.get("trap") and \
+                quotas.get("traps", 0) >= MAX_TRAP:
+            rejections["quota_trap"] += 1
+            log(f"  seed {seed}: quota (trap class)")
+            continue
         if not v.accepted:
             rejections[v.reason] += 1
             log(f"  seed {seed}: {v.reason} gap={v.measured.get('gap_imps')}"
@@ -166,6 +173,7 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
         pool.rebuild_index()
         existing.add(rec["id"])
         made.append(rec["id"])
+        quotas["traps"] = quotas.get("traps", 0) + (1 if v.measured.get("trap") else 0)
         quotas["opening"] += 1 if opening_decision else 0
         quotas["themes"][theme] += 1
         quotas["vuls"][rec["vul"]] += 1

@@ -135,6 +135,12 @@ def classify(auction: list[str], dealer_i: int, idx: int) -> CallInfo:
         if plast == "2C" and len(my_side_bids) == 1 and tok == "2D":
             return CallInfo("response", "2D waiting (artificial)",
                             True, None, jump, True)
+        if plast in ("2D", "2H", "2S") and tok == "2NT" \
+                and len(my_side_bids) == 1 \
+                and nonpass_before and nonpass_before[0] == plast:
+            # 2NT over partner's weak-two opening = Ogust/feature inquiry
+            return CallInfo("response", "2NT inquiry over the weak two "
+                            "(Ogust/feature ask)", True, None, jump, True)
         if plast in ("1H", "1S") and tok == "2NT" and not opp_suits:
             return CallInfo("response", "Jacoby 2NT (game-forcing raise)",
                             True, None, jump, True)
