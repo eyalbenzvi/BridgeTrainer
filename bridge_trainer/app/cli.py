@@ -125,6 +125,43 @@ def cmd_ben_forge(args: argparse.Namespace) -> int:
     return 0 if summary["count"] == args.count else 1
 
 
+
+def cmd_pool(args: argparse.Namespace) -> int:
+    from ..pool.store import ProblemPool
+    pool = ProblemPool(args.pool)
+    if args.pool_cmd == "ls":
+        import json
+        for pid in pool.ids():
+            r = pool.get(pid)
+            print(f"{pid}  {r.get('seat')} after "
+                  f"{' '.join(r.get('auction', [])) or '(opening)'}  "
+                  f"verdict={r.get('verdict', {}).get('accepted', '?')}")
+        print(f"{len(pool.ids())} problems in {args.pool}")
+        return 0
+    if args.pool_cmd == "rm":
+        removed = 0
+        for pid in args.ids:
+            path = pool.problems_dir / f"{pid}.json"
+            if path.exists():
+                path.unlink()
+                removed += 1
+                print(f"removed {pid}")
+            else:
+                print(f"not found: {pid}")
+        pool.rebuild_index()
+        print(f"{removed} removed; index rebuilt "
+              f"({len(pool.ids())} problems remain)")
+        return 0
+    if args.pool_cmd == "add":
+        from ..engine.maker import forge_batch
+        import time as _time
+        seed = args.seed if args.seed is not None else int(_time.time())
+        summary = forge_batch(pool_dir=args.pool, count=args.count,
+                              base_seed=seed, max_seconds=args.max_seconds)
+        return 0 if summary["count"] == args.count else 1
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="trainer",
@@ -177,6 +214,22 @@ def main(argv: list[str] | None = None) -> int:
     bf_p.add_argument("--max-seconds", type=float, default=3600.0)
     bf_p.set_defaults(func=cmd_ben_forge)
 
+    pool_p = sub.add_parser("pool", help="add/remove/list pool problems")
+    pool_sub = pool_p.add_subparsers(dest="pool_cmd", required=True)
+    pl = pool_sub.add_parser("ls", help="list problems")
+    pl.add_argument("--pool", default="data")
+    pl.set_defaults(func=cmd_pool)
+    pr = pool_sub.add_parser("rm", help="remove problems by id")
+    pr.add_argument("ids", nargs="+")
+    pr.add_argument("--pool", default="data")
+    pr.set_defaults(func=cmd_pool)
+    pa = pool_sub.add_parser(
+        "add", help="generate new problems into the pool (needs Ben env)")
+    pa.add_argument("--count", type=int, default=1)
+    pa.add_argument("--seed", type=int, default=None)
+    pa.add_argument("--pool", default="data")
+    pa.add_argument("--max-seconds", type=float, default=1800.0)
+    pa.set_defaults(func=cmd_pool)
 
     args = parser.parse_args(argv)
     return args.func(args)
