@@ -151,15 +151,41 @@ class BenEngine:
                           sample_deals=deals)
 
     # -- convention-card explanations (BBA/EPBot via ben) --------------------
-    def explain_auction(self, bot, dealer_i: int,
-                        auction: list[str]) -> list[str]:
-        """One meaning text per call in `auction`, from the engine's
-        convention card (empty string when the card says nothing)."""
-        meanings, _controlling, _preempted = bot.explain_auction(
-            pad(dealer_i, auction))
-        out = [m for _tok, m in meanings]
-        # explain_auction skips PAD entries, so out aligns with auction
-        return [(m or "").strip() for m in out] +             [""] * (len(auction) - len(out))
+    def explain_calls(self, bot, dealer_i: int,
+                      auction: list[str]) -> list[dict]:
+        """Per call: the engine card's meaning TEXT plus its NUMERIC
+        state for the bidder (HCP band, minimum suit lengths) — no
+        hand-written bridge anywhere, only the engine's card (owner r6/r7)."""
+        from bidding import bidding as bb
+        from bba.BBA import _str_array
+        bba = getattr(bot, "bbabot", None)
+        if bba is None:
+            return [{"text": "", "hcp": None, "minlen": {}}
+                    for _ in auction]
+        player = bba.players[bba.position]
+        player.new_hand(bba.position, _str_array(bba.hand_str),
+                        bba.dealer, bba.bba_vul(bba.vuln_nsew))
+        out = []
+        position = bba.dealer
+        for tok in pad(dealer_i, auction):
+            bidid = bb.BID2ID[tok]
+            if bidid < 2:
+                continue  # PAD entries
+            epbot_bid = bidid - 2 if bidid < 5 else bidid
+            seat = position % 4
+            player.set_bid(seat, epbot_bid)
+            meaning = (player.get_info_meaning(seat) or "").strip()
+            feats = player.get_info_feature(seat)
+            minl = player.get_info_min_length(seat)
+            out.append({
+                "text": meaning,
+                "hcp": (int(feats[402]), int(feats[403])),
+                "minlen": {"CDHS"[j]: int(minl[j]) for j in range(4)},
+            })
+            position += 1
+        while len(out) < len(auction):
+            out.append({"text": "", "hcp": None, "minlen": {}})
+        return out
 
     # -- meaning-band sampling at an auction prefix -------------------------
     def sample_prefix(self, bot, dealer_i: int, prefix: list[str],

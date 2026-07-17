@@ -20,32 +20,14 @@ def _call_name(tok: str) -> str:
     return tok[0] + SUIT_GLYPH[tok[1:]]
 
 
-def _band_sentence(feats: dict, seat_name: str, artificial: bool,
-                   convention: str | None) -> str:
-    lo, hi = round(feats["hcp_p10"]), round(feats["hcp_p90"])
-    longs = [s for s in "SHDC" if feats["len_avg"][s] >= 4.6]
-    if artificial:
-        major4 = max(feats["len4plus"]["H"], feats["len4plus"]["S"])
-        bits = [f"{convention}" if convention else "artificial"]
-        if convention and "Stayman" in convention:
-            bits.append(f"{major4:.0%} of consistent hands held a 4-card "
-                        f"major; the call says nothing about clubs "
-                        f"(avg {feats['len_avg']['C']:.1f})")
-        else:
-            bits.append(f"consistent hands: {lo}-{hi} HCP")
-        return "; ".join(bits)
-    parts = [f"{lo}-{hi} HCP"]
-    for s in longs:
-        parts.append(f"{feats['len_avg'][s]:.1f} {SUIT_GLYPH[s]} on average")
-    if feats["balanced_share"] >= 0.6:
-        parts.append(f"balanced {feats['balanced_share']:.0%} of the time")
-    return ", ".join(parts)
-
-
 def _clean_card_text(text: str) -> str:
     """EPBot emits 'Stayman -- ; 7+ HCP; Artificial; Forcing' and !S/!H
     suit markers — tidy for display."""
     t = text.replace("--", "").strip(" ;")
+    for filler in ("Bidable suit", "bidable suit", "Calculated bid",
+                   "calculated bid"):
+        t = t.replace(filler, "")
+    t = t.strip(" ;")
     for k, g in SUIT_GLYPH.items():
         t = t.replace(f"!{k}", g)
     parts = [p.strip() for p in t.split(";") if p.strip()]
@@ -53,71 +35,57 @@ def _clean_card_text(text: str) -> str:
         else (parts[0] if parts else "")
 
 
-_TERSE_CARD = {"bidable suit", "calculated bid", "nat", "natural", "waiting"}
-
-
-def _card_or_systemic(card_text: str, auction, dealer_i, idx) -> str:
-    """Engine-card text is primary; when the card says something terse
-    and range-free ('bidable suit'), the systemic 2/1 table explains
-    better — the card text is kept in the record either way."""
-    from .conventions import systemic_meaning
-    cleaned = _clean_card_text(card_text) if card_text else ""
-    terse = (not cleaned or cleaned.lower() in _TERSE_CARD
-             or (not any(ch.isdigit() for ch in cleaned)
-                 and len(cleaned) < 15))
-    return systemic_meaning(auction, dealer_i, idx) if terse else cleaned
+def _render_meaning(card: dict, is_pass: bool = False) -> str:
+    """Compose display text from the ENGINE's card state only: meaning
+    text + HCP band + minimum suit lengths. No bridge knowledge here —
+    formatting only (owner r6/r7)."""
+    text = _clean_card_text(card.get("text") or "")
+    bits = []
+    hcp = card.get("hcp")
+    if hcp and not any(ch.isdigit() for ch in text):
+        lo, hi = hcp
+        if hi >= 37 and lo > 0:
+            bits.append(f"{lo}+ HCP")
+        elif hi < 37 and (lo > 0 or hi < 25):
+            bits.append(f"{lo}-{hi} HCP")
+    if not any(g in text for g in SUIT_GLYPH.values()):
+        for st in "SHDC":
+            v = card.get("minlen", {}).get(st, 0)
+            if v >= 4:
+                bits.append(f"{v}+ {SUIT_GLYPH[st]}")
+    if is_pass:
+        # a pass is worth a note only when the card says it limited the hand
+        if hcp and hcp[1] <= 14:
+            return f"limited — at most {hcp[1]} HCP"
+        return ""
+    joined = ", ".join(bits)
+    if text and joined:
+        return f"{text} — {joined}"
+    return text or joined
 
 
 def stem_explanations(engine, spot, hero_bot) -> list[dict]:
-    """One entry per stem call: the meaning per the ENGINE's convention
-    card (BBA/EPBot; owner r6), systemic-table fallback, silent passes
-    get no note (r3 #5)."""
+    """One entry per stem call, meaning from the ENGINE's convention
+    card (text + numeric state); silent calls get no note."""
     try:
-        card = engine.explain_auction(hero_bot, spot.dealer_i, spot.stem)
+        card = engine.explain_calls(hero_bot, spot.dealer_i, spot.stem)
     except Exception:
-        card = [""] * len(spot.stem)
+        card = [{"text": "", "hcp": None, "minlen": {}}] * len(spot.stem)
     out = []
     for j, tok in enumerate(spot.stem):
         seat_i = seat_of(spot.dealer_i, j)
         info = classify(spot.stem, spot.dealer_i, j)
-        meaning = _card_or_systemic(card[j], spot.stem, spot.dealer_i, j)
+        meaning = _render_meaning(card[j], is_pass=(tok == "P"))
         entry = {
             "idx": j, "seat": SEATS[seat_i], "call": tok,
             "category": info.category, "convention": info.convention,
             "artificial": info.artificial, "double_type": info.double_type,
-            "card_text": card[j],
+            "card": card[j],
         }
         entry["text"] = (f"{_call_name(tok)} ({SEATS[seat_i]}): {meaning}"
                          if meaning else "")
         out.append(entry)
     return out
-
-
-def _meaning_from_partner(engine, spot, prefix, subject_i) -> str | None:
-    """What subject_i's last call in `prefix` SHOWED, measured: sample
-    layouts consistent with the auction through that call from the
-    subject's PARTNER's viewpoint (we hold the full deal), then
-    summarize the subject-seat hands — the population of hands that
-    make this call in the engine's 2/1 style."""
-    partner_i = (subject_i + 2) % 4
-    try:
-        bot = engine.bot(spot.hands[partner_i], partner_i,
-                         spot.dealer_i, spot.vul)
-        hands_np, n = engine.sample_prefix(bot, spot.dealer_i, prefix)
-    except Exception:
-        return None
-    if n < BAND_N_MIN:
-        return None
-    feats = seat_features(hands_np, subject_i,
-                          engine.models.n_cards_bidding)
-    lo, hi = round(feats["hcp_p10"]), round(feats["hcp_p90"])
-    parts = [f"shows {lo}-{hi} HCP"]
-    longs = [s for s in "SHDC" if feats["len_avg"][s] >= 4.6]
-    for s in longs:
-        parts.append(f"{feats['len_avg'][s]:.1f} {SUIT_GLYPH[s]} on average")
-    if not longs and feats["balanced_share"] >= 0.55:
-        parts.append(f"balanced {feats['balanced_share']:.0%} of the time")
-    return ", ".join(parts) + f" (n={n}, measured)"
 
 
 def _continuations(spot, ev, bid) -> str | None:
@@ -149,15 +117,14 @@ def _continuations(spot, ev, bid) -> str | None:
 
 def option_explanations(spot, verdict, policy_map, engine=None,
                         ev=None, hero_bot=None) -> list[dict]:
-    card_texts = {}
+    cards = {}
     if engine is not None and hero_bot is not None:
         for b in [r["bid"] for r in verdict.table]:
             try:
-                texts = engine.explain_auction(
-                    hero_bot, spot.dealer_i, spot.stem + [b])
-                card_texts[b] = texts[-1]
+                cards[b] = engine.explain_calls(
+                    hero_bot, spot.dealer_i, spot.stem + [b])[-1]
             except Exception:
-                card_texts[b] = ""
+                cards[b] = {"text": "", "hcp": None, "minlen": {}}
     out = []
     ordered = [r["bid"] for r in verdict.table]
     for row in verdict.table:
@@ -167,9 +134,9 @@ def option_explanations(spot, verdict, policy_map, engine=None,
         contracts = ", ".join(
             f"{c} ({cnt / verdict.measured['n_samples']:.0%})"
             for c, cnt in row["top_contracts"])
-        meaning = _card_or_systemic(card_texts.get(b, ""),
-                                    spot.stem + [b], spot.dealer_i,
-                                    len(spot.stem))
+        meaning = _render_meaning(
+            cards.get(b, {"text": "", "hcp": None, "minlen": {}}),
+            is_pass=(b == "P"))
         lines = [
             f"{_call_name(b)} — {meaning}." if meaning
             else f"{_call_name(b)} — {info.category}.",
