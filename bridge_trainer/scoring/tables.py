@@ -1,6 +1,8 @@
 """Duplicate bridge scoring and the IMP table. Golden-tested against endplay."""
 from __future__ import annotations
 
+import numpy as np
+
 _TRICK_VALUE = {"C": 20, "D": 20, "H": 30, "S": 30}
 
 
@@ -63,3 +65,10 @@ def imps(diff: float) -> int:
     sign = 1 if diff >= 0 else -1
     a = abs(diff)
     return sign * sum(1 for b in IMP_BOUNDS if a >= b)
+
+
+def imps_array(diff: np.ndarray) -> np.ndarray:
+    """Vectorized imps() over an array of score differences."""
+    a = np.abs(diff)
+    n = np.searchsorted(IMP_BOUNDS, a, side="right")
+    return np.where(np.asarray(diff) >= 0, n, -n).astype(np.int64)

@@ -31,6 +31,28 @@ def test_solver_chunks_beyond_40_deals():
     assert (tricks[("S", "N")] == 13).all()
 
 
+# A deal with non-trivial trick counts in every strain (no side runs it out).
+MIXED = Deal("N:K93.752.A854.T62 AQJ4.KQ4.K3.AK54 "
+             "T87.JT86.QJ7.Q83 652.A93.T962.J97")
+
+
+def test_targeted_solve_matches_tables():
+    """Rare strains are routed to per-board solving; the trick counts must
+    equal the full-table entries exactly."""
+    deals = [WeightedDeal(MIXED)] * 8
+    denoms = {"S", "NT", "D"}
+    # S needed everywhere (stays in tables); NT and D on one deal each
+    # (1/8 <= RARE_STRAIN_FRAC -> targeted path).
+    needed = [{("S", "N"), ("S", "E")} for _ in range(8)]
+    needed[0].add(("NT", "E"))
+    needed[5].add(("D", "W"))
+    full = DDSolver().solve(deals, denoms)
+    hybrid = DDSolver().solve(deals, denoms, needed=needed)
+    for i, pairs in enumerate(needed):
+        for dn, pl in pairs:
+            assert hybrid[(dn, pl)][i] == full[(dn, pl)][i], (i, dn, pl)
+
+
 def identity_correction():
     return CorrectionTable({"schema_version": 1,
                             "suit": {0: 1.0}, "nt": {0: 1.0}})
