@@ -7,7 +7,7 @@ from __future__ import annotations
 import numpy as np
 
 from .ben import seat_features
-from .conventions import classify, seat_of
+from .conventions import seat_of
 
 SEATS = "NESW"
 SUIT_GLYPH = {"S": "♠", "H": "♥", "D": "♦", "C": "♣", "NT": "NT"}
@@ -74,12 +74,9 @@ def stem_explanations(engine, spot, hero_bot) -> list[dict]:
     out = []
     for j, tok in enumerate(spot.stem):
         seat_i = seat_of(spot.dealer_i, j)
-        info = classify(spot.stem, spot.dealer_i, j)
         meaning = _render_meaning(card[j], is_pass=(tok == "P"))
         entry = {
             "idx": j, "seat": SEATS[seat_i], "call": tok,
-            "category": info.category, "convention": info.convention,
-            "artificial": info.artificial, "double_type": info.double_type,
             "card": card[j],
         }
         entry["text"] = (f"{_call_name(tok)} ({SEATS[seat_i]}): {meaning}"
@@ -129,8 +126,6 @@ def option_explanations(spot, verdict, policy_map, engine=None,
     ordered = [r["bid"] for r in verdict.table]
     for row in verdict.table:
         b = row["bid"]
-        info = classify(spot.stem + [b] if b not in ("P", "X", "XX") or True
-                        else spot.stem, spot.dealer_i, len(spot.stem))
         contracts = ", ".join(
             f"{c} ({cnt / verdict.measured['n_samples']:.0%})"
             for c, cnt in row["top_contracts"])
@@ -139,7 +134,7 @@ def option_explanations(spot, verdict, policy_map, engine=None,
             is_pass=(b == "P"))
         lines = [
             f"{_call_name(b)} — {meaning}." if meaning
-            else f"{_call_name(b)} — {info.category}.",
+            else f"{_call_name(b)}.",
         ]
         if ev is not None:
             cont = _continuations(spot, ev, b)
@@ -171,8 +166,5 @@ def option_explanations(spot, verdict, policy_map, engine=None,
             lines.append("Caveat: much of this margin flows through doubled "
                          "contracts, where double-dummy defense is too good — "
                          "treat the exact number with care.")
-        out.append({"bid": b, "text": " ".join(lines),
-                    "category": info.category,
-                    "convention": info.convention,
-                    "double_type": info.double_type})
+        out.append({"bid": b, "text": " ".join(lines)})
     return out
