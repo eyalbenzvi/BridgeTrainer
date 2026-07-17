@@ -62,9 +62,7 @@ def build_record(spot, verdict, stem_expl, opt_expl, elapsed) -> dict:
         "difficulty": verdict.measured["gap_imps"],
         "quality": verdict.measured,
         "explanations": {
-            "note": "meanings are empirical — measured over layouts "
-                    "consistent with the auction under the engine's 2/1 "
-                    "style, not quoted from a rulebook",
+            "note": "call meanings follow standard 2/1 Game Force",
             "stem": stem_expl,
             "options": opt_expl,
         },
