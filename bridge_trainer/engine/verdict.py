@@ -113,7 +113,8 @@ def _interest(diff, doubled, ev, best, second, hero_i, policy_top, gap):
 
 
 def judge(ev, policy_top: str | None = None,
-          hero_i: int | None = None) -> Verdict:
+          hero_i: int | None = None,
+          policy_map: dict | None = None) -> Verdict:
     """ev: engine.ben.Evaluation for the scanner's candidate list."""
     bids = sorted(ev.bids, key=lambda b: -float(ev.ev[b].mean()))
     n = ev.n_samples
@@ -142,9 +143,13 @@ def judge(ev, policy_top: str | None = None,
         winner_share[b] = share
         row = {
             "bid": b,
-            "ev_imp_vs_top": round(float(d.mean()), 2) if b != best else 0.0,
+            # the winner's row compares to the NEXT-best option, never to
+            # itself (owner r5 #2)
+            "ev_imp_vs_top": round(float(d.mean()), 2),
+            "vs": second if b == best else best,
             "ci": round(float(1.96 * d.std() / np.sqrt(max(n, 1))), 2),
             "p_gain": round(float((d > 0).mean()), 3),
+            "p_loss": round(float((d < 0).mean()), 3),
             "p_push": round(float((d == 0).mean()), 3),
             "best_share": round(share, 3),
             "top_contracts": Counter(ev.contracts[b]).most_common(3),
@@ -228,6 +233,10 @@ def judge(ev, policy_top: str | None = None,
         return reject("no_clear_winner")
     measured.setdefault(
         "winner_by", "EV gap >= 0.5 IMPs" if gap >= 0.5 else "win rate +10%")
+    # A winner the engine itself would almost never choose is suspect —
+    # likely a rollout artifact, and bad teaching (owner r5 #1).
+    if policy_map is not None and policy_map.get(winner, 0.0) < 0.15:
+        return reject("implausible_winner")
 
     flags = []
     return Verdict(True, "accepted", best=winner, toss_up=False,

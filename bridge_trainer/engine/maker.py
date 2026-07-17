@@ -144,7 +144,7 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
         t_verdict = time.perf_counter() - t_v
         stage_totals["verdict_s"] += t_verdict
         v = judge(ev, policy_top=spot.candidates[0][0],
-                  hero_i=spot.hero_i)
+                  hero_i=spot.hero_i, policy_map=dict(spot.candidates))
         if v.accepted and v.measured.get("trap") and \
                 quotas.get("traps", 0) >= MAX_TRAP:
             rejections["quota_trap"] += 1

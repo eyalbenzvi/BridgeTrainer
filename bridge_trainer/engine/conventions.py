@@ -184,7 +184,8 @@ def classify(auction: list[str], dealer_i: int, idx: int) -> CallInfo:
         # 4th-suit-forcing detection: responder bids the only unbid suit
         all_shown = my_suits | opp_suits
         unbid = [d for d in ("C", "D", "H", "S") if d not in all_shown]
-        if len(unbid) == 1 and denom == unbid[0] and len(my_side_bids) >= 2:
+        if len(unbid) == 1 and denom == unbid[0] \
+                and len(my_side_bids) >= 2 and not opp_suits:
             return CallInfo("new-suit", "fourth suit (forcing one round)",
                             True, None, jump, False)
         cat = "new-suit"
@@ -288,6 +289,9 @@ def systemic_meaning(auction: list[str], dealer_i: int, idx: int) -> str:
             return "preempt: a 7-card suit, below opening strength"
         return "preemptive: a long suit, playing strength, not defense"
     if cat == "overcall" or (cat == "jump overcall"):
+        if "XX" in prior:
+            return "competing over the redouble: a long suit, " \
+                   "no extra values promised"
         if "jump" in cat:
             return "weak jump overcall: a 6-card suit, preemptive"
         if denom == "NT":
@@ -314,14 +318,35 @@ def systemic_meaning(auction: list[str], dealer_i: int, idx: int) -> str:
             return "jump rebid: a good 6+ card suit, 15-17 HCP"
         return "rebid: a 6+ card suit, minimum opening (11-14)"
     if cat == "notrump":
-        # NT by a player who already bid = natural range-showing rebid
+        # role-aware NT ranges (owner r5): opener rebid / response to an
+        # opening / advance of an overcall / direct NT overcall
+        me = seat_of(dealer_i, idx)
+        first_bid_j = next(j for j, t in enumerate(auction) if _is_bid(t))
+        opener = seat_of(dealer_i, first_bid_j)
+        partner = (me + 2) % 4
+        if opener == me:
+            if level == 1:
+                return "opener's rebid: balanced 12-14, no fit for partner"
+            return ("opener's jump rebid: balanced 18-19 HCP"
+                    if info.jump > 0 else
+                    "opener's rebid: balanced, extra values, stoppers")
+        if opener == partner:
+            if level == 1:
+                return "response: 6-10 points, no fit shown"
+            return "natural: invitational, about 11-12 points, stoppers"
+        # opponents opened: partner overcalled (advance) or direct NT
+        partner_acted = any(
+            _is_bid(t) or t == "X"
+            for j, t in enumerate(auction[:idx])
+            if seat_of(dealer_i, j) == partner)
+        if partner_acted:
+            if level == 1:
+                return "advance of the overcall: about 8-11 points, " \
+                       "a stopper in their suit"
+            return "advance: about 11-12 points, stoppers in their suit"
         if level == 1:
-            return "natural: balanced minimum (11-14), stoppers implied"
-        if level == 2:
-            return ("jump rebid: balanced 18-19 HCP" if info.jump > 0
-                    else "natural: about 11-12 points, stoppers in "
-                         "the unbid suits")
-        return "natural: to play, stoppers implied"
+            return "1NT overcall: 15-18 balanced, a stopper in their suit"
+        return "unusual/two-suited or natural strong, by agreement"
     if cat in ("new-suit", "jump new-suit"):
         me = seat_of(dealer_i, idx)
         opened = nonpass_before and seat_of(
