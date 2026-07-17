@@ -264,7 +264,9 @@ function reveal(chosen) {{
     '<div class="fog">\\u26a0 Raw and corrected verdicts disagree \\u2014 ' +
     'inside the DD fog. Trust this one less.</div>';
   document.getElementById("vtable").innerHTML = rowsHtml(v.corrected);
-  document.getElementById("rtable").innerHTML = rowsHtml(v.raw);
+  const rbox = document.getElementById("rtable");
+  if (v.raw && v.raw.length) rbox.innerHTML = rowsHtml(v.raw);
+  else if (rbox.closest("details")) rbox.closest("details").style.display = "none";
   const q = P.quality || {{}};
   document.getElementById("quality").textContent =
     `Simulated ${{P.generator.n_deals}} layouts (ESS ${{Math.round(q.ess || 0)}}).`;
@@ -298,6 +300,36 @@ async function init() {{
   if (!r.ok) {{ document.getElementById("problem").textContent =
                 "Problem not found."; return; }}
   P = await r.json();
+  // --- normalize ben-forge records (engine pool) to the page's shape ---
+  if (P.generator && P.generator.engine) {{
+    const v = P.verdict;
+    if (!Array.isArray(v.accepted))
+      v.accepted = v.toss_up ? v.toss_up_set : [v.accepted];
+    v.fog = v.fog || (v.flags || []).includes("dd_fog");
+    if (v.table && !v.corrected) {{
+      const top = v.table[0] ? v.table[0].bid : "";
+      v.corrected = v.table.map(r => ({{ action: r.bid,
+        ev: r.ev_imp_vs_top, ci: r.ci, vs: top,
+        p_gain: r.p_gain, p_loss: Math.max(0, 1 - r.p_gain - r.p_push) }}));
+      v.raw = [];
+    }}
+    P.generator.n_deals = P.generator.n_deals || P.generator.samples;
+    if (P.explanations) {{
+      if (!P.explanation)
+        P.explanation = (P.explanations.options || []).map(o => o.text)
+          .join("\\n\\n") + (P.explanations.note
+            ? "\\n\\n(" + P.explanations.note + ")" : "");
+      if (!P.auction_notes)
+        P.auction_notes = (P.explanations.stem || []).map(
+          e => e.text.replace(/^[^:]*:\s*/, ""));
+      if (!P.option_notes && P.explanations.options) {{
+        P.option_notes = {{}};
+        for (const o of P.explanations.options)
+          P.option_notes[o.bid] =
+            o.text.split(". ")[0].replace(/^[^\\u2014]*\\u2014\\s*/, "") + ".";
+      }}
+    }}
+  }}
   document.getElementById("meta").textContent =
     `Dealer ${{P.dealer}} \\u00b7 Vul ${{P.vul}} \\u00b7 IMPs \\u00b7 you are ${{P.seat}}` +
     (P.category && P.category !== "other" ? ` \\u00b7 ${{P.category}}` : "");
@@ -305,7 +337,8 @@ async function init() {{
     `<div class="card">${{auctionTableHtml(P)}}` +
     `<div class="hand">${{handHtml(P.hand)}}</div></div>`;
   const cands = document.getElementById("cands");
-  for (const c of P.candidates) {{
+  for (const cand of P.candidates) {{
+    const c = cand.call || cand;
     const b = document.createElement("button");
     b.className = "cand"; b.dataset.action = c;
     b.innerHTML = c === "X" ? "Double" : callHtml(c);
@@ -326,12 +359,15 @@ async function init() {{
   }}
   if (P.option_notes) {{
     document.getElementById("option-notes-list").innerHTML =
-      P.candidates.map(c => {{
+      P.candidates.map(cand => {{
+        const c = cand.call || cand;
         const n = P.option_notes[c];
         if (!n) return "";
+        const shows = n.shows || n;
+        const pline = n.partner ? `<br><small class="muted">Partner: ` +
+                                  `${{n.partner}}</small>` : "";
         return `<li><b>${{c === "X" ? "Double" : callHtml(c)}}</b> \\u2014 ` +
-               `${{n.shows}}<br><small class="muted">Partner: ` +
-               `${{n.partner}}</small></li>`;
+               `${{shows}}${{pline}}</li>`;
       }}).join("");
     document.getElementById("option-notes").style.display = "block";
   }}

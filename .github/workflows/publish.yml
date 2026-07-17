@@ -29,12 +29,12 @@ jobs:
         run: pytest -q
       - name: Build app shell
         run: trainer webapp --out _site
-      - name: Preserve existing problem pool
+      - name: Deploy the repo's problem pool
+        # data/ in the repo is the pool of record (ben-forge output; the
+        # nightly generate workflow commits new problems there). The old
+        # gh-pages pool is intentionally replaced, not preserved.
         run: |
-          if git fetch origin gh-pages --depth 1 2>/dev/null; then
-            git worktree add _old origin/gh-pages
-            [ -d _old/data ] && cp -r _old/data _site/data || true
-          fi
+          [ -d data ] && cp -r data _site/data || true
       - name: Deploy to gh-pages
         run: |
           cd _site
