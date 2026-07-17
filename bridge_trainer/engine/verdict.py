@@ -24,7 +24,7 @@ DEAD_SHARE = 0.005
 # the honesty gates above answer "is the evidence sound?"; the interest
 # score answers "is this worth a serious player's minute?"
 Q_MIN = 0.40            # consequence floor: P(choice changes the result)
-THETA = 55.0            # interest-score acceptance bar (calibrated)
+THETA = 80.0            # calibrated 2026-07-17: 12/100 fresh boards
 TRAP_GAP_MIN = 0.8      # policy-argmax loses by at least this => trap
 UNSTABLE_DELTA = 15.0   # split-half interest drift => DD-noise harvest
 
@@ -103,8 +103,9 @@ def _interest(diff, doubled, ev, best, second, hero_i, policy_top, gap):
     damage = max(float(ev.ev[b].mean()) for b in ev.bids) < 0
 
     score = (30 * min(q / 0.80, 1) + 25 * min(p4 / 0.35, 1)
-             + 15 * min(tv / 0.60, 1) + 10 * (flip >= 0.25)
-             + 8 * span + 20 * trap + 12 * damage)
+             + 15 * min(tv / 0.60, 1) + 10 * (flip >= 0.25)  # span=10 keeps
+             # the pure thin-game archetype (30+25+15+10=80) exactly at THETA
+             + 10 * span + 20 * trap + 12 * damage)
     return score, {"q": round(q, 3), "p4": round(p4, 3), "tv": round(tv, 3),
                    "flip": round(flip, 3), "span": bool(span),
                    "trap": bool(trap), "damage": bool(damage),
