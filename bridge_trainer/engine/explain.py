@@ -57,14 +57,25 @@ def stem_explanations(engine, spot, hero_bot) -> list[dict]:
         }
         text_head = f"{_call_name(tok)} ({SEATS[seat_i]})"
         if tok == "P":
-            entry["text"] = f"{text_head}: nothing shown yet." if j < 2 else \
-                f"{text_head}: limited — no action available or chosen."
+            entry["text"] = ""   # bids that show nothing get no note (r3 #5)
         elif tok in ("X", "XX"):
             entry["text"] = f"{text_head}: {info.double_type or 'double'}."
         else:
             entry["text"] = f"{text_head}: {info.category}."
+        if seat_i == spot.hero_i and tok != "P":
+            # what YOUR bid told partner (owner r3 #3)
+            who = "told partner"
+            if info.convention:
+                entry["text"] = f"{text_head}: {info.convention}."
+            else:
+                meaning = _meaning_from_partner(
+                    engine, spot, spot.stem[:j + 1], spot.hero_i)
+                entry["text"] = (f"{text_head}: {who} " + meaning + "."
+                                 ) if meaning else \
+                    f"{text_head}: {info.double_type or info.category}."
+            out.append(entry)
+            continue
         if seat_i == spot.hero_i:
-            entry["text"] = f"{text_head}: your own call."
             out.append(entry)
             continue
         # empirical band through this call (hero-conditioned sampling)
@@ -88,22 +99,22 @@ def stem_explanations(engine, spot, hero_bot) -> list[dict]:
     return out
 
 
-def _option_meaning(engine, spot, bid) -> str | None:
-    """What this call SHOWS, measured: sample layouts consistent with
-    stem+bid from PARTNER's viewpoint (we hold the full deal), then
-    summarize the hero-seat hands — the population of hands that make
-    this call in the engine's 2/1 style."""
-    partner_i = (spot.hero_i + 2) % 4
+def _meaning_from_partner(engine, spot, prefix, subject_i) -> str | None:
+    """What subject_i's last call in `prefix` SHOWED, measured: sample
+    layouts consistent with the auction through that call from the
+    subject's PARTNER's viewpoint (we hold the full deal), then
+    summarize the subject-seat hands — the population of hands that
+    make this call in the engine's 2/1 style."""
+    partner_i = (subject_i + 2) % 4
     try:
         bot = engine.bot(spot.hands[partner_i], partner_i,
                          spot.dealer_i, spot.vul)
-        hands_np, n = engine.sample_prefix(
-            bot, spot.dealer_i, spot.stem + [bid])
+        hands_np, n = engine.sample_prefix(bot, spot.dealer_i, prefix)
     except Exception:
         return None
     if n < BAND_N_MIN:
         return None
-    feats = seat_features(hands_np, spot.hero_i,
+    feats = seat_features(hands_np, subject_i,
                           engine.models.n_cards_bidding)
     lo, hi = round(feats["hcp_p10"]), round(feats["hcp_p90"])
     parts = [f"shows {lo}-{hi} HCP"]
@@ -153,7 +164,8 @@ def option_explanations(spot, verdict, policy_map, engine=None,
         contracts = ", ".join(
             f"{c} ({cnt / verdict.measured['n_samples']:.0%})"
             for c, cnt in row["top_contracts"])
-        meaning = _option_meaning(engine, spot, b) if engine else None
+        meaning = _meaning_from_partner(engine, spot, spot.stem + [b],
+                                        spot.hero_i) if engine else None
         conv = info.convention or info.double_type or info.category
         lines = [
             f"{_call_name(b)} — {conv}" + (f": {meaning}." if meaning
@@ -169,19 +181,14 @@ def option_explanations(spot, verdict, policy_map, engine=None,
             f"Where it leads: {contracts}.",
         ]
         if b == verdict.best:
-            if verdict.toss_up:
-                tied = ", ".join(_call_name(x) for x in
-                                 [verdict.best] + verdict.toss_up_with)
-                lines.append(
-                    f"The panel would split: {tied} scored within the noise "
-                    f"(gap {verdict.measured['gap_imps']:+.1f} IMPs, "
-                    f"±{verdict.measured['ci']:.1f}).")
-            else:
-                lines.append(
-                    f"Best in simulation: {verdict.measured['gap_imps']:+.1f} "
-                    f"IMPs vs {_call_name(verdict.measured['top2'][1])} "
-                    f"(±{verdict.measured['ci']:.1f}) — a real edge, not a "
-                    f"landslide.")
+            by = verdict.measured.get("winner_by", "")
+            other = [x for x in verdict.measured['top2'] if x != b]
+            vs = _call_name(other[0]) if other else "the alternative"
+            lines.append(
+                f"The winner ({by}): {verdict.measured['gap_imps']:+.1f} "
+                f"IMPs vs {vs} (±{verdict.measured['ci']:.1f}); wins on "
+                f"{verdict.measured.get('p_top_wins', 0):.0%} of layouts "
+                f"against {verdict.measured.get('p_second_wins', 0):.0%}.")
         else:
             lines.append(
                 f"Scored {row['ev_imp_vs_top']:+.1f} IMPs vs the top choice "

@@ -147,6 +147,10 @@ def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
             break  # passed out
         if n > 40:
             break  # runaway guard
+        # early stop: too deep for any further eligible turn (owner r3 #1)
+        if sum(1 for t in auction if t != "P") > MAX_NONPASS_STEM + 3 \
+                and not any(t.eligible for t in turns):
+            return None
         seat_i = seat_of(dealer_i, n)
         policy = [(it.bid, it.p) for it in
                   engine.policy(bots[seat_i], dealer_i, auction)]
@@ -166,18 +170,19 @@ def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
             elif _gf_pass_artifact(policy, auction, dealer_i):
                 qualifies, why = False, "gf pass artifact"
             else:
-                fork = _content_exclusion(hands[seat_i], policy, auction,
-                                          dealer_i, seat_i)
-                if fork:
-                    qualifies, why = False, fork
+                from .conventions import in_convention_sequence
+                if in_convention_sequence(auction, dealer_i, seat_i):
+                    qualifies, why = False, "mid-convention sequence"
+                else:
+                    fork = _content_exclusion(hands[seat_i], policy,
+                                              auction, dealer_i, seat_i)
+                    if fork:
+                        qualifies, why = False, fork
 
-        # Searched choice only where search can matter (>1 live candidate);
-        # dominant turns commit the policy top directly — same call Ben's
-        # own no-search shortcut would make, at NN cost instead of seconds.
-        if len(policy) > 1:
-            chosen, _resp = engine.choose(bots[seat_i], dealer_i, auction)
-        else:
-            chosen = policy[0][0]
+        # Speed (owner r3 #1): scan commits the raw policy top at every
+        # turn — no internal search. The stem-mass floor still discards
+        # engine-weird stems; the verdict stage does the real judging.
+        chosen = policy[0][0]
         turns.append(Turn(idx=n, seat_i=seat_i, policy=policy,
                           chosen=chosen, eligible=qualifies,
                           why_ineligible=why))
