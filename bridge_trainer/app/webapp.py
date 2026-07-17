@@ -116,6 +116,19 @@ button.typerow[aria-pressed="false"] .tick { background: transparent;
                        border-color: var(--line); color: transparent; }
 button.typerow[aria-pressed="false"] .tbar > span { background: var(--push); }
 a.big.off { background: var(--push); color: var(--card); cursor: not-allowed; }
+/* collapsible filter: a tap bar that folds the two groups away by default */
+.fbar { display: flex; align-items: center; gap: 10px; width: 100%;
+        background: none; border: 0; font: inherit; color: var(--fg);
+        cursor: pointer; padding: 0; text-align: left; min-height: 24px; }
+.fbar .fbar-main { font-size: 15px; font-weight: 700; }
+.fbar .fbar-sub { margin-left: auto; font-size: 13px; color: var(--muted);
+                  font-variant-numeric: tabular-nums; }
+.fbar.on .fbar-sub { color: var(--accent); font-weight: 700; }
+.fbar .fbar-chev { color: var(--muted); font-size: 12px; width: 1em;
+                   text-align: center; transition: transform .15s; }
+.fbar[aria-expanded="true"] .fbar-chev { transform: rotate(180deg); }
+.fbody { margin-top: 14px; }
+.fbody[hidden] { display: none; }
 /* problem-type badge (classification.type), shown with the problem */
 .typebadge { display: inline-block; font-size: 11px; font-weight: 700;
              letter-spacing: .08em; text-transform: uppercase;
@@ -486,6 +499,13 @@ def _index_html() -> str:
 <style>{_CSS}</style></head><body>
 <h1><span style="opacity:.9">&spades;</span> Bridge Bidding Trainer</h1>
 <div class="card" id="filters">
+<button type="button" class="fbar" id="fbar" aria-expanded="false"
+        aria-controls="fbody">
+<span class="fbar-main">Choose difficulty &amp; type</span>
+<span class="fbar-sub" id="fbar-sub"></span>
+<span class="fbar-chev" aria-hidden="true">&#9662;</span>
+</button>
+<div class="fbody" id="fbody" hidden>
 <div class="fgroup">
 <div class="grow"><span class="glabel">Difficulty</span>
 <button type="button" class="alllink" id="all-diff"></button></div>
@@ -495,6 +515,7 @@ def _index_html() -> str:
 <div class="grow"><span class="glabel">Problem type</span>
 <button type="button" class="alllink" id="all-type"></button></div>
 <div class="typelist" id="type-list"></div>
+</div>
 </div>
 </div>
 <a class="big" id="deal" href="#">Deal me a hand &rarr;</a>
@@ -517,18 +538,48 @@ function buildFilters() {{
   seg.innerHTML = f.levels.map(lv =>
     `<button type="button" data-level="${{lv}}">` +
     `<span class="sname">${{DIFF_NAMES[lv]}}</span>` +
-    `<span class="scount">${{f.levelCount[lv]}}</span></button>`).join("");
-  const max = Math.max(1, ...f.types.map(t => f.typeCount[t]));
+    `<span class="scount">0</span></button>`).join("");
   document.getElementById("type-list").innerHTML = f.types.map(t => {{
-    const n = f.typeCount[t], nm = TYPE_NAMES[t];
-    const pct = Math.round(100 * n / max);
+    const nm = TYPE_NAMES[t];
     return `<button type="button" class="typerow" data-type="${{t}}" ` +
-      `title="${{nm[1]}}" aria-label="${{nm[0]}}, ${{n}} problems">` +
+      `title="${{nm[1]}}">` +
       `<span class="tick" aria-hidden="true"></span>` +
       `<span class="tname">${{nm[0]}}</span>` +
-      `<span class="tbar"><span style="width:${{pct}}%"></span></span>` +
-      `<span class="tcount">${{n}}</span></button>`;
+      `<span class="tbar"><span style="width:0%"></span></span>` +
+      `<span class="tcount">0</span></button>`;
   }}).join("");
+}}
+/* Counts shown on each option are cross-filtered: a difficulty segment
+   counts only problems whose type is currently selected, and a type row
+   counts only problems whose difficulty is currently selected. So picking
+   "Hard" makes every type row show its Hard-only tally. Each axis ignores
+   its own selection (standard faceting) so you can still see what turning an
+   option back on would add. */
+function facetCounts(index, flt) {{
+  const levelCount = {{}}, typeCount = {{}};
+  for (const p of index.problems) {{
+    if (p.difficulty_level && flt.types.includes(p.type))
+      levelCount[p.difficulty_level] =
+        (levelCount[p.difficulty_level] || 0) + 1;
+    if (p.type && flt.levels.includes(p.difficulty_level))
+      typeCount[p.type] = (typeCount[p.type] || 0) + 1;
+  }}
+  return {{levelCount, typeCount}};
+}}
+function updateFacetCounts() {{
+  const c = facetCounts(INDEX, FILTERS);
+  document.querySelectorAll("#diff-seg button").forEach(b => {{
+    b.querySelector(".scount").textContent = c.levelCount[+b.dataset.level] || 0;
+  }});
+  const rows = [...document.querySelectorAll("#type-list .typerow")];
+  const max = Math.max(1, ...rows.map(b => c.typeCount[b.dataset.type] || 0));
+  rows.forEach(b => {{
+    const n = c.typeCount[b.dataset.type] || 0;
+    b.querySelector(".tcount").textContent = n;
+    b.querySelector(".tbar > span").style.width = Math.round(100 * n / max) + "%";
+    b.setAttribute("aria-label",
+      `${{b.querySelector(".tname").textContent}}, ${{n}} problems`);
+  }});
 }}
 function applyFilterUi() {{
   const f = poolFacets(INDEX);
@@ -548,7 +599,7 @@ function persist() {{
       FILTERS.types.length >= f.types.length)
     localStorage.removeItem(FILTERS_KEY);   // everything -> follow the pool
   else saveFilters({{levels: FILTERS.levels, types: FILTERS.types}});
-  applyFilterUi(); renderStats();
+  applyFilterUi(); updateFacetCounts(); renderStats();
 }}
 document.getElementById("diff-seg").addEventListener("click", ev => {{
   const b = ev.target.closest("button[data-level]");
@@ -603,6 +654,10 @@ function renderStats() {{
       `You haven't answered any yet.</div>`;
   }}
   document.getElementById("stats").innerHTML = h;
+  const fbar = document.getElementById("fbar");
+  document.getElementById("fbar-sub").textContent =
+    narrowed ? `${{matching.length}} of ${{INDEX.count}}` : "All problems";
+  fbar.classList.toggle("on", narrowed);
   const deal = document.getElementById("deal");
   const none = !FILTERS.levels.length || !FILTERS.types.length;
   deal.classList.toggle("off", none);
@@ -622,8 +677,16 @@ async function init() {{
   FILTERS = resolveFilters(INDEX, loadFilters());
   buildFilters();
   applyFilterUi();
+  updateFacetCounts();
   renderStats();
 }}
+document.getElementById("fbar").onclick = () => {{
+  const bar = document.getElementById("fbar");
+  const body = document.getElementById("fbody");
+  const open = bar.getAttribute("aria-expanded") === "true";
+  bar.setAttribute("aria-expanded", open ? "false" : "true");
+  if (open) body.setAttribute("hidden", ""); else body.removeAttribute("hidden");
+}};
 document.getElementById("deal").onclick = () => {{
   if (!INDEX) return false;
   if (!FILTERS.levels.length || !FILTERS.types.length) return false;
