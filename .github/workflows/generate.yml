@@ -10,8 +10,11 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: "problems to generate"
+        description: "problems to generate (0 = none)"
         default: "10"
+      remove:
+        description: "problem ids to remove (space-separated, optional)"
+        default: ""
 
 permissions:
   contents: write
@@ -38,7 +41,14 @@ jobs:
       - name: Setup ben
         run: PYTHON=python3.12 bash scripts/setup_ben.sh "$HOME/ben" "$HOME/benv"
 
+      - name: Remove requested problems
+        if: github.event.inputs.remove != ''
+        run: |
+          "$HOME/benv/bin/python" -m bridge_trainer.app.cli \
+            pool rm ${{ github.event.inputs.remove }} --pool data
+
       - name: Generate
+        if: github.event.inputs.count != '0'
         run: |
           COUNT="${{ github.event.inputs.count || '10' }}"
           SEED=$(( $(date +%s) / 86400 ))000
