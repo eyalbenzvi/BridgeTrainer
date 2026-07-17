@@ -48,6 +48,18 @@ Problems land in a JSON pool (`data/`) read by the static app
 (`trainer webapp`); `.github/workflows/generate.yml` grows the pool
 nightly with the engine cached between CI runs.
 
+Generation speed: `--workers N` runs N engine processes in parallel
+(0 = auto; ~1.2 GB RAM each; same seed still yields the same problem,
+but which in-flight seeds land when the count fills can vary run to
+run). A decisive-rejection prescreen also judges 2 candidates on a
+32-sample slice first and discards boards whose rejection is already
+statistically settled — accepted problems still pass the unchanged
+128-sample screen and 512-sample confirm, so published evidence is
+untouched; the prescreen only trades recall (boards are free), and its
+false-kill rate is measurable with `ben-forge --audit-prescreen`. Note
+the prescreen slightly shifts pool composition away from boards whose
+evidence is diffuse at 32 samples (rare-swing, many-way dilemmas).
+
 ## Authored problems (legacy drill, still available for dev)
 
 ## Phone / cloud usage

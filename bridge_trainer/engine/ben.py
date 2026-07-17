@@ -63,7 +63,8 @@ class Evaluation:
 
 
 class BenEngine:
-    def __init__(self, ben_home: str = None, verbose: bool = False):
+    def __init__(self, ben_home: str = None, verbose: bool = False,
+                 dds_max_threads: int = 0):
         self.ben_home = ben_home or os.environ.get("BEN_HOME", BEN_HOME_DEFAULT)
         os.environ.setdefault("BEN_HOME", self.ben_home)
         src = os.path.join(self.ben_home, "src")
@@ -87,7 +88,10 @@ class BenEngine:
         configuration["sampling"]["sample_hands_auction"] = "128"
         self.models = Models.from_conf(configuration, self.ben_home)
         self.sampler = Sample.from_conf(configuration, verbose)
-        self.dds = DDSolver()
+        # dds_max_threads=0 keeps DDS's default (one solver thread per
+        # core); parallel forge workers pass cpu_count // workers so
+        # board-level parallelism is the only parallelism
+        self.dds = DDSolver(max_threads=dds_max_threads)
         self.verbose = verbose
         self._conf_name = configuration["models"].get("name", "?")
         self.model_id = f"{self._conf_name} {os.path.basename(self.models.bidder_model.model_path) if hasattr(self.models.bidder_model, 'model_path') else 'BEN-21GF'}"
@@ -117,32 +121,46 @@ class BenEngine:
 
     # -- paired evaluation of an explicit candidate list -------------------
     def evaluate(self, bot, dealer_i: int, auction: list[str],
-                 bids: list[str], n_samples: int | None = None) -> Evaluation:
+                 bids: list[str], n_samples: int | None = None,
+                 dd_memo: dict | None = None) -> Evaluation:
         """Mirror of BotBid.bid()'s rollout block, but on OUR candidate
         list, all candidates on the same sampled layouts (INV1 pairing).
         n_samples temporarily overrides the sampler's target count."""
-        from bidding import bidding as ben_bidding
+        padded, hands_np, hands_pbn, quality = self.sample_for_auction(
+            bot, dealer_i, auction, n_samples)
+        return self.rollout_eval(bot, padded, bids, hands_np, hands_pbn,
+                                 quality, dd_memo=dd_memo)
 
+    def sample_for_auction(self, bot, dealer_i: int, auction: list[str],
+                           n_samples: int | None = None):
+        """Sample + translate ONCE for an auction; the (hands_np,
+        hands_pbn) pair can then feed several rollout_eval calls (e.g. a
+        prescreen slice and the full screen) with shared PBN strings."""
         saved = self.sampler._sample_hands_auction
         if n_samples:
             self.sampler._sample_hands_auction = n_samples
         try:
-            return self._evaluate(bot, dealer_i, auction, bids, ben_bidding)
+            padded = pad(dealer_i, auction)
+            hands_np, _scores, _p_hcp, _p_shp, quality = \
+                bot.sample_hands_for_auction(padded, bot.seat)
+            n = hands_np.shape[0]
+            hands_pbn = bot.translate_hands(hands_np, bot.hand_str, n)
+            return padded, hands_np, hands_pbn, float(quality)
         finally:
             self.sampler._sample_hands_auction = saved
 
-    def _evaluate(self, bot, dealer_i, auction, bids, ben_bidding):
-        padded = pad(dealer_i, auction)
-        hands_np, sorted_score, _p_hcp, _p_shp, quality = \
-            bot.sample_hands_for_auction(padded, bot.seat)
-        n = hands_np.shape[0]
-        hands_pbn = bot.translate_hands(hands_np, bot.hand_str, n)
+    def rollout_eval(self, bot, padded, bids, hands_np, hands_pbn,
+                     quality: float, dd_memo: dict | None = None) -> Evaluation:
+        """Rollout + DD + score the candidates on the given sample rows."""
+        from bidding import bidding as ben_bidding
 
+        n = hands_np.shape[0]
         ev, contracts, aucs = {}, {}, {}
         for bid in bids:
             ben_bid = to_ben(bid)
             auctions_np = bot.bidding_rollout(padded, ben_bid, hands_np, hands_pbn)
-            cts, tricks_softmax = bot.expected_tricks_dd(hands_pbn, auctions_np, ben_bid)
+            cts, tricks_softmax = _tricks_dd_memo(bot, hands_pbn, auctions_np,
+                                                  dd_memo)
             scores = bot.expected_score(len(padded) % 4, cts, tricks_softmax)
             ev[bid] = np.asarray(scores, dtype=float)
             contracts[bid] = list(cts)
@@ -208,15 +226,63 @@ class BenEngine:
         return hands_np[:max_boards], min(len(hands_np), max_boards)
 
 
+def _tricks_dd_memo(bot, hands_pbn, auctions_np, dd_memo: dict | None):
+    """Bit-identical mirror of BotBid.expected_tricks_dd with an optional
+    deal-level cache. Key: (pbn, strain, rotated leader) — complete for
+    this call pattern because current_trick=[] and solutions=1 are
+    constants, the PBN string itself encodes the seat rotation, and DDS
+    is exact (identical inputs => identical tricks regardless of batch
+    composition). The payoff is cross-CANDIDATE within one board:
+    rollouts of different candidates frequently converge to the same
+    final contract on the same shared sample. (Cross-STAGE hits are ~0:
+    Ben's pip randomization in translate_hands is position-dependent, so
+    screen and confirm PBNs differ for the same abstract deal.)"""
+    from bidding import bidding as ben_bidding
+    from collections import defaultdict
+
+    n_samples = auctions_np.shape[0]
+    assert len(hands_pbn) == n_samples
+    decl_tricks_softmax = np.zeros((n_samples, 14), dtype=np.int32)
+    contracts = []
+    groups = defaultdict(list)
+    for i in range(n_samples):
+        sample_auction = [ben_bidding.ID2BID[b]
+                          for b in list(auctions_np[i, :]) if b != 1]
+        contract = ben_bidding.get_contract(sample_auction)
+        if contract is None:
+            contracts.append("PASS")
+            continue
+        contracts.append(contract)
+        strain = 'NSHDC'.index(contract[1])
+        declarer = 'NESW'.index(contract[-1])
+        leader = (declarer + 1) % 4
+        leader = (leader + 4 - bot.seat) % 4
+        key = (hands_pbn[i], strain, leader)
+        if dd_memo is not None and key in dd_memo:
+            decl_tricks_softmax[i, dd_memo[key]] = 1
+        else:
+            groups[(strain, leader)].append(i)
+
+    for (strain, leader), indices in groups.items():
+        pbns = [hands_pbn[i] for i in indices]
+        dd_solved = bot.ddsolver.solve(strain, leader, [], pbns, 1)
+        for j, i in enumerate(indices):
+            tricks = 13 - dd_solved["max"][j]
+            decl_tricks_softmax[i, tricks] = 1
+            if dd_memo is not None:
+                dd_memo[(hands_pbn[i], strain, leader)] = tricks
+    return contracts, decl_tricks_softmax
+
+
 def _hand_str(hand_row, n_cards) -> str:
     from util import hand_to_str
     return hand_to_str(hand_row, n_cards)
 
 
-def get_engine(verbose: bool = False) -> BenEngine:
+def get_engine(verbose: bool = False, dds_max_threads: int = 0) -> BenEngine:
     global _engine
     if _engine is None:
-        _engine = BenEngine(verbose=verbose)
+        _engine = BenEngine(verbose=verbose, dds_max_threads=dds_max_threads)
     return _engine
 
 

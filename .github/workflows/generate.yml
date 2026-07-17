@@ -54,7 +54,7 @@ jobs:
           SEED=$(( $(date +%s) / 86400 ))000
           BEN_HOME="$HOME/ben" "$HOME/benv/bin/python" -m bridge_trainer.app.cli \
             ben-forge --count "$COUNT" --seed "$SEED" --pool data \
-            --max-seconds 5400
+            --max-seconds 5400 --workers 0
 
       - name: Commit pool
         run: |
