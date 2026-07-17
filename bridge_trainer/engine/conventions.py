@@ -172,8 +172,11 @@ def classify(auction: list[str], dealer_i: int, idx: int) -> CallInfo:
     if not nonpass_before:
         return CallInfo("opening", None, False, None, jump, False)
     my_suits = {_denom(t) for t in my_side_bids if _denom(t) != "NT"}
+    my_own_suits = _suits_shown_naturally(prior, dealer_i, {me}, idx)
     partner_suits = _suits_shown_naturally(prior, dealer_i, {partner}, idx)
-    if denom != "NT" and denom in partner_suits:
+    if denom != "NT" and denom in my_own_suits:
+        cat = "rebid of the suit"
+    elif denom != "NT" and denom in partner_suits:
         cat = "raise"
     elif denom == "NT":
         cat = "notrump"
