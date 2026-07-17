@@ -48,9 +48,12 @@ class ProblemPool:
         entries = []
         for pid in self.ids():
             rec = self.get(pid)
+            cls = rec.get("classification", {})
             entries.append({
                 "id": pid,
                 "difficulty": rec.get("difficulty"),
+                "type": cls.get("type"),
+                "difficulty_level": cls.get("difficulty_level"),
                 "created_at": rec.get("created_at"),
             })
         entries.sort(key=lambda e: e["created_at"] or "", reverse=True)

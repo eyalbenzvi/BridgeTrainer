@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from ..pool.store import ProblemPool
 from .conventions import hero_role
+from .difficulty import difficulty_classification
 from .scanner import SEATS, VUL_NAMES, scan_board
 from .verdict import judge, prejudge
 
@@ -75,6 +76,10 @@ def build_record(spot, verdict, stem_expl, opt_expl, elapsed) -> dict:
              "policy": [(b, round(p, 3)) for b, p in t.policy[:4]]}
             for t in spot.turns],
     }
+    # graded 1-5 difficulty (docs: engine/difficulty.py); the LLM-assigned
+    # problem type is attached by scripts/classify_pool.py in the same
+    # generation run
+    rec["classification"] = difficulty_classification(rec)
     return rec
 
 
