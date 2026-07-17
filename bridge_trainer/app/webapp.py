@@ -68,17 +68,54 @@ a { color: var(--accent); }
 .muted { color: var(--muted); font-size: 13px; }
 .pill { display: inline-block; border-radius: 999px; padding: 1px 8px;
         font-size: 12px; border: 1px solid #ffffff55; }
-/* homepage deal filters: difficulty level + problem type, both multi-select */
-.filter-group { margin: 0 0 12px; }
-.filter-group:last-child { margin-bottom: 0; }
-.filter-label { font-size: 12px; font-weight: 700; text-transform: uppercase;
-                letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
-.filterchips { display: flex; flex-wrap: wrap; gap: 6px; }
-button.filterchip { font: inherit; font-size: 13px; padding: 6px 12px;
-  border-radius: 999px; border: 1px solid var(--line); background: var(--card);
-  color: var(--fg); cursor: pointer; }
-button.filterchip.active { border-color: var(--accent);
-  background: var(--accent-tint); color: var(--accent); font-weight: 700; }
+/* homepage practice filters: difficulty (segmented) + problem type (list),
+   both multi-select and everything selected by default. Each option carries
+   the number of problems it holds. */
+.fgroup { margin: 0 0 16px; }
+.fgroup:last-child { margin-bottom: 0; }
+.grow { display: flex; justify-content: space-between; align-items: baseline;
+        margin: 0 0 8px; }
+.glabel { font-size: 12px; font-weight: 700; text-transform: uppercase;
+          letter-spacing: .05em; color: var(--muted); }
+.alllink { background: none; border: 0; font: inherit; font-size: 12px;
+           font-weight: 600; color: var(--accent); cursor: pointer;
+           padding: 2px 2px; }
+.alllink:hover { text-decoration: underline; }
+/* segmented difficulty control (ordinal, so it reads as one scale) */
+.seg { display: grid; grid-template-columns: repeat(var(--n, 5), 1fr);
+       border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { font: inherit; border: 0; border-left: 1px solid var(--line);
+              background: var(--card); color: var(--muted); cursor: pointer;
+              padding: 8px 2px 7px; display: flex; flex-direction: column;
+              align-items: center; gap: 2px; line-height: 1.1; }
+.seg button:first-child { border-left: 0; }
+.seg button .sname { font-size: 11px; font-weight: 600; }
+.seg button .scount { font-size: 13px; font-weight: 700;
+                      font-variant-numeric: tabular-nums; }
+.seg button.active { background: var(--accent-tint); color: var(--accent); }
+/* problem-type toggle rows: name + proportional volume bar + count */
+.typelist { display: flex; flex-direction: column; gap: 6px; }
+button.typerow { display: flex; align-items: center; gap: 10px; width: 100%;
+                 font: inherit; text-align: left; background: var(--card);
+                 color: var(--fg); border: 1px solid var(--line);
+                 border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+button.typerow .tick { flex: 0 0 auto; width: 18px; height: 18px;
+                       border-radius: 5px; border: 1.5px solid var(--accent);
+                       background: var(--accent); color: #fff; display: grid;
+                       place-items: center; font-size: 11px; }
+button.typerow .tick::after { content: "\\2713"; }
+button.typerow .tname { flex: 0 0 auto; font-size: 14px; font-weight: 600; }
+button.typerow .tbar { flex: 1 1 auto; height: 6px; border-radius: 999px;
+                       background: var(--line); overflow: hidden; }
+button.typerow .tbar > span { display: block; height: 100%; border-radius: 999px;
+                              background: var(--accent); }
+button.typerow .tcount { flex: 0 0 auto; min-width: 1.6em; text-align: right;
+                         font-weight: 700; font-variant-numeric: tabular-nums; }
+button.typerow[aria-pressed="false"] { color: var(--muted); }
+button.typerow[aria-pressed="false"] .tick { background: transparent;
+                       border-color: var(--line); color: transparent; }
+button.typerow[aria-pressed="false"] .tbar > span { background: var(--push); }
+a.big.off { background: var(--push); color: var(--card); cursor: not-allowed; }
 /* problem-type badge (classification.type), shown with the problem */
 .typebadge { display: inline-block; font-size: 11px; font-weight: 700;
              letter-spacing: .08em; text-transform: uppercase;
@@ -230,22 +267,47 @@ async function fetchIndex() {
   if (!r.ok) throw new Error("no pool index");
   return r.json();
 }
-const FILTERS_KEY = "bt_filters";
+/* Deal filters. Everything is selected by default: an absent key means
+   "the whole pool", and selecting every option again clears the key so the
+   default keeps following the pool as it grows. Only options that actually
+   hold problems are ever offered. (Versioned key: the old empty-means-all
+   representation is intentionally not migrated.) */
+const FILTERS_KEY = "bt_filters_v2";
+const ALL_LEVELS = [1, 2, 3, 4, 5];
 function loadFilters() {
-  try {
-    const f = JSON.parse(localStorage.getItem(FILTERS_KEY));
-    return {levels: (f && f.levels) || [], types: (f && f.types) || []};
-  } catch (e) { return {levels: [], types: []}; }
+  try { return JSON.parse(localStorage.getItem(FILTERS_KEY)); }
+  catch (e) { return null; }
 }
 function saveFilters(f) { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); }
+/* which levels/types exist in the pool right now, and how many each holds */
+function poolFacets(index) {
+  const levelCount = {}, typeCount = {};
+  for (const p of index.problems) {
+    if (p.difficulty_level)
+      levelCount[p.difficulty_level] = (levelCount[p.difficulty_level] || 0) + 1;
+    if (p.type) typeCount[p.type] = (typeCount[p.type] || 0) + 1;
+  }
+  return {
+    levels: ALL_LEVELS.filter(l => levelCount[l]),
+    types: Object.keys(TYPE_NAMES).filter(t => typeCount[t]),
+    levelCount, typeCount,
+  };
+}
+/* turn stored (or absent) filters into concrete selected sets */
+function resolveFilters(index, raw) {
+  const f = poolFacets(index);
+  if (!raw) return {levels: f.levels.slice(), types: f.types.slice()};
+  return {
+    levels: Array.isArray(raw.levels) ? raw.levels : f.levels.slice(),
+    types: Array.isArray(raw.types) ? raw.types : f.types.slice(),
+  };
+}
 function matchesFilters(p, f) {
-  if (f.levels.length && !f.levels.includes(p.difficulty_level)) return false;
-  if (f.types.length && !f.types.includes(p.type)) return false;
-  return true;
+  return f.levels.includes(p.difficulty_level) && f.types.includes(p.type);
 }
 function pickUnseen(index, filters) {
   const s = store();
-  const f = filters || {levels: [], types: []};
+  const f = filters || resolveFilters(index, loadFilters());
   const unseen = index.problems.filter(p => !s[p.id] && matchesFilters(p, f));
   if (!unseen.length) return null;
   return unseen[Math.floor(Math.random() * unseen.length)].id;
@@ -424,13 +486,15 @@ def _index_html() -> str:
 <style>{_CSS}</style></head><body>
 <h1><span style="opacity:.9">&spades;</span> Bridge Bidding Trainer</h1>
 <div class="card" id="filters">
-<div class="filter-group">
-<div class="filter-label">Difficulty</div>
-<div class="filterchips" id="diff-chips"></div>
+<div class="fgroup">
+<div class="grow"><span class="glabel">Difficulty</span>
+<button type="button" class="alllink" id="all-diff"></button></div>
+<div class="seg" id="diff-seg"></div>
 </div>
-<div class="filter-group">
-<div class="filter-label">Problem type</div>
-<div class="filterchips" id="type-chips"></div>
+<div class="fgroup">
+<div class="grow"><span class="glabel">Problem type</span>
+<button type="button" class="alllink" id="all-type"></button></div>
+<div class="typelist" id="type-list"></div>
 </div>
 </div>
 <a class="big" id="deal" href="#">Deal me a hand &rarr;</a>
@@ -441,40 +505,75 @@ simulation. The pool grows in batches.
 <a href="#" id="reset" style="color:var(--on-felt-muted)">Reset progress</a></p>
 <script>{_SHARED_JS}
 let INDEX = null;
-let FILTERS = loadFilters();
-function buildFilterChips() {{
-  document.getElementById("diff-chips").innerHTML = [1, 2, 3, 4, 5].map(lv =>
-    `<button type="button" class="filterchip" data-level="${{lv}}">` +
-    `${{DIFF_NAMES[lv]}}</button>`).join("");
-  document.getElementById("type-chips").innerHTML =
-    Object.entries(TYPE_NAMES).map(([id, nm]) =>
-      `<button type="button" class="filterchip" data-type="${{id}}" ` +
-      `title="${{nm[1]}}">${{nm[0]}}</button>`).join("");
-}}
-function applyFilterUi() {{
-  document.querySelectorAll("#diff-chips .filterchip").forEach(c => {{
-    c.classList.toggle("active", FILTERS.levels.includes(+c.dataset.level));
-  }});
-  document.querySelectorAll("#type-chips .filterchip").forEach(c => {{
-    c.classList.toggle("active", FILTERS.types.includes(c.dataset.type));
-  }});
-}}
+let FILTERS = {{levels: [], types: []}};
 function toggleFilter(list, value) {{
   const i = list.indexOf(value);
   if (i === -1) list.push(value); else list.splice(i, 1);
 }}
-document.getElementById("diff-chips").addEventListener("click", ev => {{
-  const c = ev.target.closest(".filterchip");
-  if (!c) return;
-  toggleFilter(FILTERS.levels, +c.dataset.level);
-  saveFilters(FILTERS); applyFilterUi(); renderStats();
+function buildFilters() {{
+  const f = poolFacets(INDEX);
+  const seg = document.getElementById("diff-seg");
+  seg.style.setProperty("--n", f.levels.length || 1);
+  seg.innerHTML = f.levels.map(lv =>
+    `<button type="button" data-level="${{lv}}">` +
+    `<span class="sname">${{DIFF_NAMES[lv]}}</span>` +
+    `<span class="scount">${{f.levelCount[lv]}}</span></button>`).join("");
+  const max = Math.max(1, ...f.types.map(t => f.typeCount[t]));
+  document.getElementById("type-list").innerHTML = f.types.map(t => {{
+    const n = f.typeCount[t], nm = TYPE_NAMES[t];
+    const pct = Math.round(100 * n / max);
+    return `<button type="button" class="typerow" data-type="${{t}}" ` +
+      `title="${{nm[1]}}" aria-label="${{nm[0]}}, ${{n}} problems">` +
+      `<span class="tick" aria-hidden="true"></span>` +
+      `<span class="tname">${{nm[0]}}</span>` +
+      `<span class="tbar"><span style="width:${{pct}}%"></span></span>` +
+      `<span class="tcount">${{n}}</span></button>`;
+  }}).join("");
+}}
+function applyFilterUi() {{
+  const f = poolFacets(INDEX);
+  document.querySelectorAll("#diff-seg button").forEach(b =>
+    b.classList.toggle("active", FILTERS.levels.includes(+b.dataset.level)));
+  document.querySelectorAll("#type-list .typerow").forEach(b =>
+    b.setAttribute("aria-pressed",
+      FILTERS.types.includes(b.dataset.type) ? "true" : "false"));
+  document.getElementById("all-diff").textContent =
+    FILTERS.levels.length >= f.levels.length ? "Clear" : "Select all";
+  document.getElementById("all-type").textContent =
+    FILTERS.types.length >= f.types.length ? "Clear" : "Select all";
+}}
+function persist() {{
+  const f = poolFacets(INDEX);
+  if (FILTERS.levels.length >= f.levels.length &&
+      FILTERS.types.length >= f.types.length)
+    localStorage.removeItem(FILTERS_KEY);   // everything -> follow the pool
+  else saveFilters({{levels: FILTERS.levels, types: FILTERS.types}});
+  applyFilterUi(); renderStats();
+}}
+document.getElementById("diff-seg").addEventListener("click", ev => {{
+  const b = ev.target.closest("button[data-level]");
+  if (!b) return;
+  toggleFilter(FILTERS.levels, +b.dataset.level);
+  persist();
 }});
-document.getElementById("type-chips").addEventListener("click", ev => {{
-  const c = ev.target.closest(".filterchip");
-  if (!c) return;
-  toggleFilter(FILTERS.types, c.dataset.type);
-  saveFilters(FILTERS); applyFilterUi(); renderStats();
+document.getElementById("type-list").addEventListener("click", ev => {{
+  const b = ev.target.closest("button[data-type]");
+  if (!b) return;
+  toggleFilter(FILTERS.types, b.dataset.type);
+  persist();
 }});
+document.getElementById("all-diff").onclick = () => {{
+  const f = poolFacets(INDEX);
+  FILTERS.levels =
+    FILTERS.levels.length >= f.levels.length ? [] : f.levels.slice();
+  persist();
+}};
+document.getElementById("all-type").onclick = () => {{
+  const f = poolFacets(INDEX);
+  FILTERS.types =
+    FILTERS.types.length >= f.types.length ? [] : f.types.slice();
+  persist();
+}};
 function renderStats() {{
   if (!INDEX) return;
   const s = store();
@@ -484,12 +583,15 @@ function renderStats() {{
     const rec = s[p.id];
     if (rec) {{ done++; if (rec.correct) right++; }}
   }}
-  const active = FILTERS.levels.length || FILTERS.types.length;
-  let h = (active ?
-    `<b>${{matching.length}}</b> problems match your filters ` :
-    `<b>${{INDEX.count}}</b> problems in the pool `) +
+  const f = poolFacets(INDEX);
+  const narrowed = FILTERS.levels.length < f.levels.length ||
+                   FILTERS.types.length < f.types.length;
+  const waiting = matching.length - done;
+  let h = (narrowed
+      ? `<b>${{matching.length}}</b> of ${{INDEX.count}} problems selected `
+      : `<b>${{INDEX.count}}</b> problems in the pool `) +
     `<span class="pill" style="border-color:var(--line);color:var(--muted)">` +
-    `${{matching.length - done}} waiting for you</span>`;
+    `${{waiting}} waiting for you</span>`;
   if (done) {{
     const pct = Math.round(100 * right / done);
     h += `<div style="margin-top:8px">Your record: <b>${{right}}</b> / ` +
@@ -501,26 +603,34 @@ function renderStats() {{
       `You haven't answered any yet.</div>`;
   }}
   document.getElementById("stats").innerHTML = h;
+  const deal = document.getElementById("deal");
+  const none = !FILTERS.levels.length || !FILTERS.types.length;
+  deal.classList.toggle("off", none);
+  deal.innerHTML = none ? "Pick a difficulty and type"
+    : `Deal me a hand &rarr;` + (waiting
+      ? ` <span style="font-weight:400;opacity:.85">(${{waiting}} waiting)` +
+        `</span>`
+      : "");
 }}
 async function init() {{
-  buildFilterChips();
-  applyFilterUi();
   try {{ INDEX = await fetchIndex(); }}
   catch (e) {{
     document.getElementById("stats").textContent =
       "The problem pool is still being generated \\u2014 check back shortly.";
     return;
   }}
+  FILTERS = resolveFilters(INDEX, loadFilters());
+  buildFilters();
+  applyFilterUi();
   renderStats();
 }}
 document.getElementById("deal").onclick = () => {{
   if (!INDEX) return false;
+  if (!FILTERS.levels.length || !FILTERS.types.length) return false;
   const id = pickUnseen(INDEX, FILTERS);
   if (!id) {{
-    alert((FILTERS.levels.length || FILTERS.types.length) ?
-      "No unseen problems match your filters. Try widening your selection." :
-      "You've answered every problem in the pool! " +
-      "More will be added in the next batch.");
+    alert("You've answered every problem in your selection! " +
+          "Widen your filters, or check back for the next batch.");
     return false;
   }}
   location.href = "p.html?id=" + encodeURIComponent(id);
@@ -868,7 +978,7 @@ async function init() {{
   }}
   document.getElementById("next").onclick = async () => {{
     if (!INDEX) INDEX = await fetchIndex();
-    const nid = pickUnseen(INDEX, loadFilters());
+    const nid = pickUnseen(INDEX, resolveFilters(INDEX, loadFilters()));
     if (!nid) {{ location.href = "index.html"; return; }}
     location.href = "p.html?id=" + encodeURIComponent(nid);
   }};
