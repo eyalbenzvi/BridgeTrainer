@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..dealing.features import hand_to_pbn
-from .conventions import previous_call_is_asking, seat_of
+from .conventions import seat_of
 
 SEATS = "NESW"
 VULS = [(False, False), (True, False), (False, True), (True, True)]
@@ -59,79 +59,6 @@ def deal_board(seed: int):
     return hands, dealer_i, vul
 
 
-def _gf_pass_artifact(policy, auction, dealer_i) -> bool:
-    """A Pass candidate carrying real mass in a game-forcing auction is a
-    model artifact (rec 4): 2C opening or an uncontested 2-level new-suit
-    response (2/1 GF) present, game not yet reached."""
-    if not any(b == "P" and p >= P_OPTION for b, p in policy):
-        return False
-    from .conventions import classify, _is_bid, _level  # noqa
-    gf = False
-    for j, tok in enumerate(auction):
-        if tok == "2C" and not [t for t in auction[:j] if t != "P"]:
-            gf = True
-        info_needed = tok not in ("P", "X", "XX") and tok[0] == "2"
-        if info_needed and not gf:
-            info = classify(auction, dealer_i, j)
-            if info.category == "new-suit" and info.jump == 0:
-                # 2-level new suit by responder, uncontested = 2/1 GF
-                me = seat_of(dealer_i, j)
-                interference = any(
-                    t != "P" and seat_of(dealer_i, k) not in (me, (me + 2) % 4)
-                    for k, t in enumerate(auction[:j]))
-                if not interference:
-                    gf = True
-    if not gf:
-        return False
-    last_bid = next((t for t in reversed(auction) if t not in ("P", "X", "XX")),
-                    None)
-    below_game = last_bid is None or (
-        int(last_bid[0]) < 4 if last_bid[1:] in ("H", "S") else
-        int(last_bid[0]) < 5 if last_bid[1:] in ("C", "D") else
-        int(last_bid[0]) < 3)
-    return below_game
-
-
-def _content_exclusion(hand: str, policy, auction, dealer_i, seat_i) -> str:
-    """Stage-0 content exclusions (selectivity review): agreement forks
-    and engine-temperature splits that are close by the numbers but
-    worthless or misleading to a 2/1 student."""
-    from ..dealing.features import HCP_BY_RANK, parse_hand_pbn
-    cands = [b for b, p in policy if p >= P_OPTION]
-
-    # Bust artifact: engine splits on a near-yarborough with Pass live.
-    cards = parse_hand_pbn(hand)
-    hcp = sum(int(HCP_BY_RANK[c % 13]) for c in cards)
-    maxlen = max(sum(1 for c in cards if c // 13 == s) for s in range(4))
-    if hcp <= 4 and maxlen < 5 and "P" in cands:
-        return "bust artifact"
-
-    partner_i = (seat_i + 2) % 4
-    my_passes = [j for j, t in enumerate(auction)
-                 if seat_of(dealer_i, j) == seat_i and t == "P"]
-    partner_bids = [t for j, t in enumerate(auction)
-                    if seat_of(dealer_i, j) == partner_i
-                    and t not in ("P", "X", "XX")]
-
-    # Drury space: passed hand raising partner's major with 2C live.
-    if my_passes and partner_bids and partner_bids[-1] in ("1H", "1S"):
-        raise_call = "2" + partner_bids[-1][1]
-        if "2C" in cands and raise_call in cands:
-            return "system fork (Drury space)"
-
-    # Negative-double range fork: responder directly over an overcall
-    # with both X and a 2-level new suit among the candidates.
-    if partner_bids and "X" in cands and any(
-            b[0] == "2" and b not in ("2NT",) and b[1:] != partner_bids[-1][1:]
-            for b in cands if b not in ("P", "X", "XX")):
-        last = next((t for t in reversed(auction)
-                     if t not in ("P", "X", "XX")), None)
-        opp_last = last is not None and last != partner_bids[-1]
-        if opp_last:
-            return "system fork (negative-X range)"
-    return ""
-
-
 def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
     hands, dealer_i, vul = deal_board(seed)
     bots = [engine.bot(hands[i], i, dealer_i, vul) for i in range(4)]
@@ -162,22 +89,12 @@ def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
                     (p1 < P_TOP_3WAY and p2 + p3 >= P_23_SUM)
         why = ""
         if qualifies:
+            # the ONLY eligibility rules are the agreed mechanical ones
+            # (owner r8): stem depth; everything else is decided by the
+            # statistical gates downstream
             nonpass = sum(1 for t in auction if t != "P")
             if nonpass > MAX_NONPASS_STEM:
                 qualifies, why = False, "stem too deep"
-            elif previous_call_is_asking(auction, dealer_i):
-                qualifies, why = False, "response to asking call"
-            elif _gf_pass_artifact(policy, auction, dealer_i):
-                qualifies, why = False, "gf pass artifact"
-            else:
-                from .conventions import in_convention_sequence
-                if in_convention_sequence(auction, dealer_i, seat_i):
-                    qualifies, why = False, "mid-convention sequence"
-                else:
-                    fork = _content_exclusion(hands[seat_i], policy,
-                                              auction, dealer_i, seat_i)
-                    if fork:
-                        qualifies, why = False, fork
 
         # Speed (owner r3 #1): scan commits the raw policy top at every
         # turn — no internal search. The stem-mass floor still discards
