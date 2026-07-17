@@ -173,3 +173,20 @@ def test_difficulty_clear_is_easy():
     assert v.accepted, v.reason
     assert v.measured["trap"] is False
     assert v.difficulty <= 2
+
+
+# --------------------------------------------------------------------------
+# import guard: the lead generator imports lead_explain/lead_maker lazily
+# (BEN path), so a refactor of engine/explain.py can break them without any
+# other test noticing. This catches that class of break in normal CI.
+# --------------------------------------------------------------------------
+
+def test_lead_generator_modules_import():
+    import importlib
+    for mod in ("bridge_trainer.engine.lead_explain",
+                "bridge_trainer.engine.lead_maker"):
+        importlib.import_module(mod)
+    from bridge_trainer.engine.lead_explain import (  # noqa: F401
+        auction_meanings, card_notes)
+    from bridge_trainer.engine.lead_maker import (  # noqa: F401
+        build_lead_record, forge_lead_batch)
