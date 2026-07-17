@@ -679,7 +679,8 @@ function normalize() {{
 }}
 async function init() {{
   const id = new URLSearchParams(location.search).get("id");
-  const r = await fetch("data/problems/" + encodeURIComponent(id) + ".json");
+  const r = await fetch("data/problems/" + encodeURIComponent(id) + ".json",
+                        {{cache: "no-cache"}});
   if (!r.ok) {{ document.getElementById("problem").textContent =
                 "Problem not found."; return; }}
   P = await r.json();
