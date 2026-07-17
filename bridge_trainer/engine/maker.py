@@ -83,6 +83,11 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
     from .ben import get_engine
     from .explain import option_explanations, stem_explanations
 
+    # Resolve the pool BEFORE engine init: BenEngine chdir's into the ben
+    # source tree, so a relative pool path would land there.
+    import os
+    pool_dir = os.path.abspath(pool_dir)
+
     t_load = time.perf_counter()
     engine = get_engine()
     log(f"engine loaded in {time.perf_counter() - t_load:.1f}s")
