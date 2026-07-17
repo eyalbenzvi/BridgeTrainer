@@ -268,6 +268,42 @@ table.plain { border-collapse: collapse; width: 100%; font-size: 13px;
 table.plain th, table.plain td { border-top: 1px solid var(--line);
   padding: 6px 8px; text-align: left; }
 table.plain th { color: var(--muted); font-weight: 600; border-top: 0; }
+/* scenario switch: the site's top-level split (blue = bidding, gold = lead) */
+.scenaseg { display: flex; gap: 6px; background: var(--card); border-radius: 12px;
+  padding: 5px; margin: 0 0 12px; border: 1px solid var(--line); }
+.scenaseg button { flex: 1; border: 0; background: transparent; color: var(--muted);
+  border-radius: 9px; padding: 9px 6px; cursor: pointer; font-size: 15px;
+  font-weight: 700; display: flex; flex-direction: column; gap: 2px;
+  min-height: 52px; align-items: center; justify-content: center; }
+.scenaseg button small { font-weight: 400; font-size: 11px; opacity: .82; }
+.scenaseg button[data-kind="bidding"][aria-pressed="true"] {
+  background: var(--accent); color: #fff; }
+.scenaseg button[data-kind="lead"][aria-pressed="true"] {
+  background: var(--gold); color: var(--on-gold); }
+/* opening-lead answer grid: the hand IS the keypad, one row per suit */
+.leadgrid { margin: 12px 0; }
+.suitrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 5px 0; }
+.suitrow .s { width: 1.4em; font-size: 20px; text-align: center; }
+button.cardbtn { min-width: 44px; min-height: 48px; font-size: 17px; font-weight: 600;
+  border: 2px solid var(--line); border-radius: 9px; background: var(--card);
+  color: var(--fg); cursor: pointer; }
+button.cardbtn.chosen { border-color: var(--accent); }
+button.cardbtn.good { border-color: var(--win);
+  background: color-mix(in srgb, var(--win) 16%, var(--card)); }
+button.cardbtn.bad { border-color: var(--loss);
+  background: color-mix(in srgb, var(--loss) 16%, var(--card)); }
+/* reveal: per-suit bar comparison instead of a wall of decimals */
+.barrow { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 14px; }
+.barrow .bl { width: 3.4em; }
+.bartrack { flex: 1; height: 14px; border-radius: 99px; background: var(--line);
+  overflow: hidden; }
+.bartrack span { display: block; height: 100%; background: var(--accent); }
+.bartrack span.good { background: var(--win); }
+.barval { width: 6.2em; text-align: right; font-variant-numeric: tabular-nums;
+  color: var(--muted); font-size: 12px; }
+#bid-meaning { min-height: 1.2em; margin: 6px 0 0; }
+.headline { font-size: 18px; font-weight: 700; margin: 4px 0; }
+.headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
 """
 
 _SHARED_JS = """
@@ -292,10 +328,19 @@ function loadFilters() {
   catch (e) { return null; }
 }
 function saveFilters(f) { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); }
-/* which levels/types exist in the pool right now, and how many each holds */
-function poolFacets(index) {
+/* the site splits into two scenarios; kind routes each problem + page */
+function kindOf(p) { return p.kind || "bidding"; }
+function routeFor(kind, id) {
+  return (kind === "lead" ? "lead.html" : "p.html") + "?id=" +
+         encodeURIComponent(id);
+}
+/* which levels/types exist for a scenario right now, and how many each holds.
+   Bidding facets on difficulty x type; leads on difficulty only. */
+function poolFacets(index, kind) {
+  kind = kind || "bidding";
   const levelCount = {}, typeCount = {};
   for (const p of index.problems) {
+    if (kindOf(p) !== kind) continue;
     if (p.difficulty_level)
       levelCount[p.difficulty_level] = (levelCount[p.difficulty_level] || 0) + 1;
     if (p.type) typeCount[p.type] = (typeCount[p.type] || 0) + 1;
@@ -307,16 +352,21 @@ function poolFacets(index) {
   };
 }
 /* turn stored (or absent) filters into concrete selected sets */
-function resolveFilters(index, raw) {
-  const f = poolFacets(index);
-  if (!raw) return {levels: f.levels.slice(), types: f.types.slice()};
+function resolveFilters(index, raw, kind) {
+  kind = kind || "bidding";
+  const f = poolFacets(index, kind);
+  const base = raw || {};
   return {
-    levels: Array.isArray(raw.levels) ? raw.levels : f.levels.slice(),
-    types: Array.isArray(raw.types) ? raw.types : f.types.slice(),
+    kind,
+    levels: Array.isArray(base.levels) ? base.levels : f.levels.slice(),
+    types: Array.isArray(base.types) ? base.types : f.types.slice(),
   };
 }
 function matchesFilters(p, f) {
-  return f.levels.includes(p.difficulty_level) && f.types.includes(p.type);
+  if (kindOf(p) !== (f.kind || "bidding")) return false;
+  if (!f.levels.includes(p.difficulty_level)) return false;
+  if (kindOf(p) === "lead") return true;      // leads: difficulty only
+  return f.types.includes(p.type);            // bidding: difficulty + type
 }
 function pickUnseen(index, filters) {
   const s = store();
@@ -443,6 +493,46 @@ function auctionTableHtml(p, notes) {
     rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
   return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
 }
+function cardHtml(tok) {  // "SK" -> four-colour suit glyph + rank (T -> 10)
+  const r = tok[1] === "T" ? "10" : tok[1];
+  return suitHtml(tok[0]) + " " + r;
+}
+/* A COMPLETE auction (W-N-E-S, BBO layout) for opening-lead problems: no
+   pending-call cell, the final contract call highlighted, and every call
+   tappable for its meaning (notes[j].text). Leader plate reads "lead". */
+function completeAuctionTableHtml(p, notes) {
+  const cols = ["W", "N", "E", "S"];
+  const seats = ["N", "E", "S", "W"];
+  const hero = p.leader, decl = p.declarer;
+  const dummy = seats[(seats.indexOf(decl) + 2) % 4];
+  const vul = vulSeats(p.vul);
+  const head = cols.map(s => {
+    const cls = (vul.includes(s) ? "v" : "nv") + (s === hero ? " me" : "");
+    const who = s === hero ? "lead" : (s === decl ? "decl"
+              : (s === dummy ? "dummy" : ""));
+    const vlab = vul.includes(s) ? "vulnerable" : "not vulnerable";
+    return `<th class="${cls}" title="${s} \\u2014 ${vlab}">${s}` +
+           `${s === p.dealer ? '<sup class="d">D</sup>' : ""}` +
+           `${who ? `<small>${who}</small>` : "<small>&nbsp;</small>"}</th>`;
+  }).join("");
+  let lastBid = -1;
+  p.auction.forEach((t, j) => {
+    if (t !== "P" && t !== "X" && t !== "XX") lastBid = j;
+  });
+  const cells = [];
+  for (let i = 0; i < cols.indexOf(p.dealer); i++) cells.push("<td></td>");
+  p.auction.forEach((tok, j) => {
+    const note = notes && notes[j] && notes[j].text;
+    const fin = j === lastBid ? " fin" : "";
+    cells.push(`<td><span class="call${note ? " expl" : ""}${fin}"` +
+               ` data-i="${j}">${callHtml(tok)}</span></td>`);
+  });
+  while (cells.length % 4) cells.push("<td></td>");
+  let rows = "";
+  for (let i = 0; i < cells.length; i += 4)
+    rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
+  return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
+}
 function candOrder(c) {
   if (c === "P") return 100;
   if (c === "X") return 101;
@@ -497,7 +587,13 @@ def _index_html() -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bridge Bidding Trainer</title>
 <style>{_CSS}</style></head><body>
-<h1><span style="opacity:.9">&spades;</span> Bridge Bidding Trainer</h1>
+<h1><span style="opacity:.9">&spades;</span> Bridge Trainer</h1>
+<div class="scenaseg" id="scenario" role="group" aria-label="Practice scenario">
+<button type="button" data-kind="bidding" aria-pressed="true">Bidding
+<small>your call at the table</small></button>
+<button type="button" data-kind="lead" aria-pressed="false">Opening lead
+<small>which card to lead</small></button>
+</div>
 <div class="card" id="filters">
 <button type="button" class="fbar" id="fbar" aria-expanded="false"
         aria-controls="fbody">
@@ -511,7 +607,7 @@ def _index_html() -> str:
 <button type="button" class="alllink" id="all-diff"></button></div>
 <div class="seg" id="diff-seg"></div>
 </div>
-<div class="fgroup">
+<div class="fgroup" id="type-group">
 <div class="grow"><span class="glabel">Problem type</span>
 <button type="button" class="alllink" id="all-type"></button></div>
 <div class="typelist" id="type-list"></div>
@@ -526,13 +622,32 @@ simulation. The pool grows in batches.
 <a href="#" id="reset" style="color:var(--on-felt-muted)">Reset progress</a></p>
 <script>{_SHARED_JS}
 let INDEX = null;
-let FILTERS = {{levels: [], types: []}};
+const SCEN_KEY = "bt_scenario";
+const LEAD_FILTERS_KEY = "bt_lead_filters";
+let SCEN = localStorage.getItem(SCEN_KEY) || "bidding";
+let FILTERS = {{kind: SCEN, levels: [], types: []}};
+function curKey() {{ return SCEN === "lead" ? LEAD_FILTERS_KEY : FILTERS_KEY; }}
+function loadCur() {{
+  try {{ return JSON.parse(localStorage.getItem(curKey())); }}
+  catch (e) {{ return null; }}
+}}
+function saveCur(f) {{ localStorage.setItem(curKey(), JSON.stringify(f)); }}
+function setScenario(kind) {{
+  SCEN = kind; localStorage.setItem(SCEN_KEY, kind);
+  document.body.dataset.scenario = kind;
+  document.querySelectorAll("#scenario button").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.kind === kind ? "true" : "false"));
+  document.getElementById("type-group").style.display =
+    kind === "lead" ? "none" : "";
+  FILTERS = resolveFilters(INDEX, loadCur(), kind);
+  buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
+}}
 function toggleFilter(list, value) {{
   const i = list.indexOf(value);
   if (i === -1) list.push(value); else list.splice(i, 1);
 }}
 function buildFilters() {{
-  const f = poolFacets(INDEX);
+  const f = poolFacets(INDEX, FILTERS.kind);
   const seg = document.getElementById("diff-seg");
   seg.style.setProperty("--n", f.levels.length || 1);
   seg.innerHTML = f.levels.map(lv =>
@@ -558,7 +673,8 @@ function buildFilters() {{
 function facetCounts(index, flt) {{
   const levelCount = {{}}, typeCount = {{}};
   for (const p of index.problems) {{
-    if (p.difficulty_level && flt.types.includes(p.type))
+    if (kindOf(p) !== flt.kind) continue;
+    if (p.difficulty_level && (flt.kind === "lead" || flt.types.includes(p.type)))
       levelCount[p.difficulty_level] =
         (levelCount[p.difficulty_level] || 0) + 1;
     if (p.type && flt.levels.includes(p.difficulty_level))
@@ -582,7 +698,7 @@ function updateFacetCounts() {{
   }});
 }}
 function applyFilterUi() {{
-  const f = poolFacets(INDEX);
+  const f = poolFacets(INDEX, FILTERS.kind);
   document.querySelectorAll("#diff-seg button").forEach(b =>
     b.classList.toggle("active", FILTERS.levels.includes(+b.dataset.level)));
   document.querySelectorAll("#type-list .typerow").forEach(b =>
@@ -594,11 +710,11 @@ function applyFilterUi() {{
     FILTERS.types.length >= f.types.length ? "Clear" : "Select all";
 }}
 function persist() {{
-  const f = poolFacets(INDEX);
-  if (FILTERS.levels.length >= f.levels.length &&
-      FILTERS.types.length >= f.types.length)
-    localStorage.removeItem(FILTERS_KEY);   // everything -> follow the pool
-  else saveFilters({{levels: FILTERS.levels, types: FILTERS.types}});
+  const f = poolFacets(INDEX, FILTERS.kind);
+  const full = FILTERS.levels.length >= f.levels.length &&
+    (FILTERS.kind === "lead" || FILTERS.types.length >= f.types.length);
+  if (full) localStorage.removeItem(curKey());   // everything -> follow the pool
+  else saveCur({{levels: FILTERS.levels, types: FILTERS.types}});
   applyFilterUi(); updateFacetCounts(); renderStats();
 }}
 document.getElementById("diff-seg").addEventListener("click", ev => {{
@@ -614,13 +730,13 @@ document.getElementById("type-list").addEventListener("click", ev => {{
   persist();
 }});
 document.getElementById("all-diff").onclick = () => {{
-  const f = poolFacets(INDEX);
+  const f = poolFacets(INDEX, FILTERS.kind);
   FILTERS.levels =
     FILTERS.levels.length >= f.levels.length ? [] : f.levels.slice();
   persist();
 }};
 document.getElementById("all-type").onclick = () => {{
-  const f = poolFacets(INDEX);
+  const f = poolFacets(INDEX, FILTERS.kind);
   FILTERS.types =
     FILTERS.types.length >= f.types.length ? [] : f.types.slice();
   persist();
@@ -634,13 +750,16 @@ function renderStats() {{
     const rec = s[p.id];
     if (rec) {{ done++; if (rec.correct) right++; }}
   }}
-  const f = poolFacets(INDEX);
+  const f = poolFacets(INDEX, FILTERS.kind);
+  const kindTotal =
+    INDEX.problems.filter(p => kindOf(p) === FILTERS.kind).length;
   const narrowed = FILTERS.levels.length < f.levels.length ||
-                   FILTERS.types.length < f.types.length;
+    (FILTERS.kind !== "lead" && FILTERS.types.length < f.types.length);
+  const label = FILTERS.kind === "lead" ? "lead problems" : "bidding problems";
   const waiting = matching.length - done;
   let h = (narrowed
-      ? `<b>${{matching.length}}</b> of ${{INDEX.count}} problems selected `
-      : `<b>${{INDEX.count}}</b> problems in the pool `) +
+      ? `<b>${{matching.length}}</b> of ${{kindTotal}} ${{label}} selected `
+      : `<b>${{kindTotal}}</b> ${{label}} in the pool `) +
     `<span class="pill" style="border-color:var(--line);color:var(--muted)">` +
     `${{waiting}} waiting for you</span>`;
   if (done) {{
@@ -659,10 +778,15 @@ function renderStats() {{
     narrowed ? `${{matching.length}} of ${{INDEX.count}}` : "All problems";
   fbar.classList.toggle("on", narrowed);
   const deal = document.getElementById("deal");
-  const none = !FILTERS.levels.length || !FILTERS.types.length;
+  const none = !FILTERS.levels.length ||
+    (FILTERS.kind !== "lead" && !FILTERS.types.length);
   deal.classList.toggle("off", none);
-  deal.innerHTML = none ? "Pick a difficulty and type"
-    : `Deal me a hand &rarr;` + (waiting
+  const dealLabel = FILTERS.kind === "lead"
+    ? "Deal me a lead problem &rarr;" : "Deal me a bidding problem &rarr;";
+  deal.innerHTML = none
+    ? (FILTERS.kind === "lead" ? "Pick a difficulty"
+       : "Pick a difficulty and type")
+    : dealLabel + (waiting
       ? ` <span style="font-weight:400;opacity:.85">(${{waiting}} waiting)` +
         `</span>`
       : "");
@@ -674,12 +798,10 @@ async function init() {{
       "The problem pool is still being generated \\u2014 check back shortly.";
     return;
   }}
-  FILTERS = resolveFilters(INDEX, loadFilters());
-  buildFilters();
-  applyFilterUi();
-  updateFacetCounts();
-  renderStats();
+  setScenario(SCEN);
 }}
+document.querySelectorAll("#scenario button").forEach(b =>
+  b.onclick = () => setScenario(b.dataset.kind));
 document.getElementById("fbar").onclick = () => {{
   const bar = document.getElementById("fbar");
   const body = document.getElementById("fbody");
@@ -689,14 +811,15 @@ document.getElementById("fbar").onclick = () => {{
 }};
 document.getElementById("deal").onclick = () => {{
   if (!INDEX) return false;
-  if (!FILTERS.levels.length || !FILTERS.types.length) return false;
+  if (!FILTERS.levels.length ||
+      (FILTERS.kind !== "lead" && !FILTERS.types.length)) return false;
   const id = pickUnseen(INDEX, FILTERS);
   if (!id) {{
     alert("You've answered every problem in your selection! " +
           "Widen your filters, or check back for the next batch.");
     return false;
   }}
-  location.href = "p.html?id=" + encodeURIComponent(id);
+  location.href = routeFor(FILTERS.kind, id);
   return false;
 }};
 document.getElementById("reset").onclick = () => {{
@@ -1041,7 +1164,7 @@ async function init() {{
   }}
   document.getElementById("next").onclick = async () => {{
     if (!INDEX) INDEX = await fetchIndex();
-    const nid = pickUnseen(INDEX, resolveFilters(INDEX, loadFilters()));
+    const nid = pickUnseen(INDEX, resolveFilters(INDEX, loadFilters(), "bidding"));
     if (!nid) {{ location.href = "index.html"; return; }}
     location.href = "p.html?id=" + encodeURIComponent(nid);
   }};
@@ -1053,9 +1176,162 @@ init();
 </body></html>"""
 
 
+_LEAD_JS = r"""
+let P = null, INDEX = null;
+function avgOf(card) {
+  const r = P.verdict.table.find(x => x.card === card);
+  return r ? r.avg_def_tricks : 0;
+}
+function reveal(chosen) {
+  const v = P.verdict, acc = v.accepted;
+  document.querySelectorAll("button.cardbtn").forEach(b => {
+    const a = b.dataset.action;
+    if (acc.includes(a)) b.classList.add("good");
+    else if (a === chosen) b.classList.add("bad");
+    if (a === chosen) b.classList.add("chosen");
+    b.disabled = true;
+  });
+  const ok = acc.includes(chosen);
+  document.getElementById("headline").innerHTML = ok
+    ? '<span class="ok">✓</span> Best lead — ' + cardHtml(chosen)
+    : '<span class="no">✗</span> Better was ' + acc.map(cardHtml).join(" or ");
+  document.getElementById("subhead").innerHTML = acc.length > 1
+    ? "Equally best: " + acc.map(cardHtml).join(", ") : "";
+  const tbl = v.table, maxv = tbl.length ? tbl[0].avg_def_tricks : 1;
+  const seen = {}, picked = [];
+  tbl.forEach(r => { if (!seen[r.card[0]]) { seen[r.card[0]] = 1; picked.push(r.card); } });
+  if (picked.indexOf(chosen) < 0) picked.push(chosen);
+  document.getElementById("bars").innerHTML = picked.map(c => {
+    const val = avgOf(c), good = acc.includes(c);
+    const pct = maxv > 0 ? Math.max(4, Math.round(val / maxv * 100)) : 0;
+    const you = c === chosen ? ' <span class="muted">(your lead)</span>' : "";
+    return '<div class="barrow"><span class="bl">' + cardHtml(c) + '</span>' +
+      '<span class="bartrack"><span class="' + (good ? "good" : "") +
+      '" style="width:' + pct + '%"></span></span>' +
+      '<span class="barval">' + val.toFixed(2) + ' tr' + you + '</span></div>';
+  }).join("");
+  const notes = (P.explanations && P.explanations.cards) || [];
+  const noteFor = c => { const n = notes.find(x => x.card === c); return n ? n.text : ""; };
+  let expl = noteFor(acc[0]);
+  if (!ok) { const y = noteFor(chosen); if (y) expl += "\n\n" + y; }
+  document.getElementById("lead-expl").textContent = expl;
+  const lv = (P.classification && P.classification.difficulty_level) || P.difficulty;
+  document.getElementById("difficulty").textContent = "Difficulty " + lv + "/5";
+  let rt = "<tr><th>Card</th><th>Avg def. tricks</th><th>vs best</th><th>BEN</th></tr>";
+  v.table.forEach(r => {
+    const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
+    rt += "<tr" + g + "><td>" + cardHtml(r.card) + "</td><td>" +
+      r.avg_def_tricks.toFixed(2) + "</td><td>" +
+      (r.vs_best >= 0 ? "+" : "") + r.vs_best.toFixed(2) + "</td><td>" +
+      Math.round((r.ben_softmax || 0) * 100) + "%</td></tr>";
+  });
+  document.getElementById("ltable").innerHTML = rt;
+  if (P.full_deal) {
+    document.getElementById("fulldeal").innerHTML = ["N", "E", "S", "W"].map(s =>
+      '<div style="margin:6px 0"><b>' + s + '</b> ' + handHtml(P.full_deal[s]) +
+      '</div>').join("");
+  }
+  document.getElementById("verdict").style.display = "block";
+}
+function choose(btn) {
+  const s = store();
+  if (s[P.id]) return;
+  const a = btn.dataset.action;
+  s[P.id] = { answer: a, correct: P.verdict.accepted.includes(a), ts: Date.now() };
+  saveStore(s);
+  reveal(a);
+}
+function loadLead() {
+  try { return JSON.parse(localStorage.getItem("bt_lead_filters")); }
+  catch (e) { return null; }
+}
+async function init() {
+  const id = new URLSearchParams(location.search).get("id");
+  const r = await fetch("data/problems/" + encodeURIComponent(id) + ".json");
+  if (!r.ok) { document.getElementById("problem").textContent = "Problem not found."; return; }
+  P = await r.json();
+  const meanings = (P.explanations && P.explanations.auction) || [];
+  document.getElementById("meta").innerHTML =
+    "Contract " + callHtml(P.contract.slice(0, -1)) + " by " + P.declarer +
+    " · you lead (" + P.leader + ")";
+  document.getElementById("problem").innerHTML =
+    '<div class="card">' + completeAuctionTableHtml(P, meanings) +
+    '<div id="bidnote"></div>' +
+    '<p class="muted" style="margin:6px 0 0">Tap any call for its meaning · ' +
+    'tap a card below to lead it.</p></div>';
+  let openNote = -1;
+  const tbl = document.querySelector("table.bidding");
+  if (tbl) tbl.addEventListener("click", ev => {
+    const el = ev.target.closest(".call.expl");
+    const box = document.getElementById("bidnote");
+    document.querySelectorAll(".call.open").forEach(c => c.classList.remove("open"));
+    if (!el || +el.dataset.i === openNote) { openNote = -1; box.innerHTML = ""; return; }
+    openNote = +el.dataset.i;
+    el.classList.add("open");
+    const a = meanings[openNote] || {};
+    box.innerHTML = '<div class="bidnote"><b>' + cardHtml_or_call(a.call) +
+      ' (' + (a.seat || "") + ')</b> ' + (a.text || "") +
+      '<button class="x" aria-label="dismiss">✕</button></div>';
+    box.querySelector(".x").onclick = () => {
+      openNote = -1; box.innerHTML = "";
+      document.querySelectorAll(".call.open").forEach(c => c.classList.remove("open"));
+    };
+  });
+  const parts = P.hand.split(".");
+  document.getElementById("grid").innerHTML = ["S", "H", "D", "C"].map((s, i) => {
+    const btns = (parts[i] || "").split("").map(rk => {
+      const face = rk === "T" ? "10" : rk;
+      return '<button class="cardbtn" data-action="' + s + rk + '">' + face + '</button>';
+    }).join("");
+    return '<div class="suitrow"><span class="s">' + suitHtml(s) + '</span>' +
+      (btns || '<span class="muted">—</span>') + '</div>';
+  }).join("");
+  document.querySelectorAll("button.cardbtn").forEach(b => b.onclick = () => choose(b));
+  document.getElementById("next").onclick = async () => {
+    if (!INDEX) INDEX = await fetchIndex();
+    const nid = pickUnseen(INDEX, resolveFilters(INDEX, loadLead(), "lead"));
+    if (!nid) { location.href = "index.html"; return; }
+    location.href = routeFor("lead", nid);
+  };
+  const prev = store()[P.id];
+  if (prev) reveal(prev.answer);
+}
+function cardHtml_or_call(tok) { return tok ? callHtml(tok) : ""; }
+init();
+"""
+
+
+def _lead_html() -> str:
+    return (
+        '<!DOCTYPE html>\n<html><head><meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        '<title>Opening lead problem</title>\n<style>' + _CSS + '</style></head>'
+        '<body data-scenario="lead">\n'
+        '<div class="topbar"><a href="index.html">&larr; home</a>'
+        '<span class="muted" id="meta"></span></div>\n'
+        '<div id="problem"></div>\n'
+        '<div class="leadgrid" id="grid"></div>\n'
+        '<div id="verdict" class="card" style="display:none">\n'
+        '<div class="headline" id="headline"></div>\n'
+        '<p class="muted" id="subhead"></p>\n'
+        '<div id="bars"></div>\n'
+        '<p id="lead-expl" style="white-space:pre-line"></p>\n'
+        '<div class="muted" id="difficulty"></div>\n'
+        '<button class="big" id="next">Next lead &rarr;</button>\n'
+        '<details><summary>All 13 leads, ranked</summary>'
+        '<table class="plain" id="ltable"></table>'
+        '<p class="footnote">Average defensive tricks over a full double-dummy '
+        'simulation. Cards tied for the most are all correct.</p></details>\n'
+        '<details><summary>The full deal</summary>'
+        '<div id="fulldeal"></div></details>\n'
+        '</div>\n<script>' + _SHARED_JS + _LEAD_JS + '</script>\n</body></html>'
+    )
+
+
 def write_app(out_dir: str | Path) -> None:
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(_index_html(), encoding="utf-8")
     (out / "p.html").write_text(_problem_html(), encoding="utf-8")
+    (out / "lead.html").write_text(_lead_html(), encoding="utf-8")
     (out / ".nojekyll").write_text("")

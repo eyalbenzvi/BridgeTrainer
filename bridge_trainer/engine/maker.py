@@ -39,6 +39,7 @@ def build_record(spot, verdict, stem_expl, opt_expl, elapsed) -> dict:
     policy_map = dict(spot.candidates)
     rec = {
         "schema": 1,
+        "kind": "bidding",
         "id": f"ben1-{spot.seed:08x}",
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "generator": {"engine": "ben BEN-21GF", "seed": spot.seed,

@@ -51,8 +51,10 @@ class ProblemPool:
             cls = rec.get("classification", {})
             entries.append({
                 "id": pid,
-                "difficulty": rec.get("difficulty"),
+                # scenario router; legacy records predate it and are bidding
+                "kind": rec.get("kind", "bidding"),
                 "type": cls.get("type"),
+                "difficulty": rec.get("difficulty"),
                 "difficulty_level": cls.get("difficulty_level"),
                 "created_at": rec.get("created_at"),
             })

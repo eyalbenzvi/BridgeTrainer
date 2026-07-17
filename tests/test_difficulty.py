@@ -108,6 +108,11 @@ def test_boundary_guard_takes_median_of_halves():
 
 def test_runs_on_every_published_record():
     for path in POOL.glob("*.json"):
-        out = difficulty_classification(json.loads(path.read_text()))
+        rec = json.loads(path.read_text())
+        # difficulty_classification is bidding-specific; opening-lead records
+        # carry their own 1-5 difficulty (engine/lead_verdict.py).
+        if rec.get("kind") == "lead":
+            continue
+        out = difficulty_classification(rec)
         assert 0 <= out["difficulty_score"] <= 100
         assert 1 <= out["difficulty_level"] <= 5

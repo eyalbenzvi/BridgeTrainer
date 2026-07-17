@@ -127,6 +127,16 @@ def cmd_ben_forge(args: argparse.Namespace) -> int:
 
 
 
+def cmd_lead_forge(args: argparse.Namespace) -> int:
+    from ..engine.lead_maker import forge_lead_batch
+    summary = forge_lead_batch(
+        pool_dir=args.pool, count=args.count, base_seed=args.seed,
+        max_seconds=args.max_seconds)
+    import json as _json
+    print(_json.dumps(summary, indent=1))
+    return 0 if summary["count"] == args.count else 1
+
+
 def cmd_pool(args: argparse.Namespace) -> int:
     from ..pool.store import ProblemPool
     pool = ProblemPool(args.pool)
@@ -221,6 +231,14 @@ def main(argv: list[str] | None = None) -> int:
                       help="run the full screen even on prescreen rejects "
                            "and report the measured false-kill rate")
     bf_p.set_defaults(func=cmd_ben_forge)
+
+    lf_p = sub.add_parser(
+        "lead-forge", help="generate opening-lead problems with the Ben engine")
+    lf_p.add_argument("--pool", default="data")
+    lf_p.add_argument("--count", type=int, default=20)
+    lf_p.add_argument("--seed", type=int, default=1)
+    lf_p.add_argument("--max-seconds", type=float, default=3600.0)
+    lf_p.set_defaults(func=cmd_lead_forge)
 
     pool_p = sub.add_parser("pool", help="add/remove/list pool problems")
     pool_sub = pool_p.add_subparsers(dest="pool_cmd", required=True)
