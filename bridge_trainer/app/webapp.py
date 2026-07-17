@@ -350,8 +350,9 @@ async function init() {{
     let seat = P.dealer, items = "";
     P.auction.forEach((tok, i) => {{
       const who = seat === P.seat ? "You" : seat;
-      items += `<li><b>${{who}} ${{callHtml(tok)}}</b> \\u2014 ` +
-               `${{P.auction_notes[i]}}</li>`;
+      if (P.auction_notes[i])
+        items += `<li><b>${{who}} ${{callHtml(tok)}}</b> \\u2014 ` +
+                 `${{P.auction_notes[i]}}</li>`;
       seat = seats[(seats.indexOf(seat) + 1) % 4];
     }});
     document.getElementById("auction-notes-list").innerHTML = items;

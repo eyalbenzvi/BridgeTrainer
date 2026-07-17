@@ -209,21 +209,27 @@ def judge(ev, policy_top: str | None = None,
     if abs(s1 - s2) > UNSTABLE_DELTA and min(s1, s2) < THETA:
         return reject("unstable_interest")
 
-    toss_up = gap <= max(ci, TOSS_UP_IMPS)
-    toss_up_with = []
-    if toss_up:
-        for b in bids[1:]:
-            d = float(_imp_diff(ev.ev[best], ev.ev[b]).mean())
-            dci = float(1.96 * _imp_diff(ev.ev[best], ev.ev[b]).std()
-                        / np.sqrt(n))
-            if d <= max(dci, TOSS_UP_IMPS):
-                toss_up_with.append(b)
+    # ---- single-winner rule (owner r3 #2): every published deal has ----
+    # exactly one winner; near-identical options reject the deal.
+    if doubled_share > DOUBLED_SHARE_MAX:
+        return reject("doubled_heavy")   # no toss-up downgrade anymore
+    pg = float((diff > 0).mean())        # top beats second, per layout
+    pl = float((diff < 0).mean())
+    measured["p_top_wins"] = round(pg, 3)
+    measured["p_second_wins"] = round(pl, 3)
+    if gap >= 0.5:
+        winner = best                    # >= 0.5 IMPs: the EV edge decides
+    elif pg - pl > 0.10:
+        winner = best                    # IMPs near-equal: win rate decides
+    elif pl - pg > 0.10:
+        winner = second                  # percentages overrule a tiny EV edge
+        measured["winner_by"] = "win-rate over a sub-0.5-IMP EV edge"
+    else:
+        return reject("no_clear_winner")
+    measured.setdefault(
+        "winner_by", "EV gap >= 0.5 IMPs" if gap >= 0.5 else "win rate +10%")
 
     flags = []
-    if doubled_share > DOUBLED_SHARE_MAX:
-        flags.append("doubled_heavy")
-        if not toss_up:
-            toss_up, toss_up_with = True, [second]  # INV5-style containment
-    return Verdict(True, "accepted", best=best, toss_up=toss_up,
-                   toss_up_with=toss_up_with, flags=flags,
+    return Verdict(True, "accepted", best=winner, toss_up=False,
+                   toss_up_with=[], flags=flags,
                    measured=measured, table=table, dead=dead)

@@ -148,6 +148,13 @@ def classify(auction: list[str], dealer_i: int, idx: int) -> CallInfo:
                 and denom != _denom(plast):
             return CallInfo("response", "splinter (shortness, raise)",
                             True, None, jump, False)
+        if plast == "2NT" and my_side_bids and \
+                my_side_bids[0] in ("2D", "2H", "2S") and \
+                nonpass_before and nonpass_before[0] == my_side_bids[0] \
+                and tok.startswith("3"):
+            return CallInfo("response", "step/feature response to the "
+                            "weak-two inquiry (artificial)",
+                            True, None, jump, False)
         if plast == "4NT" and tok in ("5C", "5D", "5H", "5S"):
             return CallInfo("response", "keycard step response",
                             True, None, jump, False)
@@ -165,9 +172,11 @@ def classify(auction: list[str], dealer_i: int, idx: int) -> CallInfo:
     if not nonpass_before:
         return CallInfo("opening", None, False, None, jump, False)
     my_suits = {_denom(t) for t in my_side_bids if _denom(t) != "NT"}
-    partner_suits = {_denom(plast) for _, plast in [partner_last]} \
-        if partner_last and _denom(partner_last[1]) != "NT" else set()
-    if denom != "NT" and denom in partner_suits:
+    my_own_suits = _suits_shown_naturally(prior, dealer_i, {me}, idx)
+    partner_suits = _suits_shown_naturally(prior, dealer_i, {partner}, idx)
+    if denom != "NT" and denom in my_own_suits:
+        cat = "rebid of the suit"
+    elif denom != "NT" and denom in partner_suits:
         cat = "raise"
     elif denom == "NT":
         cat = "notrump"
@@ -219,3 +228,16 @@ def hero_role(auction: list[str], dealer_i: int, hero_i: int) -> str:
         if hero_i == (overcaller + 2) % 4:
             return "advancer"
     return "other"
+
+
+def in_convention_sequence(auction: list[str], dealer_i: int,
+                           acting_seat: int) -> bool:
+    """No decision point within 3 calls of an asking call by the acting
+    side — the auction is mid-convention (owner feedback r3, #4)."""
+    side = {acting_seat, (acting_seat + 2) % 4}
+    for j, tok in enumerate(auction):
+        if seat_of(dealer_i, j) in side and _is_bid(tok):
+            info = classify(auction, dealer_i, j)
+            if info.asking and len(auction) - j <= 3:
+                return True
+    return False
