@@ -119,7 +119,8 @@ def cmd_ben_forge(args: argparse.Namespace) -> int:
     from ..engine.maker import forge_batch
     summary = forge_batch(
         pool_dir=args.pool, count=args.count, base_seed=args.seed,
-        max_seconds=args.max_seconds)
+        max_seconds=args.max_seconds, workers=args.workers,
+        audit_prescreen=args.audit_prescreen)
     import json as _json
     print(_json.dumps(summary, indent=1))
     return 0 if summary["count"] == args.count else 1
@@ -157,7 +158,8 @@ def cmd_pool(args: argparse.Namespace) -> int:
         import time as _time
         seed = args.seed if args.seed is not None else int(_time.time())
         summary = forge_batch(pool_dir=args.pool, count=args.count,
-                              base_seed=seed, max_seconds=args.max_seconds)
+                              base_seed=seed, max_seconds=args.max_seconds,
+                              workers=args.workers)
         return 0 if summary["count"] == args.count else 1
     return 2
 
@@ -212,6 +214,12 @@ def main(argv: list[str] | None = None) -> int:
     bf_p.add_argument("--count", type=int, default=20)
     bf_p.add_argument("--seed", type=int, default=1)
     bf_p.add_argument("--max-seconds", type=float, default=3600.0)
+    bf_p.add_argument("--workers", type=int, default=1,
+                      help="parallel forge workers; 0 = auto "
+                           "(each holds a ~1.2 GB engine)")
+    bf_p.add_argument("--audit-prescreen", action="store_true",
+                      help="run the full screen even on prescreen rejects "
+                           "and report the measured false-kill rate")
     bf_p.set_defaults(func=cmd_ben_forge)
 
     pool_p = sub.add_parser("pool", help="add/remove/list pool problems")
@@ -229,6 +237,8 @@ def main(argv: list[str] | None = None) -> int:
     pa.add_argument("--seed", type=int, default=None)
     pa.add_argument("--pool", default="data")
     pa.add_argument("--max-seconds", type=float, default=1800.0)
+    pa.add_argument("--workers", type=int, default=1,
+                    help="parallel forge workers; 0 = auto")
     pa.set_defaults(func=cmd_pool)
 
     args = parser.parse_args(argv)
