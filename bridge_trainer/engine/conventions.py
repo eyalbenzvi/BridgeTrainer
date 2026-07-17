@@ -301,18 +301,33 @@ def systemic_meaning(auction: list[str], dealer_i: int, idx: int) -> str:
         return "two-level overcall: a good 5+ (usually 6) card suit, " \
                "sound values (~11-17)"
     if cat == "raise" or cat == "jump raise":
+        # role-aware (owner r7): who is raising decides the meaning
+        me = seat_of(dealer_i, idx)
+        partner = (me + 2) % 4
+        first_bid_j = next(j for j, t in enumerate(auction) if _is_bid(t))
+        opener = seat_of(dealer_i, first_bid_j)
         opp_acted = any(
-            t != "P" and seat_of(dealer_i, j) not in
-            (seat_of(dealer_i, idx), (seat_of(dealer_i, idx) + 2) % 4)
+            t != "P" and seat_of(dealer_i, j) not in (me, partner)
             for j, t in enumerate(prior))
-        if "jump" in cat:
-            return ("preemptive raise: extra trumps, weak hand"
-                    if opp_acted else
-                    "invitational raise: 4+ trumps, 10-12 points")
         game_level = (4 if denom in ("H", "S") else 5)
         if level >= game_level:
             return "raise to game: to play"
-        return "simple raise: 3+ card support, 6-10 points"
+        if me == opener:
+            # opener raising responder's suit
+            if "jump" in cat:
+                return "opener's jump raise: 4-card support, 15-17 points"
+            return "opener's raise: 4-card support, minimum opening (11-14)"
+        if partner == opener:
+            # responder raising opener
+            if "jump" in cat:
+                return ("preemptive raise: extra trumps, weak hand"
+                        if opp_acted else
+                        "invitational raise: 4+ trumps, 10-12 points")
+            return "simple raise: 3+ card support, 6-10 points"
+        # advancer raising partner's overcall
+        if "jump" in cat:
+            return "jump raise of the overcall: 4+ trumps, preemptive"
+        return "raise of the overcall: 3+ card support, competitive values"
     if cat == "rebid of the suit":
         if info.jump > 0:
             return "jump rebid: a good 6+ card suit, 15-17 HCP"
