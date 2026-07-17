@@ -18,23 +18,24 @@ override the deal count, `--no-cache` to force regeneration.
 
 ## Random problems (the app)
 
-The deployed app serves RANDOM problems, not authored ones: `trainer
-produce` deals a random board, has a deterministic rule-of-thumb bot
-(`bridge_trainer/bot/`, spec M5) bid it to a genuine decision point, inverts
-the bot's call signatures into constraints for the concealed hands, runs the
-usual simulate/DD/compare pipeline with the bot bidding out every candidate's
-continuation per layout, and keeps the problem only if the verdict is close
-(≤3 IMPs between the top candidates) and statistically sound. Each problem
-takes ~20-30s to build and lands in a JSON pool (`data/` on gh-pages) that
-the static app (`trainer webapp`) reads: index.html "deals" a random unseen
-problem; answers are stored in localStorage. Batches are generated manually
-for now (`trainer produce --pool ... --count N`); no scheduled jobs.
+The deployed app serves RANDOM problems generated with the **Ben engine**
+(github.com/lorserker/ben, GPL-3.0 — external checkout, never vendored;
+`scripts/setup_ben.sh` installs it pinned). `trainer ben-forge` deals a
+random board, Ben (BEN-21GF, a dedicated 2/1 Game Force model) bids all
+four seats to a decision point, and a turn qualifies only when Ben's own
+policy distribution genuinely splits AND the paired rollout evaluation
+(shared samples, per-candidate expected IMPs, CI floors) confirms the
+choice is close, material and statistically honest. Options are the calls
+carrying real policy mass (2–5); every problem ships with computed
+explanations — empirical meaning bands per stem call ("1♥ (N): overcall —
+7–10 HCP, 5.0♥ avg, n=128, measured"), convention names from a mechanical
+2/1 table (Stayman, transfers, RKC, cue bids, double types), and
+per-option evidence (policy weight, contract distributions, IMP margins).
+Design + review history: `docs/ben_execution_plan.md`, `docs/panel/`.
 
-The bot is deliberately simple (no Stayman/transfers, no 2C, no slam
-machinery — see `bridge_trainer/bot/bidder.py` docstring) and every call's
-constraint signature is soundness-tested against the hands that produce it.
-Problems record the full deal, the bot's complete auction, and the bot
-version, so weak spots can be reported and filtered later.
+Problems land in a JSON pool (`data/`) read by the static app
+(`trainer webapp`); `.github/workflows/generate.yml` grows the pool
+nightly with the engine cached between CI runs.
 
 ## Authored problems (legacy drill, still available for dev)
 
