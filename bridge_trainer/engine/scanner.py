@@ -59,6 +59,32 @@ def deal_board(seed: int):
     return hands, dealer_i, vul
 
 
+def bid_out(engine, seed: int):
+    """Deal a board and let Ben bid all four seats to conclusion.
+
+    Returns (hands, dealer_i, vul, full_auction). This is the play-out that
+    the opening-lead maker needs for EVERY board (the completed auction and
+    its final contract), whereas scan_board keeps only boards with a bidding
+    dilemma. Kept deliberately parallel to scan_board's committing loop.
+    """
+    hands, dealer_i, vul = deal_board(seed)
+    bots = [engine.bot(hands[i], i, dealer_i, vul) for i in range(4)]
+    auction: list[str] = []
+    while True:
+        n = len(auction)
+        if n >= 3 and all(t == "P" for t in auction[-3:]) and \
+                any(t != "P" for t in auction):
+            break
+        if n >= 4 and all(t == "P" for t in auction):
+            break  # passed out
+        if n > 40:
+            break  # runaway guard
+        seat_i = seat_of(dealer_i, n)
+        policy = engine.policy(bots[seat_i], dealer_i, auction)
+        auction.append(policy[0].bid if policy else "P")
+    return hands, dealer_i, vul, auction
+
+
 def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
     hands, dealer_i, vul = deal_board(seed)
     bots = [engine.bot(hands[i], i, dealer_i, vul) for i in range(4)]

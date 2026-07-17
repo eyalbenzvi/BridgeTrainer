@@ -10,8 +10,11 @@ on:
   workflow_dispatch:
     inputs:
       count:
-        description: "problems to generate (0 = none)"
+        description: "bidding problems to generate (0 = none)"
         default: "10"
+      lead_count:
+        description: "opening-lead problems to generate (0 = none)"
+        default: "5"
       remove:
         description: "problem ids to remove (space-separated, optional)"
         default: ""
@@ -47,14 +50,27 @@ jobs:
           "$HOME/benv/bin/python" -m bridge_trainer.app.cli \
             pool rm ${{ github.event.inputs.remove }} --pool data
 
-      - name: Generate
+      - name: Generate bidding problems
         if: github.event.inputs.count != '0'
         run: |
           COUNT="${{ github.event.inputs.count || '10' }}"
           SEED=$(( $(date +%s) / 86400 ))000
           BEN_HOME="$HOME/ben" "$HOME/benv/bin/python" -m bridge_trainer.app.cli \
             ben-forge --count "$COUNT" --seed "$SEED" --pool data \
-            --max-seconds 5400
+            --max-seconds 3600
+
+      # Same job (sequential): reuses the ~1 GB model cache and one git
+      # commit, avoiding a second cold load and racing index.json writes.
+      # Disjoint seed space (+500) so the two producers never deal the same
+      # boards.
+      - name: Generate opening-lead problems
+        if: github.event.inputs.lead_count != '0'
+        run: |
+          LCOUNT="${{ github.event.inputs.lead_count || '5' }}"
+          SEED=$(( $(date +%s) / 86400 ))500
+          BEN_HOME="$HOME/ben" "$HOME/benv/bin/python" -m bridge_trainer.app.cli \
+            lead-forge --count "$LCOUNT" --seed "$SEED" --pool data \
+            --max-seconds 1800
 
       - name: Commit pool
         run: |

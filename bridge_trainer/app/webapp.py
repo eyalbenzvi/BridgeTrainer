@@ -85,6 +85,36 @@ a.big, button.big { display: block; width: 100%; text-align: center;
 .pill { display: inline-block; border-radius: 999px; padding: .1em .7em;
         font-size: .8em; border: 1px solid #8886; margin-left: .3em; }
 details { margin: .8em 0; }
+/* opening-lead card grid: the hand IS the answer input, one row per suit */
+.leadgrid { margin: 1em 0; }
+.suitrow { display: flex; align-items: center; flex-wrap: wrap; gap: .4em;
+           margin: .35em 0; }
+.suitrow .suit { font-size: 1.4em; width: 1.3em; text-align: center; }
+button.cardbtn { min-width: 2.6em; min-height: 2.75em; font-size: 1.15em;
+  padding: .5em .3em; border-radius: 8px; border: 2px solid #8886;
+  background: inherit; color: inherit; cursor: pointer; }
+button.cardbtn.chosen { border-color: #3673b5; }
+button.cardbtn.good { border-color: #2c9e5f; background: #2c9e5f22; }
+button.cardbtn.bad { border-color: #d3455b; background: #d3455b22; }
+/* clickable calls in a completed auction */
+table.bidding td.biddable { cursor: pointer; text-decoration: underline dotted;
+  text-underline-offset: 3px; }
+table.bidding td.lead { background: #3673b5; color: #fff; }
+#bid-meaning { min-height: 1.3em; margin: .3em 0 0; }
+/* reveal: horizontal bars instead of a wall of decimals */
+.bar-wrap { display: flex; align-items: center; gap: .5em; margin: .35em 0; }
+.bar-label { width: 3em; font-size: 1.05em; }
+.bar-track { flex: 1; background: #8882; border-radius: 6px; height: 1.25em; }
+.bar-fill { background: #3673b5; height: 100%; border-radius: 6px; }
+.bar-fill.good { background: #2c9e5f; }
+.bar-val { width: 5.5em; text-align: right; font-size: .85em;
+           font-variant-numeric: tabular-nums; }
+/* segmented mode toggle on the home page */
+.seg { display: inline-flex; border: 1px solid #8886; border-radius: 999px;
+       overflow: hidden; margin: .2em 0 .6em; }
+.seg button { border: none; background: inherit; color: inherit;
+  padding: .45em 1em; cursor: pointer; font-size: .95em; }
+.seg button.on { background: #3673b5; color: #fff; }
 """
 
 _SHARED_JS = """
@@ -97,11 +127,17 @@ async function fetchIndex() {
   if (!r.ok) throw new Error("no pool index");
   return r.json();
 }
-function pickUnseen(index) {
+function pickUnseen(index, mode) {
   const s = store();
-  const unseen = index.problems.filter(p => !s[p.id]);
+  let unseen = index.problems.filter(p => !s[p.id]);
+  if (mode && mode !== "either")
+    unseen = unseen.filter(p => (p.type || "bidding") === mode);
   if (!unseen.length) return null;
-  return unseen[Math.floor(Math.random() * unseen.length)].id;
+  return unseen[Math.floor(Math.random() * unseen.length)];
+}
+function problemUrl(e) {
+  const page = (e.type || "bidding") === "lead" ? "lead.html" : "p.html";
+  return page + "?id=" + encodeURIComponent(e.id);
 }
 const SUIT_HTML = {S: "\\u2660", H: '<span class="red">\\u2665</span>',
                    D: '<span class="red">\\u2666</span>', C: "\\u2663"};
@@ -145,6 +181,37 @@ function auctionTableHtml(p) {
     rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
   return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
 }
+function cardHtml(tok) {  // "SK" -> spade glyph + rank (T shown as 10)
+  const r = tok[1] === "T" ? "10" : tok[1];
+  return SUIT_HTML[tok[0]] + " " + r;
+}
+// A COMPLETE auction in true seat order N-E-S-W. Real calls carry a
+// data-idx so the page can make every bid clickable (its meaning lives in
+// P.explanations.auction[idx]). The player on lead gets the blue column.
+function completeAuctionTableHtml(P) {
+  const seats = ["N", "E", "S", "W"];
+  const dummy = seats[(seats.indexOf(P.declarer) + 2) % 4];
+  const head = seats.map(s => {
+    if (s === P.leader) return `<th class=me>${s}<br><small>lead</small></th>`;
+    if (s === P.declarer) return `<th>${s}<br><small>decl</small></th>`;
+    if (s === dummy) return `<th>${s}<br><small>dummy</small></th>`;
+    return `<th>${s}</th>`;
+  }).join("");
+  const meanings = (P.explanations && P.explanations.auction) || [];
+  const cells = [];
+  for (let i = 0; i < seats.indexOf(P.dealer); i++)
+    cells.push('<td class=dim>\\u2013</td>');
+  P.auction.forEach((tok, gi) => {
+    const has = meanings[gi] && meanings[gi].text;
+    const cls = has ? "biddable" : "";
+    cells.push(`<td class="${cls}" data-idx="${gi}">${callHtml(tok)}</td>`);
+  });
+  while (cells.length % 4) cells.push("<td></td>");
+  let rows = "";
+  for (let i = 0; i < cells.length; i += 4)
+    rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
+  return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
+}
 """
 
 
@@ -152,16 +219,56 @@ def _index_html() -> str:
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bridge Bidding Trainer</title>
+<title>Bridge Trainer</title>
 <style>{_CSS}</style></head><body>
-<h1>Bridge Bidding Trainer</h1>
+<h1>Bridge Trainer</h1>
+<div class="seg" id="mode" role="group" aria-label="Problem type">
+  <button data-mode="bidding">Bidding</button>
+  <button data-mode="lead">Opening lead</button>
+  <button data-mode="either">Either</button>
+</div>
 <button class="big" id="deal">Deal me a hand &rarr;</button>
 <div class="card" id="stats">Loading the problem pool&hellip;</div>
-<p class="muted">Every problem is a random deal, bid to a genuine decision
-point, its verdict backed by a full double-dummy simulation. The pool grows
-in batches. <a href="#" id="reset">Reset progress</a></p>
+<p class="muted">Each problem is a random deal backed by a full double-dummy
+simulation: bidding problems ask for your call at a genuine decision point;
+opening-lead problems ask which card to lead. The pool grows in batches.
+<a href="#" id="reset">Reset progress</a></p>
 <script>{_SHARED_JS}
+const MODE_KEY = "bt_mode";
 let INDEX = null;
+let MODE = localStorage.getItem(MODE_KEY) || "either";
+function labelFor(m) {{
+  return m === "bidding" ? "Deal me a bidding problem \\u2192"
+       : m === "lead" ? "Deal me a lead problem \\u2192"
+       : "Deal me a hand \\u2192";
+}}
+function paintMode() {{
+  document.querySelectorAll("#mode button").forEach(b =>
+    b.classList.toggle("on", b.dataset.mode === MODE));
+  document.getElementById("deal").innerHTML = labelFor(MODE);
+  renderStats();
+}}
+function renderStats() {{
+  if (!INDEX) return;
+  const s = store();
+  const bucket = {{bidding: {{n: 0, done: 0, right: 0}},
+                   lead: {{n: 0, done: 0, right: 0}}}};
+  for (const p of INDEX.problems) {{
+    const t = (p.type || "bidding");
+    if (!bucket[t]) bucket[t] = {{n: 0, done: 0, right: 0}};
+    bucket[t].n++;
+    const rec = s[p.id];
+    if (rec) {{ bucket[t].done++; if (rec.correct) bucket[t].right++; }}
+  }}
+  const line = (name, b) => b.n ?
+    `${{name}}: <b>${{b.right}}</b> / ${{b.done}} answered ` +
+    `<span class="pill">${{b.n - b.done}} left</span>` : "";
+  const rows = [line("Bidding", bucket.bidding), line("Opening lead", bucket.lead)]
+    .filter(Boolean).join("<br>");
+  document.getElementById("stats").innerHTML =
+    `<b>${{INDEX.count}}</b> problems in the pool<br>` +
+    (rows || "You haven't answered any yet.");
+}}
 async function init() {{
   try {{ INDEX = await fetchIndex(); }}
   catch (e) {{
@@ -169,27 +276,20 @@ async function init() {{
       "The problem pool is still being generated \\u2014 check back shortly.";
     return;
   }}
-  const s = store();
-  let done = 0, right = 0;
-  for (const p of INDEX.problems) {{
-    const rec = s[p.id];
-    if (rec) {{ done++; if (rec.correct) right++; }}
-  }}
-  document.getElementById("stats").innerHTML =
-    `<b>${{INDEX.count}}</b> problems in the pool ` +
-    `<span class="pill">${{INDEX.count - done}} waiting for you</span><br>` +
-    (done ? `Your record: <b>${{right}}</b> / ${{done}} answered` :
-            "You haven't answered any yet.");
+  paintMode();
 }}
+document.querySelectorAll("#mode button").forEach(b => b.onclick = () => {{
+  MODE = b.dataset.mode; localStorage.setItem(MODE_KEY, MODE); paintMode();
+}});
 document.getElementById("deal").onclick = () => {{
   if (!INDEX) return;
-  const id = pickUnseen(INDEX);
-  if (!id) {{
-    alert("You've answered every problem in the pool! " +
-          "More will be added in the next batch.");
+  const e = pickUnseen(INDEX, MODE);
+  if (!e) {{
+    alert("You've answered every problem in this mode! " +
+          "Try another mode or check back after the next batch.");
     return;
   }}
-  location.href = "p.html?id=" + encodeURIComponent(id);
+  location.href = problemUrl(e);
 }};
 document.getElementById("reset").onclick = () => {{
   if (confirm("Clear all recorded answers?")) {{
@@ -380,9 +480,169 @@ async function init() {{
   }}
   document.getElementById("next").onclick = async () => {{
     if (!INDEX) INDEX = await fetchIndex();
-    const nid = pickUnseen(INDEX);
-    if (!nid) {{ location.href = "index.html"; return; }}
-    location.href = "p.html?id=" + encodeURIComponent(nid);
+    const e = pickUnseen(INDEX, "bidding");
+    if (!e) {{ location.href = "index.html"; return; }}
+    location.href = problemUrl(e);
+  }};
+  const prev = store()[P.id];
+  if (prev) reveal(prev.answer);
+}}
+init();
+</script>
+</body></html>"""
+
+
+def _lead_html() -> str:
+    return f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opening lead problem</title>
+<style>{_CSS}</style></head><body>
+<div class="topbar">
+<a href="index.html">&larr; home</a>
+<span class="muted" id="meta"></span>
+</div>
+<div id="problem"></div>
+<div class="candidates leadgrid" id="grid"></div>
+<div id="verdict" class="card">
+<div class="headline" id="headline"></div>
+<p class="muted" id="subhead"></p>
+<div id="bars"></div>
+<p id="lead-expl" style="white-space:pre-line"></p>
+<div class="muted" id="difficulty"></div>
+<button class="big" id="next">Next deal &rarr;</button>
+<details><summary class="muted">All 13 leads, ranked</summary>
+<table id="ltable"></table>
+<p class="muted">Average defensive tricks over a full double-dummy
+simulation. Cards tied for the most are all correct.</p></details>
+<details><summary class="muted">The full deal</summary>
+<div id="fulldeal"></div></details>
+</div>
+<script>{_SHARED_JS}
+let P = null, INDEX = null;
+function wireAuction() {{
+  const meanings = (P.explanations && P.explanations.auction) || [];
+  const box = document.getElementById("bid-meaning");
+  document.querySelectorAll("#problem td.biddable").forEach(td => {{
+    td.onclick = () => {{
+      const m = meanings[+td.dataset.idx];
+      document.querySelectorAll("#problem td.lead").forEach(
+        x => x.classList.remove("lead"));
+      td.classList.add("lead");
+      box.innerHTML = m && m.text
+        ? `<b>${{m.seat}} ${{callHtml(m.call)}}</b> \\u2014 ${{m.text}}`
+        : "";
+    }};
+  }});
+}}
+function gridHtml(hand) {{
+  const parts = hand.split(".");
+  return ["S", "H", "D", "C"].map((s, i) => {{
+    const btns = (parts[i] || "").split("").map(r => {{
+      const tok = s + r, face = r === "T" ? "10" : r;
+      return `<button class="cardbtn" data-action="${{tok}}">${{face}}</button>`;
+    }}).join("");
+    return `<div class="suitrow"><span class="suit">${{SUIT_HTML[s]}}</span>`
+         + (btns || '<span class="muted">\\u2014</span>') + `</div>`;
+  }}).join("");
+}}
+function avgOf(card) {{
+  const r = P.verdict.table.find(x => x.card === card);
+  return r ? r.avg_def_tricks : 0;
+}}
+function barsHtml(chosen) {{
+  const table = P.verdict.table, acc = P.verdict.accepted;
+  const maxv = table.length ? table[0].avg_def_tricks : 1;
+  const seen = new Set(), picked = [];
+  for (const r of table) {{                 // best card of each suit
+    if (!seen.has(r.card[0])) {{ seen.add(r.card[0]); picked.push(r.card); }}
+  }}
+  if (!picked.includes(chosen)) picked.push(chosen);   // always show yours
+  return picked.map(card => {{
+    const v = avgOf(card), good = acc.includes(card);
+    const pct = maxv > 0 ? Math.max(4, Math.round(v / maxv * 100)) : 0;
+    const you = card === chosen ? ' <span class="muted">(your lead)</span>' : "";
+    return `<div class="bar-wrap"><span class="bar-label">${{cardHtml(card)}}</span>`
+      + `<span class="bar-track"><span class="bar-fill ${{good ? "good" : ""}}"`
+      + ` style="width:${{pct}}%"></span></span>`
+      + `<span class="bar-val">${{v.toFixed(2)}} tr${{you}}</span></div>`;
+  }}).join("");
+}}
+function reveal(chosen) {{
+  const v = P.verdict, acc = v.accepted;
+  document.querySelectorAll("button.cardbtn").forEach(b => {{
+    const a = b.dataset.action;
+    if (acc.includes(a)) b.classList.add("good");
+    else if (a === chosen) b.classList.add("bad");
+    if (a === chosen) b.classList.add("chosen");
+    b.disabled = true;
+  }});
+  const ok = acc.includes(chosen);
+  document.getElementById("headline").innerHTML = ok
+    ? "\\u2713 Best lead \\u2014 " + cardHtml(chosen)
+    : "\\u2717 Better was " + acc.map(cardHtml).join(" or ");
+  document.getElementById("subhead").innerHTML = acc.length > 1
+    ? "Equally best: " + acc.map(cardHtml).join(", ")
+    : "";
+  document.getElementById("bars").innerHTML = barsHtml(chosen);
+  const notes = (P.explanations && P.explanations.cards) || [];
+  const noteFor = c => (notes.find(x => x.card === c) || {{}}).text || "";
+  let expl = noteFor(acc[0]);
+  if (!ok) {{ const y = noteFor(chosen); if (y) expl += "\\n\\n" + y; }}
+  document.getElementById("lead-expl").textContent = expl;
+  document.getElementById("difficulty").textContent =
+    "Difficulty " + (P.difficulty || "?") + "/5";
+  let rt = "<tr><th>Card</th><th>Avg def. tricks</th><th>vs best</th>" +
+           "<th>BEN</th></tr>";
+  for (const r of v.table) {{
+    const g = acc.includes(r.card) ? ' style="font-weight:bold"' : "";
+    rt += `<tr${{g}}><td>${{cardHtml(r.card)}}</td>` +
+          `<td>${{r.avg_def_tricks.toFixed(2)}}</td>` +
+          `<td>${{r.vs_best >= 0 ? "+" : ""}}${{r.vs_best.toFixed(2)}}</td>` +
+          `<td>${{Math.round((r.ben_softmax || 0) * 100)}}%</td></tr>`;
+  }}
+  document.getElementById("ltable").innerHTML = rt;
+  if (P.full_deal) {{
+    document.getElementById("fulldeal").innerHTML = ["N", "E", "S", "W"]
+      .map(s => `<div><b>${{s}}</b>: ${{handHtml(P.full_deal[s])}}</div>`)
+      .join("<br>");
+  }}
+  document.getElementById("verdict").style.display = "block";
+}}
+function choose(btn) {{
+  const s = store();
+  if (s[P.id]) return;
+  const a = btn.dataset.action;
+  s[P.id] = {{ answer: a, correct: P.verdict.accepted.includes(a),
+               ts: Date.now() }};
+  saveStore(s);
+  reveal(a);
+}}
+async function init() {{
+  const id = new URLSearchParams(location.search).get("id");
+  const r = await fetch("data/problems/" + encodeURIComponent(id) + ".json");
+  if (!r.ok) {{ document.getElementById("problem").textContent =
+                "Problem not found."; return; }}
+  P = await r.json();
+  document.getElementById("meta").innerHTML =
+    `Contract ${{callHtml(P.contract.slice(0, P.contract[1] === "N" ? 3 : 2))}}`
+    + ` by ${{P.declarer}} \\u00b7 Vul ${{P.vul}} \\u00b7 you lead (${{P.leader}})`;
+  document.getElementById("problem").innerHTML =
+    `<div class="card">${{completeAuctionTableHtml(P)}}` +
+    `<p class="muted">Tap any call to see what it showed.</p>` +
+    `<p id="bid-meaning"></p>` +
+    `<div class="hand">${{handHtml(P.hand)}}</div>` +
+    `<p class="muted">Tap a card to lead it.</p></div>`;
+  wireAuction();
+  const grid = document.getElementById("grid");
+  grid.innerHTML = gridHtml(P.hand);
+  grid.querySelectorAll("button.cardbtn").forEach(
+    b => b.onclick = () => choose(b));
+  document.getElementById("next").onclick = async () => {{
+    if (!INDEX) INDEX = await fetchIndex();
+    const e = pickUnseen(INDEX, "lead");
+    if (!e) {{ location.href = "index.html"; return; }}
+    location.href = problemUrl(e);
   }};
   const prev = store()[P.id];
   if (prev) reveal(prev.answer);
@@ -397,4 +657,5 @@ def write_app(out_dir: str | Path) -> None:
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(_index_html(), encoding="utf-8")
     (out / "p.html").write_text(_problem_html(), encoding="utf-8")
+    (out / "lead.html").write_text(_lead_html(), encoding="utf-8")
     (out / ".nojekyll").write_text("")

@@ -7,6 +7,8 @@ dealer.
 """
 from __future__ import annotations
 
+SEATS = "NESW"
+
 
 def seat_of(dealer_i: int, idx: int) -> int:
     return (dealer_i + idx) % 4
@@ -14,6 +16,45 @@ def seat_of(dealer_i: int, idx: int) -> int:
 
 def _is_bid(tok: str) -> bool:
     return tok not in ("P", "X", "XX")
+
+
+def final_contract(auction: list[str], dealer_i: int) -> dict | None:
+    """The contract a completed auction settles in — a mechanical fact.
+
+    Returns {level, denom, declarer_i, doubled} or None when the board is
+    passed out. `denom` is C/D/H/S/NT; `doubled` is "", "x" or "xx".
+    Declarer is the member of the contract-winning side who FIRST named the
+    final denomination (standard bridge rule).
+    """
+    bids = [(j, t) for j, t in enumerate(auction) if _is_bid(t)]
+    if not bids:
+        return None
+    last_j, last_t = bids[-1]
+    level, denom = int(last_t[0]), last_t[1:]
+    decl_side = seat_of(dealer_i, last_j) % 2
+    declarer_i = seat_of(dealer_i, last_j)
+    for j, t in bids:
+        if t[1:] == denom and seat_of(dealer_i, j) % 2 == decl_side:
+            declarer_i = seat_of(dealer_i, j)
+            break
+    doubled = ""
+    for t in auction[last_j + 1:]:
+        if t == "XX":
+            doubled = "xx"
+        elif t == "X":
+            doubled = "x"
+    return {"level": level, "denom": denom,
+            "declarer_i": declarer_i, "doubled": doubled}
+
+
+def opening_leader(declarer_i: int) -> int:
+    """The player on lead: left-hand opponent of declarer."""
+    return (declarer_i + 1) % 4
+
+
+def contract_str(fc: dict) -> str:
+    """{level,denom,declarer_i,doubled} -> '4HE' / '3NTSx'."""
+    return f"{fc['level']}{fc['denom']}{SEATS[fc['declarer_i']]}{fc['doubled']}"
 
 
 def hero_role(auction: list[str], dealer_i: int, hero_i: int) -> str:

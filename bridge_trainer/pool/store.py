@@ -50,6 +50,8 @@ class ProblemPool:
             rec = self.get(pid)
             entries.append({
                 "id": pid,
+                # legacy records predate the type field: they are all bidding
+                "type": rec.get("type", "bidding"),
                 "difficulty": rec.get("difficulty"),
                 "created_at": rec.get("created_at"),
             })
