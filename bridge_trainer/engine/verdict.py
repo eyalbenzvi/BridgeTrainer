@@ -249,6 +249,14 @@ def judge(ev, policy_top: str | None = None,
     if policy_map is not None and policy_map.get(winner, 0.0) < 0.15:
         return reject("implausible_winner")
 
+    # split-half evidence snapshots: difficulty.py stabilizes level labels
+    # near bucket cut points with these (median-of-three rule)
+    measured["half_stats"] = [
+        {"gap_imps": round(float(d.mean()), 2),
+         "p_top_wins": round(float((d > 0).mean()), 3),
+         "p_second_wins": round(float((d < 0).mean()), 3)}
+        for d in (diff[:half], diff[half:])]
+
     flags = []
     return Verdict(True, "accepted", best=winner, toss_up=False,
                    toss_up_with=[], flags=flags,

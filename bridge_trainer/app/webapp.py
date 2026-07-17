@@ -68,6 +68,20 @@ a { color: var(--accent); }
 .muted { color: var(--muted); font-size: 13px; }
 .pill { display: inline-block; border-radius: 999px; padding: 1px 8px;
         font-size: 12px; border: 1px solid #ffffff55; }
+/* problem-type badge (classification.type), shown with the problem */
+.typebadge { display: inline-block; font-size: 11px; font-weight: 700;
+             letter-spacing: .08em; text-transform: uppercase;
+             color: var(--accent); background: var(--accent-tint);
+             border: 1px solid var(--accent); border-radius: 999px;
+             padding: 3px 10px; margin-bottom: 10px; cursor: help; }
+/* difficulty stars (classification.difficulty_level), revealed with the
+   verdict only — never before the user answers */
+.diffline { display: flex; align-items: center; gap: 8px; font-size: 13px;
+            color: var(--muted); margin: 0 0 10px; }
+.diffline .stars { font-size: 15px; letter-spacing: 2px; line-height: 1; }
+.diffline .stars .on { color: var(--gold); }
+.diffline .stars .off { color: var(--line); }
+.diffline b { color: var(--fg); }
 /* four-color suits (BBO default deck) */
 .ss { color: var(--sp); } .sh { color: var(--he); }
 .sd { color: var(--di); } .sc { color: var(--cl); }
@@ -335,6 +349,45 @@ function candOrder(c) {
   if (c === "XX") return 102;
   return +c[0] * 10 + ["C", "D", "H", "S", "NT"].indexOf(c.slice(1));
 }
+/* classification display names (ids: engine/classify.py taxonomy) */
+const TYPE_NAMES = {
+  open_or_pass: ["Opening decision",
+    "Open a borderline hand, or pass \\u2014 and with which opening?"],
+  preempt_decision: ["Preempt decision",
+    "Obstruct or not \\u2014 and how high?"],
+  enter_auction: ["Enter the auction?",
+    "Overcall, double, or stay out of their auction?"],
+  compete_or_sell: ["Part-score battle",
+    "Bid once more, pass, or push them higher?"],
+  invite_or_game: ["Invite or game?",
+    "Sign off, invite, or bid game \\u2014 accept or reject the try?"],
+  slam_try: ["Slam decision",
+    "Move toward slam, or settle for game?"],
+  choice_of_strain: ["Choice of strain",
+    "The level is settled \\u2014 but WHERE: which suit, or notrump?"],
+  double_or_bid: ["Double decision",
+    "Double, bid on, or pass \\u2014 leave partner's double in or pull?"],
+  sacrifice_decision: ["Save or defend?",
+    "Deliberately outbid their making contract, or take the defense?"],
+  describe_hand: ["Describe your hand",
+    "Which constructive call best shows your strength and shape?"],
+};
+const DIFF_NAMES = ["", "Easy", "Moderate", "Tricky", "Hard", "Expert"];
+function typeBadgeHtml(p) {
+  const t = p.classification && p.classification.type;
+  const nm = TYPE_NAMES[t];
+  if (!nm) return "";
+  return `<div><span class="typebadge" title="${nm[1]}">${nm[0]}</span></div>`;
+}
+function diffLineHtml(p) {
+  const lv = p.classification && p.classification.difficulty_level;
+  if (!lv || lv < 1 || lv > 5) return "";
+  return `<span>Difficulty</span>` +
+    `<span class="stars" role="img" aria-label="difficulty ${lv} out of 5">` +
+    `<span class="on">${"\\u2605".repeat(lv)}</span>` +
+    `<span class="off">${"\\u2605".repeat(5 - lv)}</span></span>` +
+    `<b>${DIFF_NAMES[lv]}</b>`;
+}
 """
 
 
@@ -419,6 +472,7 @@ def _problem_html() -> str:
 <div id="verdict" class="card">
 <div class="headline" id="headline"></div>
 <div class="subline" id="subline"></div>
+<div class="diffline" id="diffline"></div>
 <div id="fog"></div>
 <div class="legend"><i style="background:var(--win)"></i>wins
 <i style="background:var(--push)"></i>push
@@ -526,6 +580,7 @@ function reveal(chosen) {{
   document.getElementById("subline").textContent =
     `IMPs \\u00b7 corrected single-dummy view` +
     (n ? ` \\u00b7 ${{n}} simulated layouts` : "");
+  document.getElementById("diffline").innerHTML = diffLineHtml(P);
   if (v.fog) document.getElementById("fog").innerHTML =
     '<div class="fog">\\u26a0 Double-dummy fog: raw and corrected views ' +
     'disagree \\u2014 lower confidence.</div>';
@@ -689,7 +744,7 @@ async function init() {{
     `IMPs \\u00b7 Dealer ${{P.dealer}} \\u00b7 you are ${{P.seat}}` +
     (P.category && P.category !== "other" ? ` \\u00b7 ${{P.category}}` : "");
   document.getElementById("problem").innerHTML =
-    `<div class="card">${{auctionTableHtml(P, NOTES)}}` +
+    `<div class="card">${{typeBadgeHtml(P)}}${{auctionTableHtml(P, NOTES)}}` +
     `<div id="bidnote"></div>` +
     `<div class="hand">${{handHtml(P.hand)}}</div></div>`;
   // tap a bid -> alert-style explanation strip under the auction
