@@ -117,11 +117,21 @@ class BenEngine:
 
     # -- paired evaluation of an explicit candidate list -------------------
     def evaluate(self, bot, dealer_i: int, auction: list[str],
-                 bids: list[str]) -> Evaluation:
+                 bids: list[str], n_samples: int | None = None) -> Evaluation:
         """Mirror of BotBid.bid()'s rollout block, but on OUR candidate
-        list, all candidates on the same sampled layouts (INV1 pairing)."""
+        list, all candidates on the same sampled layouts (INV1 pairing).
+        n_samples temporarily overrides the sampler's target count."""
         from bidding import bidding as ben_bidding
 
+        saved = self.sampler._sample_hands_auction
+        if n_samples:
+            self.sampler._sample_hands_auction = n_samples
+        try:
+            return self._evaluate(bot, dealer_i, auction, bids, ben_bidding)
+        finally:
+            self.sampler._sample_hands_auction = saved
+
+    def _evaluate(self, bot, dealer_i, auction, bids, ben_bidding):
         padded = pad(dealer_i, auction)
         hands_np, sorted_score, _p_hcp, _p_shp, quality = \
             bot.sample_hands_for_auction(padded, bot.seat)

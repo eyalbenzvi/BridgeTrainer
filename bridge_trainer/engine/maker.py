@@ -16,16 +16,8 @@ from .conventions import hero_role
 from .scanner import SEATS, VUL_NAMES, scan_board
 from .verdict import judge
 
-MAX_OPENING_DECISIONS = 3
-MAX_PER_THEME = 2
-MAX_TRAP = 3          # trap-class boards per batch (selectivity review)
-
-
-def _theme_key(spot) -> str:
-    tail = [t for t in spot.stem if t != "P"][-3:]
-    cands = ",".join(sorted(b for b, _ in spot.candidates))
-    return f"{'-'.join(tail)}|{cands}"
-
+SCREEN_SAMPLES = 128    # rejection decisions (10x more rejects than accepts)
+CONFIRM_SAMPLES = 512   # published evidence: fresh samples, CI halved
 
 def _round_trip_ok(spot) -> bool:
     """Rec 13d: the hand we publish is the hand Ben bid for that seat."""
@@ -94,8 +86,7 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
     pool = ProblemPool(pool_dir)
     existing = set(pool.ids())
     made, rejections = [], Counter()
-    quotas = {"opening": 0, "themes": Counter(), "vuls": Counter(),
-              "roles": Counter(), "contested": 0}
+    quotas = {"vuls": Counter(), "roles": Counter(), "contested": 0}
     t0 = time.perf_counter()
     stage_totals = Counter()
     k = 0
@@ -116,17 +107,6 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
             log(f"  seed {seed}: no dilemma [{t_scan:.1f}s]")
             continue
 
-        # quotas (rec 8)
-        opening_decision = all(t == "P" for t in spot.stem)
-        theme = _theme_key(spot)
-        if opening_decision and quotas["opening"] >= MAX_OPENING_DECISIONS:
-            rejections["quota_opening"] += 1
-            log(f"  seed {seed}: quota (opening decisions) [{t_scan:.1f}s]")
-            continue
-        if quotas["themes"][theme] >= MAX_PER_THEME:
-            rejections["quota_theme"] += 1
-            log(f"  seed {seed}: quota (theme {theme}) [{t_scan:.1f}s]")
-            continue
         if not _round_trip_ok(spot):
             rejections["round_trip"] += 1
             continue
@@ -136,7 +116,8 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
         t_v = time.perf_counter()
         try:
             ev = engine.evaluate(hero_bot, spot.dealer_i, spot.stem,
-                                 [b for b, _ in spot.candidates])
+                                 [b for b, _ in spot.candidates],
+                                 n_samples=SCREEN_SAMPLES)
         except Exception as e:
             rejections["evaluate_error"] += 1
             log(f"  seed {seed}: evaluate error ({type(e).__name__}: {e})")
@@ -145,15 +126,31 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
         stage_totals["verdict_s"] += t_verdict
         v = judge(ev, policy_top=spot.candidates[0][0],
                   hero_i=spot.hero_i, policy_map=dict(spot.candidates))
-        if v.accepted and v.measured.get("trap") and \
-                quotas.get("traps", 0) >= MAX_TRAP:
-            rejections["quota_trap"] += 1
-            log(f"  seed {seed}: quota (trap class)")
-            continue
         if not v.accepted:
             rejections[v.reason] += 1
             log(f"  seed {seed}: {v.reason} gap={v.measured.get('gap_imps')}"
                 f" ci={v.measured.get('ci')} [{t_scan:.1f}+{t_verdict:.1f}s]")
+            continue
+
+        # screen passed: confirm on FRESH high-count samples — the
+        # published evidence (owner r9: max DD checks under the minute)
+        t_c = time.perf_counter()
+        try:
+            ev = engine.evaluate(hero_bot, spot.dealer_i, spot.stem,
+                                 [b for b, _ in spot.candidates],
+                                 n_samples=CONFIRM_SAMPLES)
+        except Exception as e:
+            rejections["confirm_error"] += 1
+            log(f"  seed {seed}: confirm error ({type(e).__name__}: {e})")
+            continue
+        t_confirm = time.perf_counter() - t_c
+        stage_totals["confirm_s"] += t_confirm
+        v = judge(ev, policy_top=spot.candidates[0][0],
+                  hero_i=spot.hero_i, policy_map=dict(spot.candidates))
+        if not v.accepted:
+            rejections["confirm_" + v.reason] += 1
+            log(f"  seed {seed}: confirm_{v.reason} "
+                f"gap={v.measured.get('gap_imps')} [{t_confirm:.1f}s]")
             continue
 
         t_e = time.perf_counter()
@@ -172,9 +169,6 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
         pool.rebuild_index()
         existing.add(rec["id"])
         made.append(rec["id"])
-        quotas["traps"] = quotas.get("traps", 0) + (1 if v.measured.get("trap") else 0)
-        quotas["opening"] += 1 if opening_decision else 0
-        quotas["themes"][theme] += 1
         quotas["vuls"][rec["vul"]] += 1
         quotas["roles"][rec["hero_role"]] += 1
         quotas["contested"] += 1 if any(
@@ -187,7 +181,8 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
             f"hero {rec['seat']} after {' '.join(spot.stem) or '(opening)'} "
             f"cands={[b for b, _ in spot.candidates]} verdict={verdict_txt} "
             f"gap={v.measured['gap_imps']} "
-            f"[scan {t_scan:.1f}s verdict {t_verdict:.1f}s expl {t_expl:.1f}s]")
+            f"[scan {t_scan:.1f}s screen {t_verdict:.1f}s "
+            f"confirm {t_confirm:.1f}s expl {t_expl:.1f}s]")
 
     wall = time.perf_counter() - t0
     summary = {
@@ -195,10 +190,9 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
         "boards_scanned": k, "rejections": dict(rejections),
         "stage_totals_s": {s: round(x, 1) for s, x in stage_totals.items()},
         "per_accepted_s": round(wall / len(made), 1) if made else None,
-        "quotas": {"opening": quotas["opening"],
-                   "vuls": dict(quotas["vuls"]),
-                   "roles": dict(quotas["roles"]),
-                   "contested": quotas["contested"]},
+        "mix": {"vuls": dict(quotas["vuls"]),
+                "roles": dict(quotas["roles"]),
+                "contested": quotas["contested"]},
     }
     log(f"\nDone: {len(made)}/{count} in {wall / 60:.1f} min "
         f"({summary['per_accepted_s']}s per accepted deal); "
