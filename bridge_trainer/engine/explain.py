@@ -42,20 +42,50 @@ def _band_sentence(feats: dict, seat_name: str, artificial: bool,
     return ", ".join(parts)
 
 
-def stem_explanations(engine, spot, hero_bot) -> list[dict]:
-    """One entry per stem call: the bid's meaning per standard 2/1 Game
-    Force (owner r4: rulebook text, no statistics). Silent passes get no
-    note (r3 #5)."""
+def _clean_card_text(text: str) -> str:
+    """EPBot emits 'Stayman -- ; 7+ HCP; Artificial; Forcing' and !S/!H
+    suit markers — tidy for display."""
+    t = text.replace("--", "").strip(" ;")
+    for k, g in SUIT_GLYPH.items():
+        t = t.replace(f"!{k}", g)
+    parts = [p.strip() for p in t.split(";") if p.strip()]
+    return " — ".join([parts[0], ", ".join(parts[1:])]) if len(parts) > 1 \
+        else (parts[0] if parts else "")
+
+
+_TERSE_CARD = {"bidable suit", "calculated bid", "nat", "natural", "waiting"}
+
+
+def _card_or_systemic(card_text: str, auction, dealer_i, idx) -> str:
+    """Engine-card text is primary; when the card says something terse
+    and range-free ('bidable suit'), the systemic 2/1 table explains
+    better — the card text is kept in the record either way."""
     from .conventions import systemic_meaning
+    cleaned = _clean_card_text(card_text) if card_text else ""
+    terse = (not cleaned or cleaned.lower() in _TERSE_CARD
+             or (not any(ch.isdigit() for ch in cleaned)
+                 and len(cleaned) < 15))
+    return systemic_meaning(auction, dealer_i, idx) if terse else cleaned
+
+
+def stem_explanations(engine, spot, hero_bot) -> list[dict]:
+    """One entry per stem call: the meaning per the ENGINE's convention
+    card (BBA/EPBot; owner r6), systemic-table fallback, silent passes
+    get no note (r3 #5)."""
+    try:
+        card = engine.explain_auction(hero_bot, spot.dealer_i, spot.stem)
+    except Exception:
+        card = [""] * len(spot.stem)
     out = []
     for j, tok in enumerate(spot.stem):
         seat_i = seat_of(spot.dealer_i, j)
         info = classify(spot.stem, spot.dealer_i, j)
-        meaning = systemic_meaning(spot.stem, spot.dealer_i, j)
+        meaning = _card_or_systemic(card[j], spot.stem, spot.dealer_i, j)
         entry = {
             "idx": j, "seat": SEATS[seat_i], "call": tok,
             "category": info.category, "convention": info.convention,
             "artificial": info.artificial, "double_type": info.double_type,
+            "card_text": card[j],
         }
         entry["text"] = (f"{_call_name(tok)} ({SEATS[seat_i]}): {meaning}"
                          if meaning else "")
@@ -118,7 +148,16 @@ def _continuations(spot, ev, bid) -> str | None:
 
 
 def option_explanations(spot, verdict, policy_map, engine=None,
-                        ev=None) -> list[dict]:
+                        ev=None, hero_bot=None) -> list[dict]:
+    card_texts = {}
+    if engine is not None and hero_bot is not None:
+        for b in [r["bid"] for r in verdict.table]:
+            try:
+                texts = engine.explain_auction(
+                    hero_bot, spot.dealer_i, spot.stem + [b])
+                card_texts[b] = texts[-1]
+            except Exception:
+                card_texts[b] = ""
     out = []
     ordered = [r["bid"] for r in verdict.table]
     for row in verdict.table:
@@ -128,9 +167,9 @@ def option_explanations(spot, verdict, policy_map, engine=None,
         contracts = ", ".join(
             f"{c} ({cnt / verdict.measured['n_samples']:.0%})"
             for c, cnt in row["top_contracts"])
-        from .conventions import systemic_meaning
-        meaning = systemic_meaning(spot.stem + [b], spot.dealer_i,
-                                   len(spot.stem))
+        meaning = _card_or_systemic(card_texts.get(b, ""),
+                                    spot.stem + [b], spot.dealer_i,
+                                    len(spot.stem))
         lines = [
             f"{_call_name(b)} — {meaning}." if meaning
             else f"{_call_name(b)} — {info.category}.",

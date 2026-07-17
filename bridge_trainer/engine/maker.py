@@ -159,7 +159,7 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
         t_e = time.perf_counter()
         stem_expl = stem_explanations(engine, spot, hero_bot)
         opt_expl = option_explanations(spot, v, dict(spot.candidates),
-                               engine=engine, ev=ev)
+                               engine=engine, ev=ev, hero_bot=hero_bot)
         t_expl = time.perf_counter() - t_e
         stage_totals["explain_s"] += t_expl
 

@@ -79,9 +79,9 @@ class BenEngine:
         from ddsolver.ddsolver import DDSolver
 
         configuration = conf.load(os.path.join(self.ben_home, CONF_REL))
-        # No BBA (.NET DLL): pure NN + our own exclusion of keycard turns.
-        for key in ("consult_bba", "use_bba_rollout", "use_bba_to_count_aces"):
-            configuration["models"][key] = "False"
+        # BBA/EPBot (native lib, ships with ben) stays ON per the stock
+        # config: it supplies convention-card explanations and keycard
+        # handling (owner r6: everything from the engine).
         # Verdict evidence floor (bridge review rec 3): 128 samples beats
         # the stock 50; CI half-width scales with 1/sqrt(n).
         configuration["sampling"]["sample_hands_auction"] = "128"
@@ -149,6 +149,17 @@ class BenEngine:
         return Evaluation(bids=list(bids), ev=ev, contracts=contracts,
                           auctions=aucs, n_samples=n, quality=float(quality),
                           sample_deals=deals)
+
+    # -- convention-card explanations (BBA/EPBot via ben) --------------------
+    def explain_auction(self, bot, dealer_i: int,
+                        auction: list[str]) -> list[str]:
+        """One meaning text per call in `auction`, from the engine's
+        convention card (empty string when the card says nothing)."""
+        meanings, _controlling, _preempted = bot.explain_auction(
+            pad(dealer_i, auction))
+        out = [m for _tok, m in meanings]
+        # explain_auction skips PAD entries, so out aligns with auction
+        return [(m or "").strip() for m in out] +             [""] * (len(auction) - len(out))
 
     # -- meaning-band sampling at an auction prefix -------------------------
     def sample_prefix(self, bot, dealer_i: int, prefix: list[str],
