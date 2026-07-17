@@ -1,0 +1,115 @@
+# Balancing decision: they die in 2S; reopen or defend?
+schema_version: 1
+id: bal_reopen_after_2s
+title: "Balance over their 2S, or sell out?"
+category: balancing
+description: >
+  IMPs, both vulnerable. RHO opens 1S, sound style; responder raises to 2S
+  and opener passes it out to you in the balancing seat. You passed over 1S
+  (sound two-level overcalls). Partner is marked with values but couldn't
+  act. Sell out to 2S, reopen with a flexible double, or bid your suit?
+
+dealer: W
+vul: Both
+my_seat: N
+my_hand: "82.KJT95.K74.Q83"
+auction: ["1S", "P", "2S", "P", "P"]
+
+# Exactly five decent hearts, at most two spades, 8-10 HCP: too weak/bad-suited
+# for a direct vulnerable 2H, clearly enough to think about balancing.
+my_hand_class:
+  hcp: [8, 10]
+  suits:
+    S: [0, 2]
+    H: [5, 5]
+variants: 12
+
+our_system:
+  name: "2/1"
+  description: "2/1 GF; sound direct two-level overcalls, active balancing"
+  ruleset: our_2over1.yaml
+
+opps_system:
+  name: "Sound/standard"
+  description: "Sound openings, constructive single raises, 15-17 NT"
+  ruleset: opps_sound.yaml
+
+n_deals: 800
+
+breakdowns:
+  - feature: partner_hearts
+    label: "Partner's heart length"
+  - feature: opps_combined_spades
+    label: "Their combined spades"
+
+candidates:
+  - call: "P"
+    label: "Pass (sell out to 2S)"
+    projection:
+      # Pass-pass ends it: the auction is genuinely over.
+      - else: {contract: "2SW", terminal: false}
+
+  - call: "X"
+    label: "Balancing double (takeout-ish, flexible)"
+    projection:
+      # Partner converts with a real trump stack behind declarer.
+      - when: "partner_spades >= 5 and partner_spades_hcp >= 4"
+        contract: "2SWx"
+        terminal: false
+      # Partner remembers I already borrowed a king: game needs a true max
+      # plus a 4-card fit.
+      - when: "partner_hcp >= 13 and partner_hearts >= 4"
+        contract: "4HS"
+        terminal: true
+      # Normal case: partner bids 3H; opener competes 3S with a 6th trump,
+      # or responder with a 4th trump and the 9-card fit (Law push at the
+      # three level over a balance is routine even at Both).
+      - when: "partner_hearts >= 4 and (west_spades >= 6 or east_spades >= 4 and opps_combined_spades >= 9)"
+        contract: "3SW"
+        terminal: true
+      - when: "partner_hearts >= 4"
+        contract: "3HS"
+        terminal: true
+      # Flat misfit: partner converts under protest with 4 flat spades...
+      - when: "partner_spades >= 4 and partner_hearts <= 3 and partner_diamonds <= 3 and partner_clubs <= 3"
+        contract: "2SWx"
+        terminal: false
+      # ...otherwise scrambles into his longer minor.
+      - when: "partner_diamonds >= 4 and partner_diamonds >= partner_clubs"
+        contract: "3DS"
+        terminal: true
+      - when: "partner_clubs >= 4"
+        contract: "3CS"
+        terminal: true
+      - else: {contract: "3DS", terminal: true}
+
+  - call: "3H"
+    label: "Balance with 3H (natural)"
+    projection:
+      # They take the Law push on the same holdings as over an X-then-3H
+      # (they cannot tell the routes apart): the 9-card fit or a 6th trump
+      # in opener's hand; we are done at Both vulnerable.
+      - when: "west_spades >= 6 or east_spades >= 4 and opps_combined_spades >= 9"
+        contract: "3SW"
+        terminal: true
+      # Partner raises a balancing 3H to game only with a fitting maximum.
+      - when: "partner_hearts >= 4 and partner_hcp >= 12"
+        contract: "4HN"
+        terminal: true
+      # The trap: opener with a heart stack and a sound maximum doubles.
+      - when: "west_hearts >= 4 and west_hcp >= 13"
+        contract: "3HNx"
+        terminal: false
+      - else: {contract: "3HN", terminal: true}
+
+family:
+  principle: >-
+    In the balancing seat protection borrows a king: whether to reopen with
+    X, bid a natural 3H, or sell out to 2S turns on trump texture, the
+    misfit risk when partner is broke, and the Law at the three level.
+  publish: true
+  audit:
+    - when: "me_diamonds >= 5 or me_clubs >= 5"
+      reason: "second suit live — two-suited actions enter; not this menu"
+    - when: "me_hcp >= 10 and me_hearts_hcp >= 6"
+      reason: "would have overcalled 2H directly — the stem pass is fictional"

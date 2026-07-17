@@ -114,20 +114,15 @@ def cmd_webapp(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_produce(args: argparse.Namespace) -> int:
-    import time as _time
-    from ..generate.producer import produce_batch
-    seed = args.seed if args.seed is not None else int(_time.time())
-    made = produce_batch(
-        pool_dir=args.pool,
-        count=args.count,
-        max_seconds=args.max_seconds,
-        base_seed=seed,
-        n_deals=args.n,
-        jobs=args.jobs,
-    )
-    print(f"\n{len(made)} problems added to {args.pool} (base seed {seed})")
-    return 0
+
+def cmd_ben_forge(args: argparse.Namespace) -> int:
+    from ..engine.maker import forge_batch
+    summary = forge_batch(
+        pool_dir=args.pool, count=args.count, base_seed=args.seed,
+        max_seconds=args.max_seconds)
+    import json as _json
+    print(_json.dumps(summary, indent=1))
+    return 0 if summary["count"] == args.count else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -173,20 +168,15 @@ def main(argv: list[str] | None = None) -> int:
     app_p.add_argument("--out", default="_site")
     app_p.set_defaults(func=cmd_webapp)
 
-    prod_p = sub.add_parser(
-        "produce", help="generate random problems into the pool")
-    prod_p.add_argument("--pool", default="pool_data")
-    prod_p.add_argument("--count", type=int, default=10)
-    prod_p.add_argument("--max-seconds", type=float, default=3600.0)
-    prod_p.add_argument("--seed", type=int, default=None,
-                        help="base seed (default: derived from time)")
-    prod_p.add_argument("--n", type=int, default=600,
-                        help="simulated layouts per problem")
-    prod_p.add_argument("--jobs", type=int, default=1,
-                        help="parallel worker processes (each DD solve "
-                             "already uses ~4 cores; raise this on "
-                             "many-core machines)")
-    prod_p.set_defaults(func=cmd_produce)
+
+    bf_p = sub.add_parser(
+        "ben-forge", help="generate problems with the Ben engine")
+    bf_p.add_argument("--pool", default="pool_ben")
+    bf_p.add_argument("--count", type=int, default=20)
+    bf_p.add_argument("--seed", type=int, default=1)
+    bf_p.add_argument("--max-seconds", type=float, default=3600.0)
+    bf_p.set_defaults(func=cmd_ben_forge)
+
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -1,0 +1,136 @@
+# Direct-seat action over (1H) at unfavorable with a bad 5-card suit.
+schema_version: 1
+id: ovc_quality_1s_over_1h
+title: "Overcall 1S on a bad suit, vulnerable?"
+category: direct_actions
+description: >
+  IMPs, we are vulnerable, they are not. RHO opens 1H (light style). You
+  hold an opening-ish 11-count with a shabby five-card spade suit and a
+  doubleton club. Pass and defend, overcall 1S on Q-high, or stretch to an
+  off-shape takeout double?
+
+dealer: E
+vul: NS              # unfavorable: we are vulnerable, they are not
+my_seat: S
+my_hand: "Q9653.A4.KQ72.85"
+auction: ["1H"]
+
+# Exactly five spades, 10-12 HCP, 2-3 hearts, both minors 2+: every hand in
+# the class genuinely weighs all three actions (with a singleton minor the
+# double stops being a candidate, so minors are floored at 2/3 cards).
+my_hand_class:
+  hcp: [10, 12]
+  suits:
+    S: [5, 5]
+    H: [2, 3]
+    D: [3, 5]
+    C: [2, 4]
+variants: 12
+
+our_system:
+  name: "2/1"
+  description: "2/1 GF; disciplined vulnerable overcalls"
+  ruleset: our_2over1.yaml
+
+opps_system:
+  name: "Light/aggressive"
+  description: "Light openings allowed"
+  ruleset: opps_light_preempts.yaml
+
+n_deals: 800
+
+breakdowns:
+  - feature: partner_spades
+    label: "Partner's spade length"
+  - feature: west_spades
+    label: "Responder's spade length (the penalty risk)"
+
+candidates:
+  - call: "P"
+    label: "Pass (quiet defence)"
+    projection:
+      # Their constructive auction runs unimpeded.
+      - when: "opps_combined_hcp >= 25"
+        contract: "4HE"
+        terminal: true
+      # Partner acts in the sandwich/balancing seat with a sound takeout
+      # shape; we bid our spades and buy it.
+      - when: "partner_hcp >= 13 and partner_hearts <= 2 and partner_spades >= 3"
+        contract: "2SS"
+        terminal: true
+      - when: "opps_combined_hcp >= 21 and opps_combined_hearts >= 8"
+        contract: "3HE"
+        terminal: true
+      # Dead responder: 1H sometimes gets passed out around the table.
+      - when: "west_hcp <= 5 and partner_hcp <= 12"
+        contract: "1HE"
+        terminal: true
+      - else: {contract: "2HE", terminal: true}
+
+  - call: "1S"
+    label: "Overcall 1S (bad suit, good hand)"
+    projection:
+      # The nightmare first: responder has length/values in spades, the
+      # penalty machinery (trap pass + reopening double) catches us.
+      - when: "west_spades >= 5 and west_hcp >= 9"
+        contract: "1SSx"
+        terminal: false
+      # Constructive raise, we carry on to the vulnerable game with a max.
+      - when: "partner_spades >= 4 and partner_hcp >= 11 and me_hcp >= 11"
+        contract: "4SS"
+        terminal: true
+      # They own the deal: heart fit + power outbids us to 3H.
+      - when: "opps_combined_hearts >= 9 and opps_combined_hcp >= 20"
+        contract: "3HE"
+        terminal: true
+      # Simple raise buys it...
+      - when: "partner_spades >= 3 and partner_hcp >= 8"
+        contract: "2SS"
+        terminal: true
+      # ...misfit: opener rebids his hearts and plays there...
+      - when: "opps_combined_hearts >= 8 and partner_spades <= 2"
+        contract: "2HE"
+        terminal: true
+      # ...or it dies in 1S.
+      - else: {contract: "1SS", terminal: true}
+
+  - call: "X"
+    label: "Off-shape takeout double"
+    projection:
+      # Best case: partner has the heart stack and passes for penalty.
+      - when: "partner_hearts >= 5 and partner_hearts_hcp >= 5 and partner_hcp >= 9"
+        contract: "1HEx"
+        terminal: false
+      # Partner drives spades opposite a (presumed) sound double.
+      - when: "partner_spades >= 4 and partner_hcp >= 11"
+        contract: "4SN"
+        terminal: true
+      - when: "partner_spades >= 4 and partner_hcp >= 8"
+        contract: "2SN"
+        terminal: true
+      - when: "partner_spades >= 4"
+        contract: "1SN"
+        terminal: true
+      # They compete the heart fit over partner's minor advance.
+      - when: "opps_combined_hearts >= 9 and opps_combined_hcp >= 20"
+        contract: "3HE"
+        terminal: true
+      # The cost of the doubleton club: partner advances a minor and we
+      # play the 4-3 / 4-2 at the two level.
+      - when: "partner_diamonds >= 4 and partner_diamonds >= partner_clubs"
+        contract: "2DN"
+        terminal: true
+      - else: {contract: "2CN", terminal: true}
+
+family:
+  principle: >-
+    A vulnerable one-level overcall is a bid of suit quality as much as
+    values: with a bad suit the overcall stakes lead-direction and
+    obstruction against -200 and lost flexibility; the hand's outside
+    strength and texture decide whether the bid or the discipline wins.
+  publish: true
+  audit:
+    - when: "me_spades_hcp >= 7"
+      reason: "suit is self-sufficient — 1S is automatic, not this lesson"
+    - when: "me_spades_hcp <= 1"
+      reason: "suit is degenerate — the problem collapses to P vs X"

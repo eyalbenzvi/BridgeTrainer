@@ -8,7 +8,7 @@ from bridge_trainer.app.report import render_report
 from bridge_trainer.app.runner import run_problem
 from bridge_trainer.bank.schema import ProblemValidationError, load_problem
 
-PROBLEM = Path("problems/comp_3s_over_3h.yaml")
+PROBLEM = Path("tests/fixtures/comp_3s_over_3h.yaml")
 
 
 @pytest.fixture(scope="module")
