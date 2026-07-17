@@ -20,6 +20,14 @@ EQUIV_GAP = 0.5
 DOUBLED_SHARE_MAX = 0.40
 DEAD_SHARE = 0.005
 
+# Selectivity layer (expert review, docs/panel/selectivity_r1.md):
+# the honesty gates above answer "is the evidence sound?"; the interest
+# score answers "is this worth a serious player's minute?"
+Q_MIN = 0.40            # consequence floor: P(choice changes the result)
+THETA = 80.0            # calibrated 2026-07-17: 12/100 fresh boards
+TRAP_GAP_MIN = 0.8      # policy-argmax loses by at least this => trap
+UNSTABLE_DELTA = 15.0   # split-half interest drift => DD-noise harvest
+
 
 @dataclass
 class Verdict:
@@ -38,6 +46,15 @@ def _imp_diff(ev_a: np.ndarray, ev_b: np.ndarray) -> np.ndarray:
     return np.array([imps(float(d)) for d in (ev_a - ev_b)])
 
 
+class _EvalView:
+    """A sample-slice view of an Evaluation (for split-half checks)."""
+
+    def __init__(self, ev, sl: slice):
+        self.bids = ev.bids
+        self.ev = {b: ev.ev[b][sl] for b in ev.bids}
+        self.contracts = {b: ev.contracts[b][sl] for b in ev.bids}
+
+
 def _tv_distance(ca: list, cb: list) -> float:
     fa, fb = Counter(ca), Counter(cb)
     keys = set(fa) | set(fb)
@@ -45,7 +62,58 @@ def _tv_distance(ca: list, cb: list) -> float:
     return 0.5 * sum(abs(fa[k] / na - fb[k] / nb) for k in keys)
 
 
-def judge(ev) -> Verdict:
+def _contract_side(contract: str, hero_i: int):
+    """0 = hero's side declares, 1 = theirs, None = passed out."""
+    if contract.upper() == "PASS":
+        return None
+    return ("NESW".index(contract[-1]) - hero_i) % 2
+
+
+def _contract_class(contract: str) -> str:
+    if contract.upper() == "PASS":
+        return "pass"
+    level, strain = int(contract[0]), contract[1]
+    if level >= 6:
+        return "slam"
+    if (strain == "N" and level >= 3) or (strain in "HS" and level >= 4) \
+            or (strain in "CD" and level >= 5):
+        return "game"
+    return "partscore"
+
+
+def _interest(diff, doubled, ev, best, second, hero_i, policy_top, gap):
+    """The 0-120 interest score (selectivity review, stage 2)."""
+    from collections import Counter as _C
+    q = float((diff != 0).mean())
+    w4 = ((np.abs(diff) >= 4).astype(float) * np.where(doubled, 0.5, 1.0))
+    p4 = float(w4.mean())
+    tv = _tv_distance(ev.contracts[best], ev.contracts[second])
+    if hero_i is not None:
+        flips = [
+            (_contract_side(a, hero_i) != _contract_side(b, hero_i))
+            for a, b in zip(ev.contracts[best], ev.contracts[second])]
+        flip = float(np.mean(flips))
+    else:
+        flip = 0.0
+    modal_b = _C(ev.contracts[best]).most_common(1)[0][0]
+    modal_s = _C(ev.contracts[second]).most_common(1)[0][0]
+    span = _contract_class(modal_b) != _contract_class(modal_s)
+    trap = (policy_top is not None and policy_top != best
+            and gap >= TRAP_GAP_MIN)
+    damage = max(float(ev.ev[b].mean()) for b in ev.bids) < 0
+
+    score = (30 * min(q / 0.80, 1) + 25 * min(p4 / 0.35, 1)
+             + 15 * min(tv / 0.60, 1) + 10 * (flip >= 0.25)  # span=10 keeps
+             # the pure thin-game archetype (30+25+15+10=80) exactly at THETA
+             + 10 * span + 20 * trap + 12 * damage)
+    return score, {"q": round(q, 3), "p4": round(p4, 3), "tv": round(tv, 3),
+                   "flip": round(flip, 3), "span": bool(span),
+                   "trap": bool(trap), "damage": bool(damage),
+                   "interest": round(score, 1)}
+
+
+def judge(ev, policy_top: str | None = None,
+          hero_i: int | None = None) -> Verdict:
     """ev: engine.ben.Evaluation for the scanner's candidate list."""
     bids = sorted(ev.bids, key=lambda b: -float(ev.ev[b].mean()))
     n = ev.n_samples
@@ -120,6 +188,26 @@ def judge(ev) -> Verdict:
             return reject("pure_guess")
     if gap > GAP_MAX:
         return reject("one_sided")
+
+    # ---- selectivity layer (stage 1 + 2): consequence + interest -------
+    score, interest = _interest(diff, doubled, ev, best, second,
+                                hero_i, policy_top, gap)
+    measured.update(interest)
+    if interest["q"] < Q_MIN:
+        return reject("inconsequential")
+    if score < THETA:
+        return reject("uninteresting")
+    # split-half stability: an interest score that flips between sample
+    # halves is harvesting DD variance, not bridge
+    half = len(diff) // 2
+    s1, _ = _interest(diff[:half], doubled[:half],
+                      _EvalView(ev, slice(0, half)), best, second,
+                      hero_i, policy_top, gap)
+    s2, _ = _interest(diff[half:], doubled[half:],
+                      _EvalView(ev, slice(half, None)), best, second,
+                      hero_i, policy_top, gap)
+    if abs(s1 - s2) > UNSTABLE_DELTA and min(s1, s2) < THETA:
+        return reject("unstable_interest")
 
     toss_up = gap <= max(ci, TOSS_UP_IMPS)
     toss_up_with = []

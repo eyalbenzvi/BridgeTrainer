@@ -92,6 +92,46 @@ def _gf_pass_artifact(policy, auction, dealer_i) -> bool:
     return below_game
 
 
+def _content_exclusion(hand: str, policy, auction, dealer_i, seat_i) -> str:
+    """Stage-0 content exclusions (selectivity review): agreement forks
+    and engine-temperature splits that are close by the numbers but
+    worthless or misleading to a 2/1 student."""
+    from ..dealing.features import HCP_BY_RANK, parse_hand_pbn
+    cands = [b for b, p in policy if p >= P_OPTION]
+
+    # Bust artifact: engine splits on a near-yarborough with Pass live.
+    cards = parse_hand_pbn(hand)
+    hcp = sum(int(HCP_BY_RANK[c % 13]) for c in cards)
+    maxlen = max(sum(1 for c in cards if c // 13 == s) for s in range(4))
+    if hcp <= 4 and maxlen < 5 and "P" in cands:
+        return "bust artifact"
+
+    partner_i = (seat_i + 2) % 4
+    my_passes = [j for j, t in enumerate(auction)
+                 if seat_of(dealer_i, j) == seat_i and t == "P"]
+    partner_bids = [t for j, t in enumerate(auction)
+                    if seat_of(dealer_i, j) == partner_i
+                    and t not in ("P", "X", "XX")]
+
+    # Drury space: passed hand raising partner's major with 2C live.
+    if my_passes and partner_bids and partner_bids[-1] in ("1H", "1S"):
+        raise_call = "2" + partner_bids[-1][1]
+        if "2C" in cands and raise_call in cands:
+            return "system fork (Drury space)"
+
+    # Negative-double range fork: responder directly over an overcall
+    # with both X and a 2-level new suit among the candidates.
+    if partner_bids and "X" in cands and any(
+            b[0] == "2" and b not in ("2NT",) and b[1:] != partner_bids[-1][1:]
+            for b in cands if b not in ("P", "X", "XX")):
+        last = next((t for t in reversed(auction)
+                     if t not in ("P", "X", "XX")), None)
+        opp_last = last is not None and last != partner_bids[-1]
+        if opp_last:
+            return "system fork (negative-X range)"
+    return ""
+
+
 def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
     hands, dealer_i, vul = deal_board(seed)
     bots = [engine.bot(hands[i], i, dealer_i, vul) for i in range(4)]
@@ -125,6 +165,11 @@ def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
                 qualifies, why = False, "response to asking call"
             elif _gf_pass_artifact(policy, auction, dealer_i):
                 qualifies, why = False, "gf pass artifact"
+            else:
+                fork = _content_exclusion(hands[seat_i], policy, auction,
+                                          dealer_i, seat_i)
+                if fork:
+                    qualifies, why = False, fork
 
         # Searched choice only where search can matter (>1 live candidate);
         # dominant turns commit the policy top directly — same call Ben's
