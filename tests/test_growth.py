@@ -8,7 +8,7 @@ import pytest
 
 from bridge_trainer.app.publish import publish
 
-PROBLEMS = Path("problems")
+PROBLEMS = Path("tests/fixtures")
 
 
 def _yesterday(days=1):
