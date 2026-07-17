@@ -68,6 +68,17 @@ a { color: var(--accent); }
 .muted { color: var(--muted); font-size: 13px; }
 .pill { display: inline-block; border-radius: 999px; padding: 1px 8px;
         font-size: 12px; border: 1px solid #ffffff55; }
+/* homepage deal filters: difficulty level + problem type, both multi-select */
+.filter-group { margin: 0 0 12px; }
+.filter-group:last-child { margin-bottom: 0; }
+.filter-label { font-size: 12px; font-weight: 700; text-transform: uppercase;
+                letter-spacing: .05em; color: var(--muted); margin: 0 0 6px; }
+.filterchips { display: flex; flex-wrap: wrap; gap: 6px; }
+button.filterchip { font: inherit; font-size: 13px; padding: 6px 12px;
+  border-radius: 999px; border: 1px solid var(--line); background: var(--card);
+  color: var(--fg); cursor: pointer; }
+button.filterchip.active { border-color: var(--accent);
+  background: var(--accent-tint); color: var(--accent); font-weight: 700; }
 /* problem-type badge (classification.type), shown with the problem */
 .typebadge { display: inline-block; font-size: 11px; font-weight: 700;
              letter-spacing: .08em; text-transform: uppercase;
@@ -219,9 +230,23 @@ async function fetchIndex() {
   if (!r.ok) throw new Error("no pool index");
   return r.json();
 }
-function pickUnseen(index) {
+const FILTERS_KEY = "bt_filters";
+function loadFilters() {
+  try {
+    const f = JSON.parse(localStorage.getItem(FILTERS_KEY));
+    return {levels: (f && f.levels) || [], types: (f && f.types) || []};
+  } catch (e) { return {levels: [], types: []}; }
+}
+function saveFilters(f) { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); }
+function matchesFilters(p, f) {
+  if (f.levels.length && !f.levels.includes(p.difficulty_level)) return false;
+  if (f.types.length && !f.types.includes(p.type)) return false;
+  return true;
+}
+function pickUnseen(index, filters) {
   const s = store();
-  const unseen = index.problems.filter(p => !s[p.id]);
+  const f = filters || {levels: [], types: []};
+  const unseen = index.problems.filter(p => !s[p.id] && matchesFilters(p, f));
   if (!unseen.length) return null;
   return unseen[Math.floor(Math.random() * unseen.length)].id;
 }
@@ -398,6 +423,16 @@ def _index_html() -> str:
 <title>Bridge Bidding Trainer</title>
 <style>{_CSS}</style></head><body>
 <h1><span style="opacity:.9">&spades;</span> Bridge Bidding Trainer</h1>
+<div class="card" id="filters">
+<div class="filter-group">
+<div class="filter-label">Difficulty</div>
+<div class="filterchips" id="diff-chips"></div>
+</div>
+<div class="filter-group">
+<div class="filter-label">Problem type</div>
+<div class="filterchips" id="type-chips"></div>
+</div>
+</div>
 <a class="big" id="deal" href="#">Deal me a hand &rarr;</a>
 <div class="card" id="stats">Loading the problem pool&hellip;</div>
 <p class="topbar" style="display:block">Every problem is a random deal, bid
@@ -406,22 +441,55 @@ simulation. The pool grows in batches.
 <a href="#" id="reset" style="color:var(--on-felt-muted)">Reset progress</a></p>
 <script>{_SHARED_JS}
 let INDEX = null;
-async function init() {{
-  try {{ INDEX = await fetchIndex(); }}
-  catch (e) {{
-    document.getElementById("stats").textContent =
-      "The problem pool is still being generated \\u2014 check back shortly.";
-    return;
-  }}
+let FILTERS = loadFilters();
+function buildFilterChips() {{
+  document.getElementById("diff-chips").innerHTML = [1, 2, 3, 4, 5].map(lv =>
+    `<button type="button" class="filterchip" data-level="${{lv}}">` +
+    `${{DIFF_NAMES[lv]}}</button>`).join("");
+  document.getElementById("type-chips").innerHTML =
+    Object.entries(TYPE_NAMES).map(([id, nm]) =>
+      `<button type="button" class="filterchip" data-type="${{id}}" ` +
+      `title="${{nm[1]}}">${{nm[0]}}</button>`).join("");
+}}
+function applyFilterUi() {{
+  document.querySelectorAll("#diff-chips .filterchip").forEach(c => {{
+    c.classList.toggle("active", FILTERS.levels.includes(+c.dataset.level));
+  }});
+  document.querySelectorAll("#type-chips .filterchip").forEach(c => {{
+    c.classList.toggle("active", FILTERS.types.includes(c.dataset.type));
+  }});
+}}
+function toggleFilter(list, value) {{
+  const i = list.indexOf(value);
+  if (i === -1) list.push(value); else list.splice(i, 1);
+}}
+document.getElementById("diff-chips").addEventListener("click", ev => {{
+  const c = ev.target.closest(".filterchip");
+  if (!c) return;
+  toggleFilter(FILTERS.levels, +c.dataset.level);
+  saveFilters(FILTERS); applyFilterUi(); renderStats();
+}});
+document.getElementById("type-chips").addEventListener("click", ev => {{
+  const c = ev.target.closest(".filterchip");
+  if (!c) return;
+  toggleFilter(FILTERS.types, c.dataset.type);
+  saveFilters(FILTERS); applyFilterUi(); renderStats();
+}});
+function renderStats() {{
+  if (!INDEX) return;
   const s = store();
+  const matching = INDEX.problems.filter(p => matchesFilters(p, FILTERS));
   let done = 0, right = 0;
-  for (const p of INDEX.problems) {{
+  for (const p of matching) {{
     const rec = s[p.id];
     if (rec) {{ done++; if (rec.correct) right++; }}
   }}
-  let h = `<b>${{INDEX.count}}</b> problems in the pool ` +
+  const active = FILTERS.levels.length || FILTERS.types.length;
+  let h = (active ?
+    `<b>${{matching.length}}</b> problems match your filters ` :
+    `<b>${{INDEX.count}}</b> problems in the pool `) +
     `<span class="pill" style="border-color:var(--line);color:var(--muted)">` +
-    `${{INDEX.count - done}} waiting for you</span>`;
+    `${{matching.length - done}} waiting for you</span>`;
   if (done) {{
     const pct = Math.round(100 * right / done);
     h += `<div style="margin-top:8px">Your record: <b>${{right}}</b> / ` +
@@ -434,12 +502,25 @@ async function init() {{
   }}
   document.getElementById("stats").innerHTML = h;
 }}
+async function init() {{
+  buildFilterChips();
+  applyFilterUi();
+  try {{ INDEX = await fetchIndex(); }}
+  catch (e) {{
+    document.getElementById("stats").textContent =
+      "The problem pool is still being generated \\u2014 check back shortly.";
+    return;
+  }}
+  renderStats();
+}}
 document.getElementById("deal").onclick = () => {{
   if (!INDEX) return false;
-  const id = pickUnseen(INDEX);
+  const id = pickUnseen(INDEX, FILTERS);
   if (!id) {{
-    alert("You've answered every problem in the pool! " +
-          "More will be added in the next batch.");
+    alert((FILTERS.levels.length || FILTERS.types.length) ?
+      "No unseen problems match your filters. Try widening your selection." :
+      "You've answered every problem in the pool! " +
+      "More will be added in the next batch.");
     return false;
   }}
   location.href = "p.html?id=" + encodeURIComponent(id);
@@ -787,7 +868,7 @@ async function init() {{
   }}
   document.getElementById("next").onclick = async () => {{
     if (!INDEX) INDEX = await fetchIndex();
-    const nid = pickUnseen(INDEX);
+    const nid = pickUnseen(INDEX, loadFilters());
     if (!nid) {{ location.href = "index.html"; return; }}
     location.href = "p.html?id=" + encodeURIComponent(nid);
   }};
