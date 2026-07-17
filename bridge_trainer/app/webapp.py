@@ -237,13 +237,16 @@ auction</summary><ul id="meanings"></ul></details>
 <script>{_SHARED_JS}
 let P = null, INDEX = null;
 function rowsHtml(rows) {{
-  let h = "<tr><th>Action</th><th>EV vs best alt</th><th>P(gain)</th>" +
-          "<th>P(loss)</th></tr>";
+  let h = "<tr><th>Action</th><th>EV (IMPs)</th><th>Wins</th>" +
+          "<th>Loses</th><th>No difference</th></tr>";
   for (const c of rows) {{
+    const push = c.p_push !== undefined ? c.p_push
+               : Math.max(0, 1 - c.p_gain - c.p_loss);
     h += `<tr><td>${{c.action}}</td><td>${{c.ev >= 0 ? "+" : ""}}${{c.ev}}` +
          ` \\u00b1 ${{c.ci}} vs ${{c.vs}}</td>` +
          `<td>${{Math.round(c.p_gain * 100)}}%</td>` +
-         `<td>${{Math.round(c.p_loss * 100)}}%</td></tr>`;
+         `<td>${{Math.round(c.p_loss * 100)}}%</td>` +
+         `<td>${{Math.round(push * 100)}}%</td></tr>`;
   }}
   return h;
 }}
@@ -309,8 +312,11 @@ async function init() {{
     if (v.table && !v.corrected) {{
       const top = v.table[0] ? v.table[0].bid : "";
       v.corrected = v.table.map(r => ({{ action: r.bid,
-        ev: r.ev_imp_vs_top, ci: r.ci, vs: top,
-        p_gain: r.p_gain, p_loss: Math.max(0, 1 - r.p_gain - r.p_push) }}));
+        ev: r.ev_imp_vs_top, ci: r.ci, vs: r.vs || top,
+        p_gain: r.p_gain,
+        p_loss: r.p_loss !== undefined ? r.p_loss
+              : Math.max(0, 1 - r.p_gain - r.p_push),
+        p_push: r.p_push }}));
       v.raw = [];
     }}
     P.generator.n_deals = P.generator.n_deals || P.generator.samples;

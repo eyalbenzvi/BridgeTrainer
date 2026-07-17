@@ -62,9 +62,7 @@ def build_record(spot, verdict, stem_expl, opt_expl, elapsed) -> dict:
         "difficulty": verdict.measured["gap_imps"],
         "quality": verdict.measured,
         "explanations": {
-            "note": "meanings are empirical — measured over layouts "
-                    "consistent with the auction under the engine's 2/1 "
-                    "style, not quoted from a rulebook",
+            "note": "call meanings follow standard 2/1 Game Force",
             "stem": stem_expl,
             "options": opt_expl,
         },
@@ -146,7 +144,7 @@ def forge_batch(pool_dir: str, count: int, base_seed: int,
         t_verdict = time.perf_counter() - t_v
         stage_totals["verdict_s"] += t_verdict
         v = judge(ev, policy_top=spot.candidates[0][0],
-                  hero_i=spot.hero_i)
+                  hero_i=spot.hero_i, policy_map=dict(spot.candidates))
         if v.accepted and v.measured.get("trap") and \
                 quotas.get("traps", 0) >= MAX_TRAP:
             rejections["quota_trap"] += 1

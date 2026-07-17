@@ -43,58 +43,22 @@ def _band_sentence(feats: dict, seat_name: str, artificial: bool,
 
 
 def stem_explanations(engine, spot, hero_bot) -> list[dict]:
-    """One entry per stem call: mechanical classification + empirical
-    band from layouts consistent with the auction THROUGH that call."""
+    """One entry per stem call: the bid's meaning per standard 2/1 Game
+    Force (owner r4: rulebook text, no statistics). Silent passes get no
+    note (r3 #5)."""
+    from .conventions import systemic_meaning
     out = []
     for j, tok in enumerate(spot.stem):
         seat_i = seat_of(spot.dealer_i, j)
         info = classify(spot.stem, spot.dealer_i, j)
+        meaning = systemic_meaning(spot.stem, spot.dealer_i, j)
         entry = {
             "idx": j, "seat": SEATS[seat_i], "call": tok,
             "category": info.category, "convention": info.convention,
             "artificial": info.artificial, "double_type": info.double_type,
-            "band": None, "n": 0,
         }
-        text_head = f"{_call_name(tok)} ({SEATS[seat_i]})"
-        if tok == "P":
-            entry["text"] = ""   # bids that show nothing get no note (r3 #5)
-        elif tok in ("X", "XX"):
-            entry["text"] = f"{text_head}: {info.double_type or 'double'}."
-        else:
-            entry["text"] = f"{text_head}: {info.category}."
-        if seat_i == spot.hero_i and tok != "P":
-            # what YOUR bid told partner (owner r3 #3)
-            who = "told partner"
-            if info.convention:
-                entry["text"] = f"{text_head}: {info.convention}."
-            else:
-                meaning = _meaning_from_partner(
-                    engine, spot, spot.stem[:j + 1], spot.hero_i)
-                entry["text"] = (f"{text_head}: {who} " + meaning + "."
-                                 ) if meaning else \
-                    f"{text_head}: {info.double_type or info.category}."
-            out.append(entry)
-            continue
-        if seat_i == spot.hero_i:
-            out.append(entry)
-            continue
-        # empirical band through this call (hero-conditioned sampling)
-        if tok != "P":
-            try:
-                hands_np, n = engine.sample_prefix(
-                    hero_bot, spot.dealer_i, spot.stem[:j + 1])
-            except Exception:
-                hands_np, n = None, 0
-            if n >= BAND_N_MIN:
-                feats = seat_features(hands_np, seat_i,
-                                      engine.models.n_cards_bidding)
-                entry["band"] = feats
-                entry["n"] = n
-                entry["text"] = (
-                    f"{text_head}: {info.convention or info.double_type or info.category} — "
-                    + _band_sentence(feats, SEATS[seat_i], info.artificial,
-                                     info.convention)
-                    + f" (n={n}, measured)")
+        entry["text"] = (f"{_call_name(tok)} ({SEATS[seat_i]}): {meaning}"
+                         if meaning else "")
         out.append(entry)
     return out
 
@@ -164,12 +128,12 @@ def option_explanations(spot, verdict, policy_map, engine=None,
         contracts = ", ".join(
             f"{c} ({cnt / verdict.measured['n_samples']:.0%})"
             for c, cnt in row["top_contracts"])
-        meaning = _meaning_from_partner(engine, spot, spot.stem + [b],
-                                        spot.hero_i) if engine else None
-        conv = info.convention or info.double_type or info.category
+        from .conventions import systemic_meaning
+        meaning = systemic_meaning(spot.stem + [b], spot.dealer_i,
+                                   len(spot.stem))
         lines = [
-            f"{_call_name(b)} — {conv}" + (f": {meaning}." if meaning
-                                           else "."),
+            f"{_call_name(b)} — {meaning}." if meaning
+            else f"{_call_name(b)} — {info.category}.",
         ]
         if ev is not None:
             cont = _continuations(spot, ev, b)
