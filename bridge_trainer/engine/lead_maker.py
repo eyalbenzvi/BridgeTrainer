@@ -35,7 +35,11 @@ def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
                       card_notes, elapsed) -> dict:
     return {
         "schema": 1,
-        "type": "lead",
+        "kind": "lead",
+        # main's index reads difficulty_level from classification; leads carry
+        # their own 1-5 difficulty there so the difficulty filter includes them
+        # (no type taxonomy for leads — difficulty is the only lead facet).
+        "classification": {"difficulty_level": verdict.difficulty},
         "id": f"lead1-{seed:08x}",
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "generator": {"engine": "ben BEN-21GF", "seed": seed,

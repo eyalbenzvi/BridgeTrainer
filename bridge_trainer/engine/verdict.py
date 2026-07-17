@@ -28,6 +28,17 @@ THETA = 80.0            # calibrated 2026-07-17: 12/100 fresh boards
 TRAP_GAP_MIN = 0.8      # policy-argmax loses by at least this => trap
 UNSTABLE_DELTA = 15.0   # split-half interest drift => DD-noise harvest
 
+# Prescreen cascade (speedup review): decisive-rejection margins on a
+# 32-sample slice of the screen pool. Only REJECTIONS may be decided
+# here; anything non-decisive escalates to the unchanged 128-sample
+# judge, so precision is untouched and only recall is at stake.
+PRE_MIN_N = 16          # below this the slice can't be decisive at all
+PRE_MIN_NONZERO = 5     # sigma-based margins need dispersion: an all-push
+                        # slice has std=0 and a CLT bound is meaningless
+PRE_Z = 2.04            # t(31) instead of 1.96: n=32 tails
+PRE_TV_ALLOW = 0.15     # optimistic TV allowance (TV is biased UP at
+                        # small n, so +allowance is doubly conservative)
+
 
 @dataclass
 class Verdict:
@@ -238,7 +249,108 @@ def judge(ev, policy_top: str | None = None,
     if policy_map is not None and policy_map.get(winner, 0.0) < 0.15:
         return reject("implausible_winner")
 
+    # split-half evidence snapshots: difficulty.py stabilizes level labels
+    # near bucket cut points with these (median-of-three rule)
+    measured["half_stats"] = [
+        {"gap_imps": round(float(d.mean()), 2),
+         "p_top_wins": round(float((d > 0).mean()), 3),
+         "p_second_wins": round(float((d < 0).mean()), 3)}
+        for d in (diff[:half], diff[half:])]
+
     flags = []
     return Verdict(True, "accepted", best=winner, toss_up=False,
                    toss_up_with=[], flags=flags,
                    measured=measured, table=table, dead=dead)
+
+
+def _wilson_upper(k: int, n: int, z: float = PRE_Z) -> float:
+    """Wilson score upper bound for a binomial proportion (Wald
+    undercovers badly at small n / extreme p-hat; k=0 stays non-zero)."""
+    if n <= 0:
+        return 1.0
+    p = k / n
+    z2 = z * z
+    center = p + z2 / (2 * n)
+    half = z * np.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
+    return float((center + half) / (1 + z2 / n))
+
+
+def prejudge(ev, policy_top: str | None = None,
+             hero_i: int | None = None) -> str | None:
+    """Decisive-rejection prescreen on a small top-2-candidate slice.
+
+    Returns a rejection reason only when the full 128-sample judge's
+    outcome is already statistically settled; returns None ("escalate")
+    otherwise. Two families of bounds, deliberately kept apart:
+
+    - sigma-based margins (one_sided, stakeless) use the sample std and
+      are trusted only with PRE_MIN_NONZERO nonzero diffs — IMP diffs
+      are spiky (mostly 0, occasionally 10+), and an all-push slice has
+      std=0, which would make any CLT "upper bound" vacuous;
+    - binomial bounds (q, p4, flip) use the Wilson upper bound, which is
+      valid at k=0: 0 nonzero diffs out of 32 genuinely is decisive
+      evidence that q < 0.40 (a true-q>=0.40 board shows all-push with
+      probability 0.6^32 ~ 1e-7).
+
+    Only the top-2 policy candidates are evaluated here, so a 3rd
+    candidate can in principle rescue a board we reject — a recall-only
+    loss, measured via the audit mode in maker.forge_one.
+    """
+    n = ev.n_samples
+    if n < PRE_MIN_N:
+        return None
+    bids = sorted(ev.bids, key=lambda b: -float(ev.ev[b].mean()))
+    best, second = bids[0], bids[1]
+    diff = _imp_diff(ev.ev[best], ev.ev[second])
+    gap = float(diff.mean())
+    ci = float(PRE_Z * diff.std() / np.sqrt(n))
+    nonzero = int((diff != 0).sum())
+    # sigma margins also need VARIETY: 32 identical nonzero diffs have
+    # std=0, and a zero-width CI proves nothing about the 128-sample tail
+    distinct = len(set(np.round(diff[diff != 0], 6).tolist()))
+    dispersion_ok = nonzero >= PRE_MIN_NONZERO and distinct >= 2
+
+    if dispersion_ok and gap - ci > GAP_MAX:
+        return "one_sided"
+    if dispersion_ok:
+        absd = np.abs(diff)
+        stakes_hi = float(absd.mean() + PRE_Z * absd.std() / np.sqrt(n))
+        if stakes_hi < STAKES_MIN:
+            return "stakeless"
+
+    q_hi = _wilson_upper(nonzero, n)
+    if q_hi < Q_MIN:
+        return "inconsequential"
+
+    # optimistic upper bound of the interest score: every term takes its
+    # most favorable defensible value; only a bound that STILL cannot
+    # reach THETA is decisive. span and damage are granted outright
+    # unless excluded with their own margin; trap (20 pts) is denied only
+    # when the ordering is decisively settled in policy_top's favor.
+    # p4's doubled-discount weights are <= 1, so the plain count bounds
+    # the weighted mean from above
+    k4 = int((np.abs(diff) >= 4).sum())
+    p4_hi = _wilson_upper(k4, n)
+    tv = _tv_distance(ev.contracts[best], ev.contracts[second])
+    tv_hi = min(1.0, tv + PRE_TV_ALLOW)
+    if hero_i is not None:
+        flips = int(sum(
+            _contract_side(a, hero_i) != _contract_side(b, hero_i)
+            for a, b in zip(ev.contracts[best], ev.contracts[second])))
+        flip_hi = _wilson_upper(flips, n)
+    else:
+        flip_hi = 0.0
+    trap_denied = (policy_top is not None and policy_top == best
+                   and dispersion_ok and gap - ci > 0)
+    damage_lo = max(float(ev.ev[b].mean()) -
+                    PRE_Z * float(ev.ev[b].std()) / np.sqrt(n)
+                    for b in ev.bids)
+    damage_denied = damage_lo > 0     # best EV decisively positive
+    score_hi = (30 * min(q_hi / 0.80, 1) + 25 * min(p4_hi / 0.35, 1)
+                + 15 * min(tv_hi / 0.60, 1) + 10 * (flip_hi >= 0.25)
+                + 10                              # span: granted
+                + (0 if trap_denied else 20)
+                + (0 if damage_denied else 12))
+    if score_hi < THETA:
+        return "uninteresting"
+    return None

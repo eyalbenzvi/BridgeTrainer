@@ -48,11 +48,14 @@ class ProblemPool:
         entries = []
         for pid in self.ids():
             rec = self.get(pid)
+            cls = rec.get("classification", {})
             entries.append({
                 "id": pid,
-                # legacy records predate the type field: they are all bidding
-                "type": rec.get("type", "bidding"),
+                # scenario router; legacy records predate it and are bidding
+                "kind": rec.get("kind", "bidding"),
+                "type": cls.get("type"),
                 "difficulty": rec.get("difficulty"),
+                "difficulty_level": cls.get("difficulty_level"),
                 "created_at": rec.get("created_at"),
             })
         entries.sort(key=lambda e: e["created_at"] or "", reverse=True)

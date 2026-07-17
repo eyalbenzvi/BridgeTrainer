@@ -33,20 +33,29 @@ explanations — empirical meaning bands per stem call ("1♥ (N): overcall —
 per-option evidence (policy weight, contract distributions, IMP margins).
 Design + review history: `docs/ben_execution_plan.md`, `docs/panel/`.
 
-### Managing the pool without Claude
+### Managing the pool
 
-Generation needs no Claude session — only the Ben environment:
-
-- **GitHub UI (no install)**: Actions → *generate* → Run workflow —
-  set `count` to add problems and/or list ids in `remove` to delete;
-  the site redeploys automatically.
-- **Any machine**: `scripts/setup_ben.sh` once, then
-  `trainer pool add --count N` / `trainer pool rm <id> ...` /
-  `trainer pool ls` (removal and listing need no Ben install).
+Generation runs through Claude Code sessions (the old nightly /
+manual-dispatch CI workflow has been retired). On any machine with the
+Ben environment: `scripts/setup_ben.sh` once, then
+`trainer pool add --count N` / `trainer pool rm <id> ...` /
+`trainer pool ls` (removal and listing need no Ben install).
 
 Problems land in a JSON pool (`data/`) read by the static app
-(`trainer webapp`); `.github/workflows/generate.yml` grows the pool
-nightly with the engine cached between CI runs.
+(`trainer webapp`); commits to `data/` on main are deployed by the
+publish workflow.
+
+Generation speed: `--workers N` runs N engine processes in parallel
+(0 = auto; ~1.2 GB RAM each; same seed still yields the same problem,
+but which in-flight seeds land when the count fills can vary run to
+run). A decisive-rejection prescreen also judges 2 candidates on a
+32-sample slice first and discards boards whose rejection is already
+statistically settled — accepted problems still pass the unchanged
+128-sample screen and 512-sample confirm, so published evidence is
+untouched; the prescreen only trades recall (boards are free), and its
+false-kill rate is measurable with `ben-forge --audit-prescreen`. Note
+the prescreen slightly shifts pool composition away from boards whose
+evidence is diffuse at 32 samples (rare-swing, many-way dilemmas).
 
 ## Authored problems (legacy drill, still available for dev)
 

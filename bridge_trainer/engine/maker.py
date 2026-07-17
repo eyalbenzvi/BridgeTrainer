@@ -9,15 +9,25 @@ from __future__ import annotations
 
 import time
 from collections import Counter
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..pool.store import ProblemPool
 from .conventions import hero_role
+from .difficulty import difficulty_classification
 from .scanner import SEATS, VUL_NAMES, scan_board
-from .verdict import judge
+from .verdict import judge, prejudge
 
 SCREEN_SAMPLES = 128    # rejection decisions (10x more rejects than accepts)
-CONFIRM_SAMPLES = 512   # published evidence: fresh samples, CI halved
+CONFIRM_SAMPLES = 512   # published evidence: 4x the screen count, CI halved.
+                        # NOT independent replication: Ben's sampler reseeds
+                        # deterministically per call (hash of the hero hand),
+                        # so the 512-sample confirm pool CONTAINS the screen's
+                        # 128 abstract deals (~25% weight selection carryover).
+                        # Changing that (e.g. perturbing the seed for confirm)
+                        # is an owner-level evidence-policy decision.
+PRESCREEN_SAMPLES = 32  # decisive-rejection slice of the screen pool
+PRESCREEN_TOP_K = 2     # candidates evaluated at prescreen (by policy mass)
 
 def _round_trip_ok(spot) -> bool:
     """Rec 13d: the hand we publish is the hand Ben bid for that seat."""
@@ -29,7 +39,7 @@ def build_record(spot, verdict, stem_expl, opt_expl, elapsed) -> dict:
     policy_map = dict(spot.candidates)
     rec = {
         "schema": 1,
-        "type": "bidding",
+        "kind": "bidding",
         "id": f"ben1-{spot.seed:08x}",
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "generator": {"engine": "ben BEN-21GF", "seed": spot.seed,
@@ -67,135 +77,259 @@ def build_record(spot, verdict, stem_expl, opt_expl, elapsed) -> dict:
              "policy": [(b, round(p, 3)) for b, p in t.policy[:4]]}
             for t in spot.turns],
     }
+    # graded 1-5 difficulty (docs: engine/difficulty.py); the LLM-assigned
+    # problem type is attached by scripts/classify_pool.py in the same
+    # generation run
+    rec["classification"] = difficulty_classification(rec)
     return rec
 
 
-def forge_batch(pool_dir: str, count: int, base_seed: int,
-                max_seconds: float = 3600.0, log=print) -> dict:
-    from .ben import get_engine
+@dataclass
+class BoardOutcome:
+    """Everything the batch loop needs to know about one board."""
+    seed: int
+    status: str                    # accepted | rejected | error
+    reason: str = ""
+    rec: dict | None = None
+    timings: dict = field(default_factory=dict)
+    detail: str = ""               # preformatted log tail (no [i/count])
+    audit: dict | None = None      # prescreen audit outcome, if any
+
+
+def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
+    """The whole per-board pipeline: scan → prescreen (decisive-rejection
+    cascade on a 32-row slice, top-2 candidates) → 128-sample screen →
+    512-sample confirm → explanations. Fully self-contained so the
+    sequential loop and parallel workers share one implementation.
+
+    audit_prescreen: run the full screen even when the prescreen
+    rejects, recording both outcomes — the only way to MEASURE the
+    prescreen's false-kill rate (a pre-rejected board is otherwise never
+    escalated, so `pre_*` counters alone can't see it)."""
+    import numpy as np
+
     from .explain import option_explanations, stem_explanations
 
+    t = {}
+    t_board = time.perf_counter()
+    try:
+        spot = scan_board(engine, seed)
+    except Exception as e:
+        return BoardOutcome(seed, "error", "scan_error",
+                            detail=f"scan error ({type(e).__name__}: {e})")
+    t["scan_s"] = time.perf_counter() - t_board
+    if spot is None:
+        return BoardOutcome(seed, "rejected", "no_dilemma", timings=t,
+                            detail=f"no dilemma [{t['scan_s']:.1f}s]")
+    if not _round_trip_ok(spot):
+        return BoardOutcome(seed, "rejected", "round_trip", timings=t)
+
+    hero_bot = engine.bot(spot.hands[spot.hero_i], spot.hero_i,
+                          spot.dealer_i, spot.vul)
+    cand_bids = [b for b, _ in spot.candidates]
+    policy_top = spot.candidates[0][0]
+    dd_memo: dict = {}   # board-scoped: shared across prescreen + screen
+
+    # ---- sample ONCE at screen size; prescreen judges a slice of it ----
+    t_v = time.perf_counter()
+    try:
+        padded, hands_np, hands_pbn, quality = engine.sample_for_auction(
+            hero_bot, spot.dealer_i, spot.stem, n_samples=SCREEN_SAMPLES)
+    except Exception as e:
+        return BoardOutcome(seed, "error", "evaluate_error", timings=t,
+                            detail=f"evaluate error ({type(e).__name__}: {e})")
+
+    pre_reason, n = None, hands_np.shape[0]
+    if n >= 2 * PRESCREEN_SAMPLES:
+        # strided slice, NOT the head: after selection Ben re-sorts
+        # samples by bidding-trust score, so the head is a biased
+        # (most-auction-consistent) subset
+        idx = np.arange(0, n, n // PRESCREEN_SAMPLES)[:PRESCREEN_SAMPLES]
+        sub_np = hands_np[idx]
+        sub_pbn = [hands_pbn[i] for i in idx]
+        try:
+            ev_pre = engine.rollout_eval(
+                hero_bot, padded, cand_bids[:PRESCREEN_TOP_K],
+                sub_np, sub_pbn, quality, dd_memo=dd_memo)
+            pre_reason = prejudge(ev_pre, policy_top=policy_top,
+                                  hero_i=spot.hero_i)
+        except Exception as e:
+            return BoardOutcome(seed, "error", "evaluate_error", timings=t,
+                                detail=f"prescreen error "
+                                       f"({type(e).__name__}: {e})")
+    t["prescreen_s"] = time.perf_counter() - t_v
+
+    if pre_reason and not audit_prescreen:
+        t["verdict_s"] = time.perf_counter() - t_v
+        return BoardOutcome(
+            seed, "rejected", "pre_" + pre_reason, timings=t,
+            detail=f"pre_{pre_reason} "
+                   f"[{t['scan_s']:.1f}+{t['prescreen_s']:.1f}s]")
+
+    # ---- full screen: all candidates on all sampled rows (unchanged) ---
+    try:
+        ev = engine.rollout_eval(hero_bot, padded, cand_bids,
+                                 hands_np, hands_pbn, quality,
+                                 dd_memo=dd_memo)
+    except Exception as e:
+        return BoardOutcome(seed, "error", "evaluate_error", timings=t,
+                            detail=f"evaluate error ({type(e).__name__}: {e})")
+    t["verdict_s"] = time.perf_counter() - t_v
+    v = judge(ev, policy_top=policy_top,
+              hero_i=spot.hero_i, policy_map=dict(spot.candidates))
+
+    audit = None
+    if pre_reason:                  # audit mode: compare the two verdicts
+        audit = {"pre_reason": pre_reason,
+                 "screen_reason": v.reason,
+                 "false_kill": bool(v.accepted)}
+    if not v.accepted:
+        return BoardOutcome(
+            seed, "rejected", v.reason, timings=t, audit=audit,
+            detail=f"{v.reason} gap={v.measured.get('gap_imps')}"
+                   f" ci={v.measured.get('ci')}"
+                   f" [{t['scan_s']:.1f}+{t['verdict_s']:.1f}s]")
+
+    # ---- confirm at 4x samples: the published evidence (see the note
+    # at CONFIRM_SAMPLES: a superset re-evaluation, not fresh samples;
+    # its PBNs differ from the screen's, so dd_memo gets ~no hits here
+    # and is passed only for uniformity) ----
+    t_c = time.perf_counter()
+    try:
+        ev = engine.evaluate(hero_bot, spot.dealer_i, spot.stem, cand_bids,
+                             n_samples=CONFIRM_SAMPLES, dd_memo=dd_memo)
+    except Exception as e:
+        return BoardOutcome(seed, "error", "confirm_error", timings=t,
+                            audit=audit,
+                            detail=f"confirm error ({type(e).__name__}: {e})")
+    t["confirm_s"] = time.perf_counter() - t_c
+    v = judge(ev, policy_top=policy_top,
+              hero_i=spot.hero_i, policy_map=dict(spot.candidates))
+    if not v.accepted:
+        return BoardOutcome(
+            seed, "rejected", "confirm_" + v.reason, timings=t, audit=audit,
+            detail=f"confirm_{v.reason} gap={v.measured.get('gap_imps')} "
+                   f"[{t['confirm_s']:.1f}s]")
+
+    t_e = time.perf_counter()
+    stem_expl = stem_explanations(engine, spot, hero_bot)
+    opt_expl = option_explanations(spot, v, dict(spot.candidates),
+                                   engine=engine, ev=ev, hero_bot=hero_bot)
+    t["explain_s"] = time.perf_counter() - t_e
+
+    elapsed = time.perf_counter() - t_board
+    rec = build_record(spot, v, stem_expl, opt_expl, elapsed)
+    verdict_txt = ("toss-up " + "/".join(rec["verdict"]["toss_up_set"])
+                   ) if v.toss_up else v.best
+    detail = (f"ACCEPTED {rec['id']} "
+              f"hero {rec['seat']} after {' '.join(spot.stem) or '(opening)'} "
+              f"cands={cand_bids} verdict={verdict_txt} "
+              f"gap={v.measured['gap_imps']} "
+              f"[scan {t['scan_s']:.1f}s screen {t['verdict_s']:.1f}s "
+              f"confirm {t['confirm_s']:.1f}s expl {t['explain_s']:.1f}s]")
+    return BoardOutcome(seed, "accepted", "accepted", rec=rec, timings=t,
+                        audit=audit, detail=detail)
+
+
+class _BatchState:
+    """Aggregation shared by the sequential and parallel paths."""
+
+    def __init__(self, pool_dir: str, count: int, log):
+        self.pool = ProblemPool(pool_dir)
+        self.existing = set(self.pool.ids())
+        self.count = count
+        self.log = log
+        self.made: list[str] = []
+        self.rejections = Counter()
+        self.stage_totals = Counter()
+        self.quotas = {"vuls": Counter(), "roles": Counter(), "contested": 0}
+        self.audits = {"pre_rejects_audited": 0, "false_kills": 0}
+        self.boards = 0
+
+    def absorb(self, out: BoardOutcome, tag: str = "") -> None:
+        self.boards += 1
+        for k, x in out.timings.items():
+            self.stage_totals[k] += x
+        if out.audit:
+            self.audits["pre_rejects_audited"] += 1
+            self.audits["false_kills"] += out.audit["false_kill"]
+        if out.status in ("rejected", "error"):
+            self.rejections[out.reason] += 1
+            if out.detail:
+                self.log(f"  {tag}seed {out.seed}: {out.detail}")
+            return
+        rec = out.rec
+        if rec["id"] in self.existing:
+            self.rejections["duplicate"] += 1
+            return
+        self.pool.add(rec)
+        self.pool.rebuild_index()
+        self.existing.add(rec["id"])
+        self.made.append(rec["id"])
+        self.quotas["vuls"][rec["vul"]] += 1
+        self.quotas["roles"][rec["hero_role"]] += 1
+        stem, dealer = rec["auction"], SEATS.index(rec["dealer"])
+        hero = SEATS.index(rec["seat"])
+        self.quotas["contested"] += 1 if any(
+            tok != "P" for i, tok in enumerate(stem)
+            if (dealer + i) % 4 not in (hero, (hero + 2) % 4)) else 0
+        self.log(f"  {tag}seed {out.seed}: "
+                 + out.detail.replace(
+                     "ACCEPTED " + rec["id"],
+                     f"ACCEPTED {rec['id']} [{len(self.made)}/{self.count}]",
+                     1))
+
+    def summary(self, wall: float) -> dict:
+        s = {
+            "made": self.made, "count": len(self.made),
+            "wall_s": round(wall, 1), "boards_scanned": self.boards,
+            "rejections": dict(self.rejections),
+            "stage_totals_s": {k: round(x, 1)
+                               for k, x in self.stage_totals.items()},
+            "per_accepted_s": round(wall / len(self.made), 1)
+            if self.made else None,
+            "mix": {"vuls": dict(self.quotas["vuls"]),
+                    "roles": dict(self.quotas["roles"]),
+                    "contested": self.quotas["contested"]},
+        }
+        if self.audits["pre_rejects_audited"]:
+            s["prescreen_audit"] = dict(self.audits)
+        return s
+
+
+def forge_batch(pool_dir: str, count: int, base_seed: int,
+                max_seconds: float = 3600.0, log=print,
+                workers: int = 1, audit_prescreen: bool = False) -> dict:
     # Resolve the pool BEFORE engine init: BenEngine chdir's into the ben
     # source tree, so a relative pool path would land there.
     import os
     pool_dir = os.path.abspath(pool_dir)
 
+    if workers == 0:
+        # auto: each worker holds a ~1.2 GB engine — stay conservative
+        # (the 7 GB CI runner OOMs at 4) unless told explicitly
+        workers = max(1, min(3, os.cpu_count() or 1))
+    if workers > 1:
+        from .parallel import forge_batch_parallel
+        return forge_batch_parallel(pool_dir, count, base_seed, max_seconds,
+                                    log, workers, audit_prescreen)
+
+    from .ben import get_engine
+
     t_load = time.perf_counter()
     engine = get_engine()
     log(f"engine loaded in {time.perf_counter() - t_load:.1f}s")
 
-    pool = ProblemPool(pool_dir)
-    existing = set(pool.ids())
-    made, rejections = [], Counter()
-    quotas = {"vuls": Counter(), "roles": Counter(), "contested": 0}
+    state = _BatchState(pool_dir, count, log)
     t0 = time.perf_counter()
-    stage_totals = Counter()
     k = 0
-    while len(made) < count and time.perf_counter() - t0 < max_seconds:
-        seed = base_seed + k
+    while len(state.made) < count and time.perf_counter() - t0 < max_seconds:
+        state.absorb(forge_one(engine, base_seed + k, audit_prescreen))
         k += 1
-        t_board = time.perf_counter()
-        try:
-            spot = scan_board(engine, seed)
-        except Exception as e:  # engine hiccup: log and move on
-            rejections["scan_error"] += 1
-            log(f"  seed {seed}: scan error ({type(e).__name__}: {e})")
-            continue
-        t_scan = time.perf_counter() - t_board
-        stage_totals["scan_s"] += t_scan
-        if spot is None:
-            rejections["no_dilemma"] += 1
-            log(f"  seed {seed}: no dilemma [{t_scan:.1f}s]")
-            continue
-
-        if not _round_trip_ok(spot):
-            rejections["round_trip"] += 1
-            continue
-
-        hero_bot = engine.bot(spot.hands[spot.hero_i], spot.hero_i,
-                              spot.dealer_i, spot.vul)
-        t_v = time.perf_counter()
-        try:
-            ev = engine.evaluate(hero_bot, spot.dealer_i, spot.stem,
-                                 [b for b, _ in spot.candidates],
-                                 n_samples=SCREEN_SAMPLES)
-        except Exception as e:
-            rejections["evaluate_error"] += 1
-            log(f"  seed {seed}: evaluate error ({type(e).__name__}: {e})")
-            continue
-        t_verdict = time.perf_counter() - t_v
-        stage_totals["verdict_s"] += t_verdict
-        v = judge(ev, policy_top=spot.candidates[0][0],
-                  hero_i=spot.hero_i, policy_map=dict(spot.candidates))
-        if not v.accepted:
-            rejections[v.reason] += 1
-            log(f"  seed {seed}: {v.reason} gap={v.measured.get('gap_imps')}"
-                f" ci={v.measured.get('ci')} [{t_scan:.1f}+{t_verdict:.1f}s]")
-            continue
-
-        # screen passed: confirm on FRESH high-count samples — the
-        # published evidence (owner r9: max DD checks under the minute)
-        t_c = time.perf_counter()
-        try:
-            ev = engine.evaluate(hero_bot, spot.dealer_i, spot.stem,
-                                 [b for b, _ in spot.candidates],
-                                 n_samples=CONFIRM_SAMPLES)
-        except Exception as e:
-            rejections["confirm_error"] += 1
-            log(f"  seed {seed}: confirm error ({type(e).__name__}: {e})")
-            continue
-        t_confirm = time.perf_counter() - t_c
-        stage_totals["confirm_s"] += t_confirm
-        v = judge(ev, policy_top=spot.candidates[0][0],
-                  hero_i=spot.hero_i, policy_map=dict(spot.candidates))
-        if not v.accepted:
-            rejections["confirm_" + v.reason] += 1
-            log(f"  seed {seed}: confirm_{v.reason} "
-                f"gap={v.measured.get('gap_imps')} [{t_confirm:.1f}s]")
-            continue
-
-        t_e = time.perf_counter()
-        stem_expl = stem_explanations(engine, spot, hero_bot)
-        opt_expl = option_explanations(spot, v, dict(spot.candidates),
-                               engine=engine, ev=ev, hero_bot=hero_bot)
-        t_expl = time.perf_counter() - t_e
-        stage_totals["explain_s"] += t_expl
-
-        elapsed = time.perf_counter() - t_board
-        rec = build_record(spot, v, stem_expl, opt_expl, elapsed)
-        if rec["id"] in existing:
-            rejections["duplicate"] += 1
-            continue
-        pool.add(rec)
-        pool.rebuild_index()
-        existing.add(rec["id"])
-        made.append(rec["id"])
-        quotas["vuls"][rec["vul"]] += 1
-        quotas["roles"][rec["hero_role"]] += 1
-        quotas["contested"] += 1 if any(
-            t != "P" for i, t in enumerate(spot.stem)
-            if (spot.dealer_i + i) % 4 not in
-            (spot.hero_i, (spot.hero_i + 2) % 4)) else 0
-        verdict_txt = ("toss-up " + "/".join(rec["verdict"]["toss_up_set"])
-                       ) if v.toss_up else v.best
-        log(f"  seed {seed}: ACCEPTED {rec['id']} [{len(made)}/{count}] "
-            f"hero {rec['seat']} after {' '.join(spot.stem) or '(opening)'} "
-            f"cands={[b for b, _ in spot.candidates]} verdict={verdict_txt} "
-            f"gap={v.measured['gap_imps']} "
-            f"[scan {t_scan:.1f}s screen {t_verdict:.1f}s "
-            f"confirm {t_confirm:.1f}s expl {t_expl:.1f}s]")
 
     wall = time.perf_counter() - t0
-    summary = {
-        "made": made, "count": len(made), "wall_s": round(wall, 1),
-        "boards_scanned": k, "rejections": dict(rejections),
-        "stage_totals_s": {s: round(x, 1) for s, x in stage_totals.items()},
-        "per_accepted_s": round(wall / len(made), 1) if made else None,
-        "mix": {"vuls": dict(quotas["vuls"]),
-                "roles": dict(quotas["roles"]),
-                "contested": quotas["contested"]},
-    }
-    log(f"\nDone: {len(made)}/{count} in {wall / 60:.1f} min "
+    summary = state.summary(wall)
+    log(f"\nDone: {len(state.made)}/{count} in {wall / 60:.1f} min "
         f"({summary['per_accepted_s']}s per accepted deal); "
-        f"scanned {k} boards; rejections: {dict(rejections)}")
+        f"scanned {k} boards; rejections: {summary['rejections']}")
     return summary
