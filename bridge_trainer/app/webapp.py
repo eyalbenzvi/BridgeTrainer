@@ -1421,10 +1421,41 @@ _DASHBOARD_CSS = """
         overflow: hidden; }
 .dbar > span { display: block; height: 100%; background: var(--accent);
                border-radius: 99px; }
+.scen .subh { font-weight: 700; margin: 13px 0 3px; font-size: 13px; }
+.costline { margin: 6px 0 6px; font-size: 14px; }
+.costline b { font-size: 21px; }
+.band { display: flex; height: 22px; border-radius: 99px; overflow: hidden;
+        background: var(--line); margin: 4px 0 5px; }
+.band .bseg { display: flex; align-items: center; justify-content: center;
+              font-size: 11px; font-weight: 700; color: #fff; min-width: 0;
+              box-shadow: inset -1px 0 0 rgba(0,0,0,.15); }
+.band .bseg.opt { background: #2f7d5b; }
+.band .bseg.near { background: #c2851b; }
+.band .bseg.bl { background: #b04a34; }
+.blegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px;
+           color: var(--muted); }
+.blegend i.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+                margin-inline-end: 4px; vertical-align: middle; }
+.blegend i.opt { background: #2f7d5b; } .blegend i.near { background: #c2851b; }
+.blegend i.bl { background: #b04a34; }
+.drill { border-top: 1px solid var(--line); }
+.drill > summary { cursor: pointer; padding: 2px 0; }
+.drill > summary .catrow { margin: 5px 0; }
+.drill .drillbody { padding: 0 1.6em 6px; }
 """
 
 _DASHBOARD_JS = r"""
 const MIN_N = 5, MIN_TREND = 8;
+// distribution-band thresholds; units differ by scenario (IMPs vs tricks)
+const COST = { bidding: {unit: "IMP", near: 2.0}, lead: {unit: "trick", near: 1.0} };
+const SUIT_NAME = {S: "Spades", H: "Hearts", D: "Diamonds", C: "Clubs"};
+const RANKS = "AKQJT98765432";
+function num(x) { return typeof x === "number" ? x : (parseFloat(x) || 0); }
+function median(xs) {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
 function wilson(k, n) {
   if (!n) return {p: 0, lo: 0, hi: 0};
   const z = 1.96, ph = k / n, z2 = z * z, den = 1 + z2 / n;
@@ -1450,6 +1481,76 @@ function row(label, k, n) {
     `<span>${pct(w.p)} <span class="muted">(${pct(w.lo)}–${pct(w.hi)}, ` +
     `n=${n})</span></span></div>`;
 }
+function diffRows(list) {
+  const by = {};
+  list.forEach(a => { const d = a.difficultyLevel || 0;
+    (by[d] ??= {k: 0, n: 0}); by[d].n++; if (a.correct) by[d].k++; });
+  const out = [1, 2, 3, 4, 5].filter(d => by[d])
+    .map(d => row(DIFF_NAMES[d] || ("level " + d), by[d].k, by[d].n)).join("");
+  return out || '<div class="muted">no data</div>';
+}
+function typeRows(list) {
+  const by = {};
+  list.forEach(a => { const t = a.type || "—";
+    (by[t] ??= {k: 0, n: 0}); by[t].n++; if (a.correct) by[t].k++; });
+  const es = Object.entries(by).sort((a, b) => b[1].n - a[1].n);
+  return es.length
+    ? es.map(([t, s]) => row((TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t, s.k, s.n)).join("")
+    : '<div class="muted">no data</div>';
+}
+function costBand(list, kind) {
+  const cfg = COST[kind] || COST.bidding, n = list.length;
+  if (!n) return "";
+  let opt = 0, near = 0, bl = 0; const costs = [];
+  list.forEach(a => { const c = num(a.gradedCost); costs.push(c);
+    if (a.correct) opt++; else if (c < cfg.near) near++; else bl++; });
+  const mean = costs.reduce((s, c) => s + c, 0) / n, med = median(costs), u = cfg.unit;
+  const seg = (cls, v) => v
+    ? `<span class="bseg ${cls}" style="width:${(v / n * 100).toFixed(1)}%">` +
+      `${Math.round(v / n * 100)}%</span>` : "";
+  return `<div class="costline">avg <b>${mean.toFixed(1)}</b> ${u} below best ` +
+    `<span class="muted">(median ${med.toFixed(1)})</span></div>` +
+    `<div class="band" role="img" aria-label="optimal ${opt}, near-miss ${near}, ` +
+    `blunder ${bl} of ${n}">` + seg("opt", opt) + seg("near", near) + seg("bl", bl) +
+    '</div><div class="blegend">' +
+    '<span><i class="sw opt"></i>optimal</span>' +
+    `<span><i class="sw near"></i>near-miss (&lt;${cfg.near} ${u})</span>` +
+    `<span><i class="sw bl"></i>blunder (≥${cfg.near} ${u})</span></div>`;
+}
+function suitRows(list) {
+  const suits = {S: {k: 0, n: 0, c: {}}, H: {k: 0, n: 0, c: {}},
+                 D: {k: 0, n: 0, c: {}}, C: {k: 0, n: 0, c: {}}};
+  list.forEach(a => { const card = a.chosenCall || "", st = card[0], s = suits[st];
+    if (!s) return;
+    s.n++; if (a.correct) s.k++;
+    (s.c[card] ??= {k: 0, n: 0}); s.c[card].n++; if (a.correct) s.c[card].k++; });
+  const order = ["S", "H", "D", "C"].filter(st => suits[st].n);
+  if (!order.length) return '<div class="muted">no data</div>';
+  return order.map(st => {
+    const s = suits[st], label = suitHtml(st) + " " + SUIT_NAME[st];
+    const cards = Object.keys(s.c)
+      .sort((a, b) => RANKS.indexOf(a[1]) - RANKS.indexOf(b[1]))
+      .map(c => row(cardHtml(c), s.c[c].k, s.c[c].n)).join("");
+    return '<details class="drill"><summary>' + row(label, s.k, s.n) + '</summary>' +
+      '<div class="drillbody">' + cards + '</div></details>';
+  }).join("");
+}
+function scenarioCard(title, list, kind) {
+  if (!list.length) return "";
+  let html = '<div class="card scen"><b>' + title + '</b> ' +
+    '<span class="muted">' + (kind === "lead" ? "tricks" : "IMPs") +
+    ' · n=' + list.length + '</span>' +
+    costBand(list, kind) +
+    '<div class="subh">By difficulty</div>' + diffRows(list);
+  if (kind === "lead") {
+    html += '<div class="subh">By suit led</div>' + suitRows(list) +
+      '<div class="muted" style="font-size:12px;margin-top:4px">' +
+      'Tap a suit to see the cards.</div>';
+  } else {
+    html += '<div class="subh">By problem type</div>' + typeRows(list);
+  }
+  return html + '</div>';
+}
 function render(attempts) {
   const el = document.getElementById("dash");
   if (!attempts.length) {
@@ -1463,15 +1564,12 @@ function render(attempts) {
   const recent = [...first].sort((a, b) => tsMillis(b) - tsMillis(a));
   let streak = 0;
   for (const a of recent) { if (a.correct) streak++; else break; }
-  const byType = {}, byDiff = {}, byKind = {};
-  for (const a of first) {
-    const t = a.type || "—";
-    (byType[t] ??= {k: 0, n: 0}); byType[t].n++; if (a.correct) byType[t].k++;
-    const d = a.difficultyLevel || 0;
-    (byDiff[d] ??= {k: 0, n: 0}); byDiff[d].n++; if (a.correct) byDiff[d].k++;
-    const kd = a.kind || "bidding";
-    (byKind[kd] ??= {k: 0, n: 0}); byKind[kd].n++; if (a.correct) byKind[kd].k++;
-  }
+  // split first-attempts by scenario (units differ: IMPs vs tricks)
+  const scen = {bidding: [], lead: []};
+  for (const a of first) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
+  const byKind = {};
+  for (const a of first) { const kd = a.kind || "bidding";
+    (byKind[kd] ??= {k: 0, n: 0}); byKind[kd].n++; if (a.correct) byKind[kd].k++; }
   const chrono = [...first].sort((a, b) => tsMillis(a) - tsMillis(b));
   let trend = "";
   if (chrono.length >= MIN_TREND) {
@@ -1499,7 +1597,6 @@ function render(attempts) {
         ` <a href="${routeFor(m.kind || "bidding", m.problemId)}">retry</a></li>`
       ).join("") + "</ul></div>"
     : "";
-  const typeName = t => (TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t;
   el.innerHTML =
     '<div class="card"><div class="statgrid">' +
     `<div class="stat"><b>${n < MIN_N ? "—" : pct(w.p)}</b>` +
@@ -1512,15 +1609,13 @@ function render(attempts) {
     Object.keys(byKind).map(kd =>
       row(kd === "lead" ? "Opening lead" : "Bidding", byKind[kd].k, byKind[kd].n)).join("") +
     '</div>' +
-    '<div class="card"><b>By problem type</b>' +
-    Object.entries(byType).sort((a, b) => b[1].n - a[1].n)
-      .map(([t, s]) => row(typeName(t), s.k, s.n)).join("") + '</div>' +
-    '<div class="card"><b>By difficulty</b>' +
-    [1, 2, 3, 4, 5].filter(d => byDiff[d])
-      .map(d => row(DIFF_NAMES[d] || ("level " + d), byDiff[d].k, byDiff[d].n)).join("") +
-    '</div>' + missList +
+    scenarioCard("Bidding", scen.bidding, "bidding") +
+    scenarioCard("Opening lead", scen.lead, "lead") +
+    missList +
     '<p class="footnote">First attempts only. Percentages are suppressed until ' +
-    'there are at least ' + MIN_N + '; ranges are 95% Wilson intervals.</p>';
+    'there are at least ' + MIN_N + '; ranges are 95% Wilson intervals. ' +
+    '“Cost below best” averages IMPs (bidding) or defensive tricks (lead) lost ' +
+    'versus the optimal action; correct answers count as zero.</p>';
 }
 async function init() {
   try { render(await window.BT.allAttempts()); }
