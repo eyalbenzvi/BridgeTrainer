@@ -16,3 +16,9 @@ pool_b2/
 pool_b2/
 pool_b3/
 pool_live/
+
+# Firebase service-account keys — never commit these
+*service-account*.json
+*-sa-key.json
+serviceAccountKey*.json
+firebase-adminsdk*.json

@@ -171,6 +171,13 @@ def cmd_pool(args: argparse.Namespace) -> int:
                               base_seed=seed, max_seconds=args.max_seconds,
                               workers=args.workers)
         return 0 if summary["count"] == args.count else 1
+    if args.pool_cmd == "push":
+        from ..pool.firestore_store import push_local_pool
+        summary = push_local_pool(args.pool, key_path=args.key,
+                                  overwrite=args.overwrite)
+        print(f"uploaded {summary['uploaded']}, skipped {summary['skipped']} "
+              f"(pool has {summary['total']}); meta/index refreshed")
+        return 0
     return 2
 
 
@@ -258,6 +265,15 @@ def main(argv: list[str] | None = None) -> int:
     pa.add_argument("--workers", type=int, default=1,
                     help="parallel forge workers; 0 = auto")
     pa.set_defaults(func=cmd_pool)
+    pp = pool_sub.add_parser(
+        "push", help="upload the local JSON pool + index to Firestore")
+    pp.add_argument("--pool", default="data")
+    pp.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pp.add_argument("--overwrite", action="store_true",
+                    help="replace documents that already exist")
+    pp.set_defaults(func=cmd_pool)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -1,7 +1,8 @@
 name: Deploy app
 
-# Deploys the static web app shell to gh-pages on code changes, along with
-# the problem pool (data/) committed to the repo.
+# Deploys the static web app shell to gh-pages on code changes. Problems and
+# per-user progress live in Firestore, read by the client at runtime; the
+# deploy ships only the static shell (HTML + ES modules + CSS).
 
 on:
   push:
@@ -28,13 +29,10 @@ jobs:
       - name: Tests
         run: pytest -q
       - name: Build app shell
+        # Problems and per-user data live in Firestore; the client reads them
+        # at runtime (see web/bt-firebase.js). The deploy ships only the
+        # static shell — data/ is no longer copied to the site.
         run: trainer webapp --out _site
-      - name: Deploy the repo's problem pool
-        # data/ in the repo is the pool of record (ben-forge output,
-        # generated manually via Claude Code and committed here). The old
-        # gh-pages pool is intentionally replaced, not preserved.
-        run: |
-          [ -d data ] && cp -r data _site/data || true
       - name: Deploy to gh-pages
         run: |
           cd _site

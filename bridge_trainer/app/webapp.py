@@ -307,14 +307,14 @@ button.cardbtn.bad { border-color: var(--loss);
 """
 
 _SHARED_JS = """
-const KEY = "bt_pool";
-function store() { try { return JSON.parse(localStorage.getItem(KEY)) || {}; }
-                   catch (e) { return {}; } }
-function saveStore(s) { localStorage.setItem(KEY, JSON.stringify(s)); }
+/* Progress + pool now live in Firestore (see web/bt-firebase.js, window.BT).
+   store() returns the signed-in user's answered-problem cache synchronously
+   (preloaded at sign-in); answers persist through BT.record. */
+function store() { return (window.BT && window.BT.attempts()) || {}; }
+function saveStore(s) { /* no-op: attempts persist via BT.record */ }
 async function fetchIndex() {
-  const r = await fetch("data/index.json", {cache: "no-cache"});
-  if (!r.ok) throw new Error("no pool index");
-  return r.json();
+  if (!window.BT) throw new Error("Firebase not ready");
+  return window.BT.fetchIndex();
 }
 /* Deal filters. Everything is selected by default: an absent key means
    "the whole pool", and selecting every option again clears the key so the
@@ -586,7 +586,8 @@ def _index_html() -> str:
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bridge Bidding Trainer</title>
-<style>{_CSS}</style></head><body>
+<style>{_CSS}</style>
+<script type="module" src="bt-firebase.js"></script></head><body>
 <h1><span style="opacity:.9">&spades;</span> Bridge Trainer</h1>
 <div class="scenaseg" id="scenario" role="group" aria-label="Practice scenario">
 <button type="button" data-kind="bidding" aria-pressed="true">Bidding
@@ -619,6 +620,8 @@ def _index_html() -> str:
 <p class="topbar" style="display:block">Every problem is a random deal, bid
 to a genuine decision point, its verdict backed by a full double-dummy
 simulation. The pool grows in batches.
+<a href="dashboard.html" style="color:var(--on-felt)">Your progress &rarr;</a>
+&middot;
 <a href="#" id="reset" style="color:var(--on-felt-muted)">Reset progress</a></p>
 <script>{_SHARED_JS}
 let INDEX = null;
@@ -824,11 +827,12 @@ document.getElementById("deal").onclick = () => {{
 }};
 document.getElementById("reset").onclick = () => {{
   if (confirm("Clear all recorded answers?")) {{
-    localStorage.removeItem(KEY); location.reload();
+    window.BT.resetAll().then(() => location.reload());
   }}
   return false;
 }};
-init();
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 </script>
 </body></html>"""
 
@@ -838,7 +842,8 @@ def _problem_html() -> str:
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Bidding problem</title>
-<style>{_CSS}</style></head><body>
+<style>{_CSS}</style>
+<script type="module" src="bt-firebase.js"></script></head><body>
 <div class="topbar">
 <a href="index.html">&larr; home</a>
 <span id="meta"></span>
@@ -1020,12 +1025,9 @@ function reveal(chosen) {{
   document.getElementById("verdict").style.display = "block";
 }}
 function choose(action) {{
-  const s = store();
-  if (s[P.id]) return;
-  s[P.id] = {{ answer: action,
-               correct: P.verdict.accepted.includes(action), ts: Date.now() }};
-  saveStore(s);
+  if (store()[P.id]) return;
   reveal(action);
+  window.BT.record(P.id, window.BT.gradeBidding(P, action));
 }}
 /* two-step selection: first tap shows what the bid means, a second
    (confirm) tap locks the answer in */
@@ -1111,11 +1113,9 @@ function normalize() {{
 }}
 async function init() {{
   const id = new URLSearchParams(location.search).get("id");
-  const r = await fetch("data/problems/" + encodeURIComponent(id) + ".json",
-                        {{cache: "no-cache"}});
-  if (!r.ok) {{ document.getElementById("problem").textContent =
+  P = await window.BT.getProblem(id);
+  if (!P) {{ document.getElementById("problem").textContent =
                 "Problem not found."; return; }}
-  P = await r.json();
   normalize();
   document.getElementById("meta").textContent =
     `IMPs \\u00b7 Dealer ${{P.dealer}} \\u00b7 you are ${{P.seat}}` +
@@ -1171,7 +1171,8 @@ async function init() {{
   const prev = store()[P.id];
   if (prev) reveal(prev.answer);
 }}
-init();
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 </script>
 </body></html>"""
 
@@ -1234,12 +1235,10 @@ function reveal(chosen) {
   document.getElementById("verdict").style.display = "block";
 }
 function choose(btn) {
-  const s = store();
-  if (s[P.id]) return;
+  if (store()[P.id]) return;
   const a = btn.dataset.action;
-  s[P.id] = { answer: a, correct: P.verdict.accepted.includes(a), ts: Date.now() };
-  saveStore(s);
   reveal(a);
+  window.BT.record(P.id, window.BT.gradeLead(P, a));
 }
 function loadLead() {
   try { return JSON.parse(localStorage.getItem("bt_lead_filters")); }
@@ -1247,9 +1246,8 @@ function loadLead() {
 }
 async function init() {
   const id = new URLSearchParams(location.search).get("id");
-  const r = await fetch("data/problems/" + encodeURIComponent(id) + ".json");
-  if (!r.ok) { document.getElementById("problem").textContent = "Problem not found."; return; }
-  P = await r.json();
+  P = await window.BT.getProblem(id);
+  if (!P) { document.getElementById("problem").textContent = "Problem not found."; return; }
   const meanings = (P.explanations && P.explanations.auction) || [];
   document.getElementById("meta").innerHTML =
     "Contract " + callHtml(P.contract.slice(0, -1)) + " by " + P.declarer +
@@ -1297,7 +1295,8 @@ async function init() {
   if (prev) reveal(prev.answer);
 }
 function cardHtml_or_call(tok) { return tok ? callHtml(tok) : ""; }
-init();
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 """
 
 
@@ -1305,7 +1304,8 @@ def _lead_html() -> str:
     return (
         '<!DOCTYPE html>\n<html><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        '<title>Opening lead problem</title>\n<style>' + _CSS + '</style></head>'
+        '<title>Opening lead problem</title>\n<style>' + _CSS + '</style>\n'
+        '<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-scenario="lead">\n'
         '<div class="topbar"><a href="index.html">&larr; home</a>'
         '<span class="muted" id="meta"></span></div>\n'
@@ -1328,10 +1328,156 @@ def _lead_html() -> str:
     )
 
 
+_DASHBOARD_CSS = """
+.statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat { text-align: center; }
+.stat b { font-size: 26px; display: block; line-height: 1.1; }
+.catrow { display: grid; grid-template-columns: 9em 1fr auto; gap: 8px;
+          align-items: center; margin: 7px 0; font-size: 13px; }
+.dbar { height: 12px; border-radius: 99px; background: var(--line);
+        overflow: hidden; }
+.dbar > span { display: block; height: 100%; background: var(--accent);
+               border-radius: 99px; }
+"""
+
+_DASHBOARD_JS = r"""
+const MIN_N = 5, MIN_TREND = 8;
+function wilson(k, n) {
+  if (!n) return {p: 0, lo: 0, hi: 0};
+  const z = 1.96, ph = k / n, z2 = z * z, den = 1 + z2 / n;
+  const c = (ph + z2 / (2 * n)) / den;
+  const h = z * Math.sqrt((ph * (1 - ph) + z2 / (4 * n)) / n) / den;
+  return {p: ph, lo: Math.max(0, c - h), hi: Math.min(1, c + h)};
+}
+function pct(x) { return Math.round(x * 100) + "%"; }
+function tsMillis(a) {
+  if (!a || !a.ts) return 0;
+  if (typeof a.ts.toMillis === "function") return a.ts.toMillis();
+  if (a.ts.seconds) return a.ts.seconds * 1000;
+  return 0;
+}
+function row(label, k, n) {
+  if (n < MIN_N)
+    return `<div class="catrow"><span>${label}</span>` +
+      `<span class="muted">not enough data</span>` +
+      `<span class="muted">${k}/${n}</span></div>`;
+  const w = wilson(k, n);
+  return `<div class="catrow"><span>${label}</span>` +
+    `<span class="dbar"><span style="width:${w.p * 100}%"></span></span>` +
+    `<span>${pct(w.p)} <span class="muted">(${pct(w.lo)}–${pct(w.hi)}, ` +
+    `n=${n})</span></span></div>`;
+}
+function render(attempts) {
+  const el = document.getElementById("dash");
+  if (!attempts.length) {
+    el.innerHTML = '<div class="card">No attempts yet — ' +
+      '<a href="index.html">answer a problem</a> to start tracking.</div>';
+    return;
+  }
+  const first = attempts.filter(a => a.isFirstAttempt !== false);
+  const n = first.length, k = first.filter(a => a.correct).length;
+  const w = wilson(k, n);
+  const recent = [...first].sort((a, b) => tsMillis(b) - tsMillis(a));
+  let streak = 0;
+  for (const a of recent) { if (a.correct) streak++; else break; }
+  const byType = {}, byDiff = {}, byKind = {};
+  for (const a of first) {
+    const t = a.type || "—";
+    (byType[t] ??= {k: 0, n: 0}); byType[t].n++; if (a.correct) byType[t].k++;
+    const d = a.difficultyLevel || 0;
+    (byDiff[d] ??= {k: 0, n: 0}); byDiff[d].n++; if (a.correct) byDiff[d].k++;
+    const kd = a.kind || "bidding";
+    (byKind[kd] ??= {k: 0, n: 0}); byKind[kd].n++; if (a.correct) byKind[kd].k++;
+  }
+  const chrono = [...first].sort((a, b) => tsMillis(a) - tsMillis(b));
+  let trend = "";
+  if (chrono.length >= MIN_TREND) {
+    let cum = 0; const pts = [];
+    chrono.forEach((a, i) => { cum += a.correct ? 1 : 0; pts.push(cum / (i + 1) * 100); });
+    const W = 300, H = 60, step = W / (pts.length - 1);
+    const path = pts.map((y, i) =>
+      `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
+    trend = '<div class="card"><b>Accuracy over time</b> ' +
+      '<span class="muted">(cumulative first-attempt)</span><br>' +
+      `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:6px">` +
+      `<line x1="0" y1="${H - 30}" x2="${W}" y2="${H - 30}" stroke="#8884" ` +
+      'stroke-dasharray="3"></line>' +
+      `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"></path>` +
+      '</svg><div class="muted">dashed line = 50%</div></div>';
+  }
+  const misses = recent.filter(a => !a.correct).slice(0, 10);
+  const missList = misses.length
+    ? '<div class="card"><b>Recent misses</b> <span class="muted">(review)</span>' +
+      '<ul class="notes">' + misses.map(m =>
+        `<li>You chose <b>${m.chosenCall}</b> — ${m.outcomeClass}` +
+        (m.gradedCost ? `, cost ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
+        (m.acceptedSet && m.acceptedSet.length
+          ? `. Best: ${m.acceptedSet.join(", ")}` : "") +
+        ` <a href="${routeFor(m.kind || "bidding", m.problemId)}">retry</a></li>`
+      ).join("") + "</ul></div>"
+    : "";
+  const typeName = t => (TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t;
+  el.innerHTML =
+    '<div class="card"><div class="statgrid">' +
+    `<div class="stat"><b>${n < MIN_N ? "—" : pct(w.p)}</b>` +
+    `<span class="muted">first-attempt accuracy</span></div>` +
+    `<div class="stat"><b>${streak}</b><span class="muted">current streak</span></div>` +
+    `<div class="stat"><b>${n}</b><span class="muted">problems answered</span></div>` +
+    `<div class="stat"><b>${attempts.length}</b><span class="muted">total attempts</span></div>` +
+    '</div></div>' + trend +
+    '<div class="card"><b>By scenario</b>' +
+    Object.keys(byKind).map(kd =>
+      row(kd === "lead" ? "Opening lead" : "Bidding", byKind[kd].k, byKind[kd].n)).join("") +
+    '</div>' +
+    '<div class="card"><b>By problem type</b>' +
+    Object.entries(byType).sort((a, b) => b[1].n - a[1].n)
+      .map(([t, s]) => row(typeName(t), s.k, s.n)).join("") + '</div>' +
+    '<div class="card"><b>By difficulty</b>' +
+    [1, 2, 3, 4, 5].filter(d => byDiff[d])
+      .map(d => row(DIFF_NAMES[d] || ("level " + d), byDiff[d].k, byDiff[d].n)).join("") +
+    '</div>' + missList +
+    '<p class="footnote">First attempts only. Percentages are suppressed until ' +
+    'there are at least ' + MIN_N + '; ranges are 95% Wilson intervals.</p>';
+}
+async function init() {
+  try { render(await window.BT.allAttempts()); }
+  catch (e) {
+    document.getElementById("dash").textContent =
+      "Couldn't load your attempts: " + e.message;
+  }
+}
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
+"""
+
+
+def _dashboard_html() -> str:
+    return (
+        '<!DOCTYPE html>\n<html><head><meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        '<title>Your progress</title>\n<style>' + _CSS + _DASHBOARD_CSS +
+        '</style>\n<script type="module" src="bt-firebase.js"></script></head>'
+        '<body>\n<div class="topbar"><a href="index.html">&larr; home</a>'
+        '<span class="muted">your progress</span></div>\n'
+        '<h1>Your progress</h1>\n<div id="dash" class="muted">Loading&hellip;</div>\n'
+        '<script>' + _SHARED_JS + _DASHBOARD_JS + '</script>\n</body></html>'
+    )
+
+
+# Static ES-module assets copied verbatim next to the generated pages.
+_ASSET_FILES = ("firebase-config.js", "bt-firebase.js")
+
+
 def write_app(out_dir: str | Path) -> None:
+    from importlib import resources
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(_index_html(), encoding="utf-8")
     (out / "p.html").write_text(_problem_html(), encoding="utf-8")
     (out / "lead.html").write_text(_lead_html(), encoding="utf-8")
+    (out / "dashboard.html").write_text(_dashboard_html(), encoding="utf-8")
+    web = resources.files("bridge_trainer") / "web"
+    for name in _ASSET_FILES:
+        (out / name).write_text((web / name).read_text(encoding="utf-8"),
+                                encoding="utf-8")
     (out / ".nojekyll").write_text("")

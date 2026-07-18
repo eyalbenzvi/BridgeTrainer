@@ -15,6 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+firestore = ["firebase-admin>=6"]
 
 [project.scripts]
 trainer = "bridge_trainer.app.cli:main"
@@ -23,7 +24,7 @@ trainer = "bridge_trainer.app.cli:main"
 include = ["bridge_trainer*"]
 
 [tool.setuptools.package-data]
-bridge_trainer = ["**/*.yaml"]
+bridge_trainer = ["**/*.yaml", "web/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
