@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+# Generate opening-lead problems with the Ben engine and push them to Firestore.
+#
+# Designed to run on a Claude Code server (or any machine): it sets up Ben,
+# forges N lead problems into data/, then uploads them to the Firestore
+# `problems` collection. Repeatable — safe to run again to grow the pool.
+#
+# Credentials (a Firebase service-account private key) are read, in order:
+#   1. --key <path>                    explicit file
+#   2. $GOOGLE_APPLICATION_CREDENTIALS path to the JSON file
+#   3. $FIREBASE_SERVICE_ACCOUNT       the full JSON *content* (written to a
+#                                      temp file, deleted on exit)
+# The key is never written inside the repo and never committed.
+#
+# Usage:  scripts/generate_and_push_leads.sh [COUNT] [--key PATH]
+#   COUNT         problems to generate (default 96)
+#   SEED=...      override the RNG seed (default: day-based)
+#   MAX_SECONDS=… generation time budget (default 6000)
+set -euo pipefail
+
+COUNT="96"
+KEY_ARG=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --key) KEY_ARG="$2"; shift 2 ;;
+    *) COUNT="$1"; shift ;;
+  esac
+done
+
+REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+BEN_HOME="${BEN_HOME:-$HOME/ben}"
+VENV="${BEN_VENV:-$HOME/benv}"
+PY="$VENV/bin/python"
+
+# 1) Ensure the Ben engine + venv exist (idempotent; fast once cached).
+PYTHON="${PYTHON:-python3.12}" bash "$REPO_DIR/scripts/setup_ben.sh" "$BEN_HOME" "$VENV"
+"$VENV/bin/pip" install -q -e "${REPO_DIR}[firestore]"
+
+# 2) Resolve the service-account key.
+KEY_FILE=""
+CLEANUP=0
+if [ -n "$KEY_ARG" ]; then
+  KEY_FILE="$KEY_ARG"
+elif [ -n "${GOOGLE_APPLICATION_CREDENTIALS:-}" ]; then
+  KEY_FILE="$GOOGLE_APPLICATION_CREDENTIALS"
+elif [ -n "${FIREBASE_SERVICE_ACCOUNT:-}" ]; then
+  KEY_FILE="$(mktemp)"; CLEANUP=1
+  printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$KEY_FILE"
+fi
+trap '[ "$CLEANUP" = 1 ] && rm -f "$KEY_FILE"' EXIT
+if [ -z "$KEY_FILE" ] || [ ! -s "$KEY_FILE" ]; then
+  echo "error: no Firebase service-account key found." >&2
+  echo "  provide --key PATH, or set GOOGLE_APPLICATION_CREDENTIALS (path)," >&2
+  echo "  or set FIREBASE_SERVICE_ACCOUNT (the JSON content)." >&2
+  exit 1
+fi
+
+# 3) Generate the problems into data/.
+SEED="${SEED:-$(( $(date +%s) / 86400 ))000}"
+echo ">> forging $COUNT lead problems (seed $SEED)"
+BEN_HOME="$BEN_HOME" "$PY" -m bridge_trainer.app.cli \
+  lead-forge --count "$COUNT" --seed "$SEED" --pool "$REPO_DIR/data" \
+  --max-seconds "${MAX_SECONDS:-6000}"
+
+# 4) Push the pool to Firestore (skips docs already present).
+echo ">> pushing pool to Firestore"
+"$PY" -m bridge_trainer.app.cli pool push --pool "$REPO_DIR/data" --key "$KEY_FILE"
+echo ">> done"
