@@ -1,16 +1,15 @@
 // Firebase layer for the trainer, exposed as a single global `window.BT` so
 // the (classic, non-module) page scripts can call it without imports. It
-// provides: guest-friendly Google sign-in (as an action, not a wall), the
-// problem pool read from Firestore (index doc + per-problem docs), and the
-// per-user attempt (measurement) stream. Guests use the app fully with
-// attempts saved to localStorage; signing in migrates guest data to
-// Firestore. Loaded as a module; dispatches `bt-ready` once window.BT is set,
-// and `bt-user-changed` whenever the signed-in/guest state flips.
+// provides: a Google sign-in gate (sign-in is REQUIRED — there is no guest
+// mode), the problem pool read from Firestore (index doc + per-problem
+// docs), and the per-user attempt (measurement) stream. Loaded as a module;
+// dispatches `bt-ready` once window.BT is set, and `bt-user-changed`
+// whenever the signed-in state flips (so the page nav can refresh).
 import { initializeApp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
-  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect,
-  signOut, onAuthStateChanged,
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, signOut,
+  onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, getDocs, collection, addDoc, writeBatch,
@@ -23,95 +22,58 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const provider = new GoogleAuthProvider();
 
-const GUEST_KEY = "bt_guest_attempts";
-
 let USER = null;
-let ATTEMPTS = {};   // {problemId: record} — mirrors the old localStorage shape
-let migrating = false;   // guard against double-migration on sign-in
+let ATTEMPTS = {};   // {problemId: record}, preloaded at sign-in
 
 function tsMillis(a) {
   if (!a || !a.ts) return 0;
   if (typeof a.ts.toMillis === "function") return a.ts.toMillis();
   if (a.ts.seconds) return a.ts.seconds * 1000;
-  if (typeof a.ts === "number") return a.ts;
   return 0;
 }
 
-// ---- guest (localStorage) store --------------------------------------
-function readGuest() {
-  try {
-    const raw = localStorage.getItem(GUEST_KEY);
-    const arr = raw ? JSON.parse(raw) : [];
-    return Array.isArray(arr) ? arr : [];
-  } catch (e) {
-    console.error("could not read guest attempts", e);
-    return [];
-  }
-}
-function writeGuest(arr) {
-  try { localStorage.setItem(GUEST_KEY, JSON.stringify(arr)); }
-  catch (e) { console.error("could not save guest attempts", e); }
-}
-function clearGuest() {
-  try { localStorage.removeItem(GUEST_KEY); }
-  catch (e) { console.error("could not clear guest attempts", e); }
+function doSignIn() {
+  return signInWithPopup(auth, provider).catch((e) => {
+    console.error("popup sign-in failed, falling back to redirect", e);
+    return signInWithRedirect(auth, provider);
+  });
 }
 
-// Build the {problemId: firstAttempt} cache from a flat array of records,
-// keeping the earliest attempt per problemId (by ts).
-function firstAttemptCache(all) {
-  const sorted = [...all].sort((a, b) => tsMillis(a) - tsMillis(b));
-  const cache = {};
-  for (const a of sorted) if (!cache[a.problemId]) cache[a.problemId] = a;
-  return cache;
-}
-
-// ---- setup gate (unconfigured only) ----------------------------------
+// ---- full-screen auth gate (Hebrew, RTL) ------------------------------
 function gate(mode) {
   let g = document.getElementById("bt-gate");
   if (!g) {
     g = document.createElement("div");
     g.id = "bt-gate";
     g.dir = "rtl";
-    g.lang = "he";
     g.style.cssText =
       "position:fixed;inset:0;z-index:9999;display:flex;align-items:center;" +
-      "justify-content:center;text-align:center;padding:1.5em;direction:rtl;" +
+      "justify-content:center;text-align:center;padding:1.5em;" +
       "background:var(--felt-deep,#0B1A13);color:var(--on-felt,#fff);";
     document.body.appendChild(g);
   }
   if (mode === "setup") {
     g.innerHTML =
       "<div style='max-width:32em;line-height:1.6'><h1>נדרשת הגדרה</h1>" +
-      "<p>‏Firebase עדיין לא הוגדר. יש למלא את הקובץ <code>firebase-config.js</code> " +
-      "בפרטי ההגדרה של הפרויקט שלך, ואז לטעון מחדש את הדף.</p></div>";
+      "<p>Firebase עדיין לא מוגדר. מלא את <code>firebase-config.js</code> " +
+      "בפרטי הפרויקט שלך, ואז טען מחדש.</p></div>";
     return;
   }
+  g.innerHTML =
+    "<div><h1 style='color:inherit'>&spades; Bridge Trainer</h1>" +
+    "<p>התחבר כדי לשמור ולעקוב אחר ההתקדמות שלך.</p>" +
+    "<button id='bt-signin' style='font-size:17px;font-weight:700;" +
+    "padding:14px 22px;border:0;border-radius:12px;background:#EAB84C;" +
+    "color:#2A2410;cursor:pointer'>התחבר עם Google</button></div>";
+  document.getElementById("bt-signin").onclick = () => doSignIn();
 }
+function ungate() { const g = document.getElementById("bt-gate"); if (g) g.remove(); }
 
 async function preloadAttempts(uid) {
   const snap = await getDocs(collection(db, "users", uid, "attempts"));
-  const all = snap.docs.map((d) => d.data());
-  ATTEMPTS = firstAttemptCache(all);
-}
-
-// ---- migration on sign-in --------------------------------------------
-async function migrateGuest(uid) {
-  if (migrating) return;
-  const guest = readGuest();
-  if (!guest.length) return;
-  migrating = true;
-  try {
-    for (const rec of guest) {
-      try {
-        await addDoc(collection(db, "users", uid, "attempts"),
-                     { ...rec, ts: serverTimestamp() });
-      } catch (e) { console.error("could not migrate guest attempt", e); }
-    }
-    clearGuest();
-  } finally {
-    migrating = false;
-  }
+  const all = snap.docs.map((d) => d.data()).sort((a, b) => tsMillis(a) - tsMillis(b));
+  ATTEMPTS = {};
+  for (const a of all) if (!ATTEMPTS[a.problemId]) ATTEMPTS[a.problemId] = a;
 }
 
 // ---- grading (compute the stored measurement from the verdict) --------
@@ -162,22 +124,10 @@ function gradeLead(P, card) {
 const BT = {
   user: () => USER,
   isGuest: () => !USER,
-  attempts: () => {
-    if (USER) return ATTEMPTS;          // Firestore-preloaded cache
-    return firstAttemptCache(readGuest());
-  },
+  attempts: () => ATTEMPTS,
   gradeBidding, gradeLead,
-
-  signIn() {
-    return signInWithPopup(auth, provider).catch((e) => {
-      console.error("popup sign-in failed, falling back to redirect", e);
-      return signInWithRedirect(auth, provider)
-        .catch((e2) => console.error("redirect sign-in failed", e2));
-    });
-  },
-  signOut() {
-    return signOut(auth).catch((e) => console.error("sign-out failed", e));
-  },
+  signIn: () => doSignIn(),
+  signOut: () => signOut(auth).catch((e) => console.error(e)),
 
   async fetchIndex() {
     const s = await getDoc(doc(db, "meta", "index"));
@@ -189,23 +139,12 @@ const BT = {
     return s.exists() ? s.data() : null;
   },
   async allAttempts() {
-    if (!USER) return readGuest();
+    if (!USER) return [];
     const snap = await getDocs(collection(db, "users", USER.uid, "attempts"));
     return snap.docs.map((d) => d.data());
   },
   async record(problemId, rec) {
-    if (!USER) {
-      const arr = readGuest();
-      const existing = arr.some((a) => a.problemId === problemId);
-      const full = { ...rec, problemId,
-                     isFirstAttempt: !existing,
-                     attemptNo: 1,
-                     ts: Date.now() };
-      arr.push(full);
-      writeGuest(arr);
-      ATTEMPTS = firstAttemptCache(arr);       // keep sync cache consistent
-      return;
-    }
+    if (!USER) return;
     const full = { ...rec, problemId,
                    isFirstAttempt: !ATTEMPTS[problemId],
                    attemptNo: 1 };
@@ -216,11 +155,7 @@ const BT = {
     } catch (e) { console.error("could not save attempt", e); }
   },
   async resetAll() {
-    if (!USER) {
-      clearGuest();
-      ATTEMPTS = {};
-      return;
-    }
+    if (!USER) return;
     const snap = await getDocs(collection(db, "users", USER.uid, "attempts"));
     let batch = writeBatch(db), n = 0;
     for (const d of snap.docs) {
@@ -231,29 +166,22 @@ const BT = {
     ATTEMPTS = {};
   },
 
-  // Render immediately for a guest, then track auth state. No sign-in wall.
+  // Sign-in is required. Gate the whole app until authenticated; preload the
+  // user's attempts, then hand control back to the page and notify the nav.
   start(ready) {
     if (!isConfigured) { gate("setup"); return; }
-
-    // Guest mode: render the app right away.
     let handedOff = false;
-    ready(null);
-    handedOff = true;
-
     onAuthStateChanged(auth, async (u) => {
-      if (u) {
-        USER = u;
-        try { await migrateGuest(u.uid); } catch (e) { console.error(e); }
-        try { await preloadAttempts(u.uid); } catch (e) { console.error(e); }
-      } else {
-        USER = null;
-        ATTEMPTS = firstAttemptCache(readGuest());
+      if (!u) {
+        USER = null; ATTEMPTS = {};
+        window.dispatchEvent(new Event("bt-user-changed"));
+        gate("signin");
+        return;
       }
-      // Signal the page nav to refresh account UI / re-render.
+      USER = u; ungate();
+      try { await preloadAttempts(u.uid); } catch (e) { console.error(e); }
       window.dispatchEvent(new Event("bt-user-changed"));
-      // `ready` already ran once for the guest; only re-invoke if the very
-      // first auth callback arrived before we handed off (defensive).
-      if (!handedOff) { handedOff = true; ready(USER); }
+      if (!handedOff) { handedOff = true; ready(u); }
     });
   },
 };
