@@ -54,6 +54,56 @@ trainer pool push --key /path/to/sa-key.json  # upload data/ -> Firestore
 To migrate the existing repo pool, just run `push` against the current
 `data/` directory.
 
+> ⚠️ `push` rebuilds `meta/index` from the **local** `data/` pool, and the app
+> reads that one index doc. Always push the *complete* pool (existing +
+> new), never a partial directory, or the index will shrink to only what you
+> pushed. The generated problem docs left behind in the collection would
+> become orphans the app can't see.
+
+## 8b. Generating a batch inside a Claude Code session (repeatable)
+
+This is the intended way to grow the pool: it runs entirely on Claude Code
+servers, no CI. Three steps — **generate → classify → push** — because a
+problem's `type` (the taxonomy label the app filters on) is assigned by the
+`claude` CLI, which is only available inside a Claude Code session.
+
+```bash
+# one-time per session: Ben engine (TensorFlow + models, ~3 GB)
+scripts/setup_ben.sh ~/ben ~/benv
+~/benv/bin/pip install 'firebase-admin>=6' 'protobuf==5.29.5'   # push deps
+
+# 1. generate N bidding problems into data/ (pick a seed above the highest
+#    already used — ids are ben1-<seed hex>, so a fresh range avoids clashes)
+BEN_HOME=~/ben ~/benv/bin/trainer ben-forge \
+    --count N --pool data --seed <fresh> --workers 4
+
+# 2. classify: the claude CLI adds classification.type to the new bidding
+#    problems (idempotent — already-classified problems are skipped; lead
+#    problems fail fast and harmlessly, they carry no bidding type)
+python3 scripts/classify_pool.py data
+
+# 3. push the whole pool to Firestore, then commit data/ to git
+~/benv/bin/trainer pool push --pool data --key /path/to/sa-key.json
+git add data/ && git commit -m "generate N bidding problems"
+```
+
+Firestore + TensorFlow disagree on the protobuf version; if you hit an import
+error, do the push from a **separate venv** that has `firebase-admin` but not
+TensorFlow — generation and push only share the `data/` directory, never a
+process.
+
+### Where to put the service-account key
+The key is a secret — never commit it. In a Claude Code session, either:
+- **attach the JSON to the session** and pass its path to `--key` (simplest;
+  nothing persisted), or
+- for unattended/scheduled runs, set it as an **environment secret** in the
+  Claude Code environment config and export
+  `GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json` (the push falls back to
+  that env var when `--key` is omitted).
+
+Rotate the key (Firebase console → Service accounts → *Generate new private
+key*, then delete the old one) if it is ever exposed.
+
 ## 9. Deploy the app shell
 Push to `main`; the `Deploy app` workflow builds the static shell with
 `trainer webapp` and deploys it to GitHub Pages. The shell reads problems and
