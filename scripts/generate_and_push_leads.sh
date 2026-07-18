@@ -29,12 +29,20 @@ done
 
 REPO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 BEN_HOME="${BEN_HOME:-$HOME/ben}"
-VENV="${BEN_VENV:-$HOME/benv}"
+VENV="${BEN_VENV:-$HOME/benv}"          # generation: Ben + TensorFlow (protobuf <6)
+FB_VENV="${FB_VENV:-$HOME/fbenv}"       # push: firebase-admin (protobuf >=6)
 PY="$VENV/bin/python"
+FB_PY="$FB_VENV/bin/python"
 
 # 1) Ensure the Ben engine + venv exist (idempotent; fast once cached).
+# firebase-admin lives in a SEPARATE venv on purpose: it needs protobuf >=6,
+# which is incompatible with the TensorFlow that Ben requires (protobuf <6).
 PYTHON="${PYTHON:-python3.12}" bash "$REPO_DIR/scripts/setup_ben.sh" "$BEN_HOME" "$VENV"
-"$VENV/bin/pip" install -q -e "${REPO_DIR}[firestore]"
+if [ ! -x "$FB_PY" ]; then
+  "${PYTHON:-python3.12}" -m venv "$FB_VENV"
+  "$FB_VENV/bin/pip" install -q --upgrade pip
+  "$FB_VENV/bin/pip" install -q -e "${REPO_DIR}[firestore]"
+fi
 
 # 2) Resolve the service-account key.
 KEY_FILE=""
@@ -64,5 +72,5 @@ BEN_HOME="$BEN_HOME" "$PY" -m bridge_trainer.app.cli \
 
 # 4) Push the pool to Firestore (skips docs already present).
 echo ">> pushing pool to Firestore"
-"$PY" -m bridge_trainer.app.cli pool push --pool "$REPO_DIR/data" --key "$KEY_FILE"
+"$FB_PY" -m bridge_trainer.app.cli pool push --pool "$REPO_DIR/data" --key "$KEY_FILE"
 echo ">> done"
