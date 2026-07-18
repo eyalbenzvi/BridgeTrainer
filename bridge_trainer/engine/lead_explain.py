@@ -9,7 +9,7 @@ Two computed artifacts, no hand-authored bridge:
 from __future__ import annotations
 
 from .conventions import SEATS, seat_of
-from .explain import _call_name, _render_meaning
+from .explain import terse_meaning
 
 
 def auction_meanings(engine, hand_pbn, leader_i, dealer_i, vul,
@@ -24,8 +24,7 @@ def auction_meanings(engine, hand_pbn, leader_i, dealer_i, vul,
     out = []
     for j, tok in enumerate(full_auction):
         seat_i = seat_of(dealer_i, j)
-        meaning = _render_meaning(cards[j], is_pass=(tok == "P")) \
-            if j < len(cards) else ""
+        meaning = terse_meaning(cards[j], call=tok) if j < len(cards) else ""
         out.append({"idx": j, "seat": SEATS[seat_i], "call": tok,
                     "text": meaning})
     return out
