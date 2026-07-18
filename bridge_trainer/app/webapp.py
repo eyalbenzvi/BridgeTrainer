@@ -330,8 +330,126 @@ button.cardbtn.bad { border-color: var(--loss);
 .barval { width: 6.2em; text-align: right; font-variant-numeric: tabular-nums;
   color: var(--muted); font-size: 12px; }
 #bid-meaning { min-height: 1.2em; margin: 6px 0 0; }
-.headline { font-size: 18px; font-weight: 700; margin: 4px 0; }
+.headline { font-size: 22px; font-weight: 800; margin: 4px 0; }
 .headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
+
+/* ===== redesign layer (v2): type scale, theming, nav, a11y, RTL ===== */
+/* base uplift + room for the fixed bottom nav */
+body { font-size: 16px; line-height: 1.55; padding-bottom: 84px;
+       padding-inline: 12px; }
+h1 { font-size: 26px; font-weight: 800; }
+h2 { font-size: 19px; font-weight: 700; color: var(--fg); margin: 0; }
+.headline { font-size: 24px; }
+
+/* manual theme override (wins over prefers-color-scheme) */
+html[data-theme="light"] body {
+  --felt: #2E6B4F; --felt-deep: #24573F; --on-felt: #ffffff;
+  --on-felt-muted: #C9DCD1; --card: #ffffff; --fg: #1C2B24; --muted: #5C6B62;
+  --line: #D9E0DA; --accent: #2B6CB0; --accent-tint: #2B6CB014;
+  --vul: #B3252F; --nonvul: #E6F4EA; --on-nonvul: #1C5C34;
+  --sp: #2838C8; --he: #C8102E; --di: #E07000; --cl: #1A7A1A;
+  --win: #1E8E4E; --loss: #C8102E; --push: #A9B3AC;
+  --gold: #EAB84C; --on-gold: #2A2410;
+  --warn-bg: #FDF3DF; --warn-fg: #7A5312; --warn-line: #E3C87F; }
+html[data-theme="dark"] body {
+  --felt: #10241A; --felt-deep: #0B1A13; --on-felt: #E9F0EB;
+  --on-felt-muted: #9FB4A8; --card: #1B2620; --fg: #E8EDEA; --muted: #97A79D;
+  --line: #33413A; --accent: #6CA6DD; --accent-tint: #6CA6DD1F;
+  --vul: #A62630; --nonvul: #2E4A38; --on-nonvul: #BFE3CC;
+  --sp: #8C96FF; --he: #FF7B72; --di: #FFAB40; --cl: #57C957;
+  --win: #3BB273; --loss: #E5665F; --push: #5B6961;
+  --gold: #D9A93E; --on-gold: #241F0C;
+  --warn-bg: #2E2612; --warn-fg: #E7C97E; --warn-line: #6B5A2A; }
+html[data-theme="dark"] .card { border: 1px solid var(--line); box-shadow: none; }
+
+/* text-size control */
+html[data-scale="l"] body { font-size: 18px; }
+html[data-scale="xl"] body { font-size: 20px; }
+
+/* visible focus for everyone */
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px;
+                 border-radius: 6px; }
+/* skip link */
+.skip { position: absolute; inset-inline-start: -9999px; top: 8px; z-index: 200;
+        background: var(--card); color: var(--fg); padding: 8px 14px;
+        border-radius: 8px; border: 1px solid var(--line); }
+.skip:focus { inset-inline-start: 12px; }
+
+/* RTL: flip shell text/spacing to logical props (bridge diagrams stay LTR
+   via dir="ltr" on their containers) */
+.fbar { text-align: start; }
+.fbar-sub { margin-left: 0; margin-inline-start: auto; }
+.seg button { border-left: 0; border-inline-start: 1px solid var(--line); }
+.seg button:first-child { border-inline-start: 0; }
+button.typerow { text-align: start; }
+.bidnote { padding: 10px 12px; padding-inline-end: 40px; }
+.bidnote b { margin-right: 0; margin-inline-end: 6px; }
+.bidnote .x { right: auto; inset-inline-end: 0; }
+.notes ul { padding-left: 0; padding-inline-start: 18px; }
+table.plain th, table.plain td { text-align: start; }
+.barrow .barval { text-align: start; }
+/* bridge diagrams are LTR islands */
+.hand, .fulldeal, .leadgrid, table.bidding, .candidates,
+.wpl, .bartrack, .fdcompass { direction: ltr; }
+.ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+
+/* gold = commit only; selection uses accent (blue) on both scenarios */
+.scenaseg button[data-kind="lead"][aria-pressed="true"] {
+  background: var(--accent); color: #fff; }
+
+/* non-color cue inside the win/push/loss bar */
+.wpl { position: relative; height: 16px; }
+.wpl span { display: flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 800; color: #fff; overflow: hidden; }
+
+/* ===== global bottom navigation ===== */
+.gnav { position: fixed; inset-inline: 0; bottom: 0; z-index: 90;
+        display: flex; justify-content: center; gap: 4px;
+        background: var(--card); border-top: 1px solid var(--line);
+        padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+        box-shadow: 0 -2px 12px #0000001a; }
+.gnav .navwrap { display: flex; gap: 4px; width: 100%; max-width: 640px; }
+.gnav a, .gnav button.navbtn { flex: 1; background: none; border: 0; cursor: pointer;
+        font: inherit; color: var(--muted); text-decoration: none;
+        display: flex; flex-direction: column; align-items: center; gap: 2px;
+        padding: 6px 4px; border-radius: 10px; min-height: 48px;
+        font-size: 11px; font-weight: 700; }
+.gnav a .ico, .gnav button .ico { font-size: 20px; line-height: 1; }
+.gnav a[aria-current="page"] { color: var(--accent); background: var(--accent-tint); }
+
+/* settings sheet */
+.sheet { position: fixed; inset: 0; z-index: 120; display: none;
+         align-items: flex-end; justify-content: center;
+         background: #0007; }
+.sheet.open { display: flex; }
+.sheet .panel { background: var(--card); color: var(--fg); width: 100%;
+        max-width: 640px; border-radius: 16px 16px 0 0; padding: 20px 18px 28px;
+        box-shadow: 0 -4px 24px #0005; }
+.sheet h2 { margin-bottom: 12px; }
+.setrow { display: flex; align-items: center; justify-content: space-between;
+          gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.setrow:first-of-type { border-top: 0; }
+.segctl { display: inline-flex; border: 1px solid var(--line); border-radius: 10px;
+          overflow: hidden; }
+.segctl button { font: inherit; border: 0; background: var(--card);
+          color: var(--muted); padding: 8px 14px; cursor: pointer;
+          border-inline-start: 1px solid var(--line); font-weight: 700; }
+.segctl button:first-child { border-inline-start: 0; }
+.segctl button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.sheet .closebtn { width: 100%; margin-top: 16px; padding: 12px; border-radius: 10px;
+          border: 1px solid var(--line); background: var(--card); color: var(--fg);
+          font: inherit; font-weight: 700; cursor: pointer; }
+
+/* session ribbon (recedes; never outshines the hand/auction) */
+.sessribbon { display: flex; align-items: center; justify-content: space-between;
+          gap: 8px; font-size: 12px; color: var(--on-felt-muted); margin: 2px 0 8px; }
+.sessribbon .prog { flex: 1; height: 6px; border-radius: 99px;
+          background: #ffffff2e; overflow: hidden; }
+.sessribbon .prog > span { display: block; height: 100%; background: var(--gold); }
+
+/* designed empty/error state */
+.state { text-align: center; padding: 8px 4px; }
+.state .em { font-size: 15px; color: var(--fg); font-weight: 700; margin-bottom: 4px; }
 """
 
 _SHARED_JS = """
@@ -594,28 +712,43 @@ function candOrder(c) {
 }
 /* classification display names (ids: engine/classify.py taxonomy) */
 const TYPE_NAMES = {
-  open_or_pass: ["Opening decision",
-    "Open a borderline hand, or pass \\u2014 and with which opening?"],
-  preempt_decision: ["Preempt decision",
-    "Obstruct or not \\u2014 and how high?"],
-  enter_auction: ["Enter the auction?",
-    "Overcall, double, or stay out of their auction?"],
-  compete_or_sell: ["Part-score battle",
-    "Bid once more, pass, or push them higher?"],
-  invite_or_game: ["Invite or game?",
-    "Sign off, invite, or bid game \\u2014 accept or reject the try?"],
-  slam_try: ["Slam decision",
-    "Move toward slam, or settle for game?"],
-  choice_of_strain: ["Choice of strain",
-    "The level is settled \\u2014 but WHERE: which suit, or notrump?"],
-  double_or_bid: ["Double decision",
-    "Double, bid on, or pass \\u2014 leave partner's double in or pull?"],
-  sacrifice_decision: ["Save or defend?",
-    "Deliberately outbid their making contract, or take the defense?"],
-  describe_hand: ["Describe your hand",
-    "Which constructive call best shows your strength and shape?"],
+  open_or_pass: ["\\u05d4\\u05d7\\u05dc\\u05d8\\u05ea \\u05e4\\u05ea\\u05d9\\u05d7\\u05d4",
+    "\\u05dc\\u05e4\\u05ea\\u05d5\\u05d7 \\u05d9\\u05d3 \\u05d2\\u05d1\\u05d5\\u05dc\\u05d9\\u05ea, \\u05d0\\u05d5 \\u05dc\\u05e4\\u05e1 \\u2014 \\u05d5\\u05d1\\u05d0\\u05d9\\u05d6\\u05d5 \\u05e4\\u05ea\\u05d9\\u05d7\\u05d4?"],
+  preempt_decision: ["\\u05d4\\u05db\\u05e8\\u05d6\\u05ea \\u05de\\u05e0\\u05e2",
+    "\\u05dc\\u05d4\\u05e4\\u05e8\\u05d9\\u05e2 \\u05d0\\u05d5 \\u05dc\\u05d0 \\u2014 \\u05d5\\u05e2\\u05d3 \\u05d0\\u05d9\\u05d6\\u05d5 \\u05e8\\u05de\\u05d4?"],
+  enter_auction: ["\\u05db\\u05e0\\u05d9\\u05e1\\u05d4 \\u05dc\\u05de\\u05db\\u05e8\\u05d6",
+    "\\u05d0\\u05d5\\u05d1\\u05e8\\u05e7\\u05d5\\u05dc, \\u05d3\\u05d0\\u05d1\\u05dc, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05d9\\u05e9\\u05d0\\u05e8 \\u05d1\\u05d7\\u05d5\\u05e5?"],
+  compete_or_sell: ["\\u05e7\\u05e8\\u05d1 \\u05d7\\u05d5\\u05d6\\u05d4 \\u05d7\\u05dc\\u05e7\\u05d9",
+    "\\u05dc\\u05d4\\u05db\\u05e8\\u05d9\\u05d6 \\u05e2\\u05d5\\u05d3 \\u05e4\\u05e2\\u05dd, \\u05dc\\u05e4\\u05e1, \\u05d0\\u05d5 \\u05dc\\u05d3\\u05d7\\u05d5\\u05e3 \\u05d0\\u05d5\\u05ea\\u05dd \\u05d2\\u05d1\\u05d5\\u05d4 \\u05d9\\u05d5\\u05ea\\u05e8?"],
+  invite_or_game: ["\\u05d4\\u05d6\\u05de\\u05e0\\u05d4 \\u05d0\\u05d5 \\u05de\\u05e9\\u05d7\\u05e7 \\u05de\\u05dc\\u05d0",
+    "\\u05dc\\u05e2\\u05e6\\u05d5\\u05e8, \\u05dc\\u05d4\\u05d6\\u05de\\u05d9\\u05df, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05db\\u05e8\\u05d9\\u05d6 \\u05d2\\u05e2\\u05d9\\u05dd?"],
+  slam_try: ["\\u05e0\\u05d9\\u05e1\\u05d9\\u05d5\\u05df \\u05e1\\u05dc\\u05dd",
+    "\\u05dc\\u05d4\\u05ea\\u05e7\\u05d3\\u05dd \\u05dc\\u05e1\\u05dc\\u05dd, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05e1\\u05ea\\u05e4\\u05e7 \\u05d1\\u05d2\\u05e2\\u05d9\\u05dd?"],
+  choice_of_strain: ["\\u05d1\\u05d7\\u05d9\\u05e8\\u05ea \\u05e9\\u05dc\\u05d9\\u05d8",
+    "\\u05d4\\u05e8\\u05de\\u05d4 \\u05e1\\u05d2\\u05d5\\u05e8\\u05d4 \\u2014 \\u05d0\\u05d1\\u05dc \\u05d4\\u05d9\\u05db\\u05df: \\u05d0\\u05d9\\u05d6\\u05d5 \\u05e1\\u05d3\\u05e8\\u05d4, \\u05d0\\u05d5 \\u05dc\\u05dc\\u05d0-\\u05e9\\u05dc\\u05d9\\u05d8?"],
+  double_or_bid: ["\\u05d4\\u05d7\\u05dc\\u05d8\\u05ea \\u05d3\\u05d0\\u05d1\\u05dc",
+    "\\u05d3\\u05d0\\u05d1\\u05dc, \\u05dc\\u05d4\\u05de\\u05e9\\u05d9\\u05da \\u05dc\\u05d4\\u05db\\u05e8\\u05d9\\u05d6, \\u05d0\\u05d5 \\u05dc\\u05e4\\u05e1?"],
+  sacrifice_decision: ["\\u05d4\\u05e7\\u05e8\\u05d1\\u05d4",
+    "\\u05dc\\u05d3\\u05e8\\u05d5\\u05e1 \\u05d0\\u05ea \\u05d4\\u05d7\\u05d5\\u05d6\\u05d4 \\u05e9\\u05dc\\u05d4\\u05dd \\u05d1\\u05de\\u05d7\\u05d9\\u05e8 \\u05de\\u05d9\\u05e0\\u05d5\\u05e1, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05d2\\u05df?"],
+  describe_hand: ["\\u05ea\\u05d9\\u05d0\\u05d5\\u05e8 \\u05d4\\u05d9\\u05d3",
+    "\\u05d0\\u05d9\\u05d6\\u05d5 \\u05d4\\u05db\\u05e8\\u05d6\\u05d4 \\u05d1\\u05d5\\u05e0\\u05d4 \\u05de\\u05ea\\u05d0\\u05e8\\u05ea \\u05d4\\u05db\\u05d9 \\u05d8\\u05d5\\u05d1 \\u05d0\\u05ea \\u05d4\\u05db\\u05d5\\u05d7 \\u05d5\\u05d4\\u05e6\\u05d5\\u05e8\\u05d4?"],
 };
-const DIFF_NAMES = ["", "Easy", "Moderate", "Tricky", "Hard", "Expert"];
+const DIFF_NAMES = ["", "\\u05e7\\u05dc", "\\u05d1\\u05d9\\u05e0\\u05d5\\u05e0\\u05d9", "\\u05de\\u05d0\\u05ea\\u05d2\\u05e8", "\\u05e7\\u05e9\\u05d4", "\\u05de\\u05d5\\u05de\\u05d7\\u05d4"];
+/* Hebrew suit + card names for screen-reader labels (glyphs stay four-color) */
+const SUIT_NAME_HE = {S: "\\u05e2\\u05dc\\u05d4", H: "\\u05dc\\u05d1", D: "\\u05d9\\u05d4\\u05dc\\u05d5\\u05dd", C: "\\u05ea\\u05dc\\u05ea\\u05df"};
+const RANK_NAME_HE = {A: "\\u05d0\\u05e1", K: "\\u05de\\u05dc\\u05da", Q: "\\u05de\\u05dc\\u05db\\u05d4", J: "\\u05e0\\u05e1\\u05d9\\u05da", T: "10"};
+function cardLabel(tok) {
+  const r = RANK_NAME_HE[tok[1]] || tok[1];
+  return r + " " + (SUIT_NAME_HE[tok[0]] || "");
+}
+function callLabel(tok) {
+  if (tok === "P") return "\\u05e4\\u05e1";
+  if (tok === "X") return "\\u05d3\\u05d0\\u05d1\\u05dc";
+  if (tok === "XX") return "\\u05e8\\u05d3\\u05d0\\u05d1\\u05dc";
+  const denom = tok.slice(1);
+  if (denom === "NT") return tok[0] + " \\u05dc\\u05dc\\u05d0 \\u05e9\\u05dc\\u05d9\\u05d8";
+  return tok[0] + " " + (SUIT_NAME_HE[denom] || denom);
+}
 function typeBadgeHtml(p) {
   const t = p.classification && p.classification.type;
   const nm = TYPE_NAMES[t];
@@ -625,51 +758,182 @@ function typeBadgeHtml(p) {
 function diffLineHtml(p) {
   const lv = p.classification && p.classification.difficulty_level;
   if (!lv || lv < 1 || lv > 5) return "";
-  return `<span>Difficulty</span>` +
-    `<span class="stars" role="img" aria-label="difficulty ${lv} out of 5">` +
+  return `<span>\\u05e8\\u05de\\u05ea \\u05e7\\u05d5\\u05e9\\u05d9</span>` +
+    `<span class="stars" role="img" aria-label="\\u05e8\\u05de\\u05ea \\u05e7\\u05d5\\u05e9\\u05d9 ${lv} \\u05de\\u05ea\\u05d5\\u05da 5">` +
     `<span class="on">${"\\u2605".repeat(lv)}</span>` +
     `<span class="off">${"\\u2605".repeat(5 - lv)}</span></span>` +
-    `<b>${DIFF_NAMES[lv]}</b>`;
+    `<b>${DIFF_NAMES[lv]} (${lv}/5)</b>`;
 }
+
+/* ===== app chrome: theme/text-size, global nav, settings sheet =====
+   Injected on every page so there is no per-template markup to maintain.
+   Theme + scale are applied immediately to limit flash-of-wrong-theme. */
+function applyTheme() {
+  const t = localStorage.getItem("bt_theme") || "system";
+  const s = localStorage.getItem("bt_scale") || "s";
+  const h = document.documentElement;
+  if (t === "system") h.removeAttribute("data-theme");
+  else h.setAttribute("data-theme", t);
+  if (s === "s") h.removeAttribute("data-scale");
+  else h.setAttribute("data-scale", s);
+}
+applyTheme();
+/* practice-session progress (a 10-problem run started from the home page) */
+function getSession() {
+  try { return JSON.parse(localStorage.getItem("bt_session")); }
+  catch (e) { return null; }
+}
+function bumpSession(correct) {
+  const s = getSession();
+  if (!s) return;
+  s.count = (s.count || 0) + 1;
+  if (correct) s.right = (s.right || 0) + 1;
+  localStorage.setItem("bt_session", JSON.stringify(s));
+  renderSessRibbon();
+}
+function renderSessRibbon() {
+  const el = document.getElementById("sessribbon");
+  if (!el) return;
+  const s = getSession();
+  if (!s || !s.size) { el.hidden = true; return; }
+  const done = Math.min(s.count || 0, s.size);
+  el.hidden = false;
+  el.innerHTML =
+    '<span>\\u05ea\\u05e8\\u05d2\\u05d5\\u05dc \\u00b7 ' + done + '/' + s.size + '</span>' +
+    '<span class="prog"><span style="width:' + Math.round(100 * done / s.size) +
+    '%"></span></span>' +
+    '<span>' + (s.right || 0) + ' \\u05e0\\u05db\\u05d5\\u05e0\\u05d5\\u05ea</span>';
+}
+const NAV_ITEMS = [
+  {id: "practice", href: "index.html", ico: "\\u2660", label: "\\u05ea\\u05e8\\u05d2\\u05d5\\u05dc"},
+  {id: "progress", href: "dashboard.html", ico: "\\u25a4", label: "\\u05d4\\u05ea\\u05e7\\u05d3\\u05de\\u05d5\\u05ea"},
+];
+function initChrome() {
+  if (document.getElementById("gnav")) return;
+  const active = document.body.dataset.nav || "";
+  // skip link -> main
+  const skip = document.createElement("a");
+  skip.className = "skip"; skip.href = "#main";
+  skip.textContent = "\\u05d3\\u05dc\\u05d2 \\u05dc\\u05ea\\u05d5\\u05db\\u05df";
+  document.body.insertBefore(skip, document.body.firstChild);
+  // bottom nav
+  const nav = document.createElement("nav");
+  nav.className = "gnav"; nav.id = "gnav";
+  nav.setAttribute("aria-label", "\\u05e0\\u05d9\\u05d5\\u05d5\\u05d8 \\u05e8\\u05d0\\u05e9\\u05d9");
+  const links = NAV_ITEMS.map(it =>
+    `<a href="${it.href}" ${it.id === active ? 'aria-current="page"' : ""}>` +
+    `<span class="ico" aria-hidden="true">${it.ico}</span>${it.label}</a>`).join("");
+  nav.innerHTML = `<div class="navwrap">${links}` +
+    `<button type="button" class="navbtn" id="nav-account">` +
+    `<span class="ico" aria-hidden="true">\\u2699</span>` +
+    `<span id="nav-account-lbl">\\u05d7\\u05e9\\u05d1\\u05d5\\u05df</span></button></div>`;
+  document.body.appendChild(nav);
+  // settings sheet
+  const sheet = document.createElement("div");
+  sheet.className = "sheet"; sheet.id = "settings"; sheet.setAttribute("role", "dialog");
+  sheet.setAttribute("aria-modal", "true"); sheet.setAttribute("aria-label", "\\u05d4\\u05d2\\u05d3\\u05e8\\u05d5\\u05ea");
+  sheet.innerHTML =
+    '<div class="panel">' +
+    '<h2>\\u05d4\\u05d2\\u05d3\\u05e8\\u05d5\\u05ea</h2>' +
+    '<div class="setrow"><span>\\u05e2\\u05e8\\u05db\\u05ea \\u05e0\\u05d5\\u05e9\\u05d0</span>' +
+    '<span class="segctl" id="ctl-theme">' +
+    '<button type="button" data-v="system">\\u05de\\u05e2\\u05e8\\u05db\\u05ea</button>' +
+    '<button type="button" data-v="light">\\u05d1\\u05d4\\u05d9\\u05e8</button>' +
+    '<button type="button" data-v="dark">\\u05db\\u05d4\\u05d4</button></span></div>' +
+    '<div class="setrow"><span>\\u05d2\\u05d5\\u05d3\\u05dc \\u05d8\\u05e7\\u05e1\\u05d8</span>' +
+    '<span class="segctl" id="ctl-scale">' +
+    '<button type="button" data-v="s">\\u05e8\\u05d2\\u05d9\\u05dc</button>' +
+    '<button type="button" data-v="l">\\u05d2\\u05d3\\u05d5\\u05dc</button>' +
+    '<button type="button" data-v="xl">\\u05e2\\u05e0\\u05e7</button></span></div>' +
+    '<div class="setrow" id="acct-row"><span id="acct-name">\\u05d0\\u05d5\\u05e8\\u05d7</span>' +
+    '<button type="button" class="alllink" id="acct-btn"></button></div>' +
+    '<button type="button" class="closebtn" id="settings-close">\\u05e1\\u05d2\\u05d5\\u05e8</button>' +
+    '</div>';
+  document.body.appendChild(sheet);
+  function syncCtl(id, val) {
+    document.querySelectorAll("#" + id + " button").forEach(b =>
+      b.setAttribute("aria-pressed", b.dataset.v === val ? "true" : "false"));
+  }
+  syncCtl("ctl-theme", localStorage.getItem("bt_theme") || "system");
+  syncCtl("ctl-scale", localStorage.getItem("bt_scale") || "s");
+  document.getElementById("ctl-theme").onclick = ev => {
+    const b = ev.target.closest("button"); if (!b) return;
+    localStorage.setItem("bt_theme", b.dataset.v); applyTheme(); syncCtl("ctl-theme", b.dataset.v);
+  };
+  document.getElementById("ctl-scale").onclick = ev => {
+    const b = ev.target.closest("button"); if (!b) return;
+    localStorage.setItem("bt_scale", b.dataset.v); applyTheme(); syncCtl("ctl-scale", b.dataset.v);
+  };
+  function refreshAcct() {
+    const guest = !window.BT || window.BT.isGuest();
+    const nameEl = document.getElementById("acct-name");
+    const btn = document.getElementById("acct-btn");
+    const navLbl = document.getElementById("nav-account-lbl");
+    if (guest) {
+      nameEl.textContent = "\\u05d0\\u05d5\\u05e8\\u05d7 \\u2014 \\u05d4\\u05d4\\u05ea\\u05e7\\u05d3\\u05de\\u05d5\\u05ea \\u05e0\\u05e9\\u05de\\u05e8\\u05ea \\u05de\\u05e7\\u05d5\\u05de\\u05d9\\u05ea";
+      btn.textContent = "\\u05d4\\u05ea\\u05d7\\u05d1\\u05e8 \\u05e2\\u05dd Google";
+      btn.onclick = () => window.BT && window.BT.signIn();
+      if (navLbl) navLbl.textContent = "\\u05d7\\u05e9\\u05d1\\u05d5\\u05df";
+    } else {
+      const u = window.BT.user();
+      nameEl.textContent = (u && (u.displayName || u.email)) || "\\u05de\\u05d7\\u05d5\\u05d1\\u05e8";
+      btn.textContent = "\\u05d4\\u05ea\\u05e0\\u05ea\\u05e7";
+      btn.onclick = () => window.BT.signOut();
+      if (navLbl) navLbl.textContent = (u && u.displayName ? u.displayName.split(" ")[0] : "\\u05d7\\u05e9\\u05d1\\u05d5\\u05df");
+    }
+  }
+  refreshAcct();
+  renderSessRibbon();
+  addEventListener("bt-user-changed", refreshAcct);
+  function openSheet(o) { sheet.classList.toggle("open", o); }
+  document.getElementById("nav-account").onclick = () => openSheet(true);
+  document.getElementById("settings-close").onclick = () => openSheet(false);
+  sheet.addEventListener("click", ev => { if (ev.target === sheet) openSheet(false); });
+  addEventListener("keydown", ev => { if (ev.key === "Escape") openSheet(false); });
+}
+if (document.readyState !== "loading") initChrome();
+else addEventListener("DOMContentLoaded", initChrome);
 """
 
 
 def _index_html() -> str:
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bridge Bidding Trainer</title>
+<title>Bridge Trainer — תרגול</title>
 <style>{_CSS}</style>
-<script type="module" src="bt-firebase.js"></script></head><body>
+<script type="module" src="bt-firebase.js"></script></head><body data-nav="practice">
+<main id="main" tabindex="-1">
 <h1><span style="opacity:.9">&spades;</span> Bridge Trainer</h1>
-<div class="scenaseg" id="scenario" role="group" aria-label="Practice scenario">
-<button type="button" data-kind="bidding" aria-pressed="true">Bidding
-<small>your call at the table</small></button>
-<button type="button" data-kind="lead" aria-pressed="false">Opening lead
-<small>which card to lead</small></button>
+<div class="scenaseg" id="scenario" role="group" aria-label="בחירת תרחיש תרגול">
+<button type="button" data-kind="bidding" aria-pressed="true">הכרזה
+<small>הקריאה שלך ליד השולחן</small></button>
+<button type="button" data-kind="lead" aria-pressed="false">הובלה
+<small>איזה קלף להוביל</small></button>
 </div>
 <div class="card" id="filters">
 <button type="button" class="fbar" id="fbar" aria-expanded="false"
         aria-controls="fbody">
-<span class="fbar-main">Choose difficulty &amp; type</span>
+<span class="fbar-main">בחירת דרגת קושי וסוג</span>
 <span class="fbar-sub" id="fbar-sub"></span>
 <span class="fbar-chev" aria-hidden="true">&#9662;</span>
 </button>
 <div class="fbody" id="fbody" hidden>
 <div class="fgroup">
-<div class="grow"><span class="glabel">Difficulty</span>
+<div class="grow"><span class="glabel">דרגת קושי</span>
 <button type="button" class="alllink" id="all-diff"></button></div>
 <div class="seg" id="diff-seg"></div>
 </div>
 <div class="fgroup" id="type-group">
-<div class="grow"><span class="glabel">Problem type</span>
+<div class="grow"><span class="glabel">סוג בעיה</span>
 <button type="button" class="alllink" id="all-type"></button></div>
 <div class="typelist" id="type-list"></div>
 </div>
 </div>
 </div>
-<a class="big" id="deal" href="#">Deal me a hand &rarr;</a>
-<div class="card" id="stats">Loading the problem pool&hellip;</div>
+<a class="big" id="deal" href="#">התחל תרגול &larr;</a>
+<div class="card" id="stats">טוען את מאגר הבעיות&hellip;</div>
+</main>
 <script>{_SHARED_JS}
 let INDEX = null;
 const SCEN_KEY = "bt_scenario";
@@ -805,50 +1069,62 @@ function renderStats() {{
     INDEX.problems.filter(p => kindOf(p) === FILTERS.kind).length;
   const narrowed = FILTERS.levels.length < f.levels.length ||
     (FILTERS.kind !== "lead" && FILTERS.types.length < f.types.length);
-  const label = FILTERS.kind === "lead" ? "lead problems" : "bidding problems";
+  const label = FILTERS.kind === "lead" ? "בעיות הובלה" : "בעיות הכרזה";
   const waiting = matching.length - done;
   let h = (narrowed
-      ? `<b>${{matching.length}}</b> of ${{kindTotal}} ${{label}} selected `
-      : `<b>${{kindTotal}}</b> ${{label}} in the pool `) +
+      ? `<b>${{matching.length}}</b> מתוך ${{kindTotal}} ${{label}} נבחרו `
+      : `<b>${{kindTotal}}</b> ${{label}} במאגר `) +
     `<span class="pill" style="border-color:var(--line);color:var(--muted)">` +
-    `${{waiting}} waiting for you</span>`;
+    `${{waiting}} ממתינות לך</span>`;
   if (done) {{
     const pct = Math.round(100 * right / done);
-    h += `<div style="margin-top:8px">Your record: <b>${{right}}</b> / ` +
-      `${{done}} answered</div>` +
-      `<div class="wpl" role="img" aria-label="${{pct}}% correct">` +
-      `<span class="w" style="width:${{pct}}%"></span></div>`;
+    h += `<div style="margin-top:8px">ההישג שלך: <b>${{right}}</b> / ` +
+      `${{done}} נענו · <a href="dashboard.html">להתקדמות המלאה &larr;</a></div>` +
+      `<div class="wpl" role="img" aria-label="${{pct}}% נכון">` +
+      `<span class="w" style="width:${{pct}}%">${{pct}}%</span></div>`;
   }} else {{
     h += `<div style="margin-top:8px" class="muted">` +
-      `You haven't answered any yet.</div>`;
+      `עוד לא ענית על אף אחת.</div>`;
   }}
   document.getElementById("stats").innerHTML = h;
   const fbar = document.getElementById("fbar");
   document.getElementById("fbar-sub").textContent =
-    narrowed ? `${{matching.length}} of ${{kindTotal}}` : "All problems";
+    narrowed ? `${{matching.length}} מתוך ${{kindTotal}}` : "כל הבעיות";
   fbar.classList.toggle("on", narrowed);
   const deal = document.getElementById("deal");
   const none = !FILTERS.levels.length ||
     (FILTERS.kind !== "lead" && !FILTERS.types.length);
   deal.classList.toggle("off", none);
   const dealLabel = FILTERS.kind === "lead"
-    ? "Deal me a lead problem &rarr;" : "Deal me a bidding problem &rarr;";
+    ? "התחל תרגול הובלה &larr;" : "התחל תרגול הכרזה &larr;";
   deal.innerHTML = none
-    ? (FILTERS.kind === "lead" ? "Pick a difficulty"
-       : "Pick a difficulty and type")
+    ? (FILTERS.kind === "lead" ? "בחר דרגת קושי"
+       : "בחר דרגת קושי וסוג")
     : dealLabel + (waiting
-      ? ` <span style="font-weight:400;opacity:.85">(${{waiting}} waiting)` +
+      ? ` <span style="font-weight:400;opacity:.85">(${{waiting}} ממתינות)` +
         `</span>`
       : "");
 }}
 async function init() {{
   try {{ INDEX = await fetchIndex(); }}
   catch (e) {{
-    document.getElementById("stats").textContent =
-      "The problem pool is still being generated \\u2014 check back shortly.";
+    document.getElementById("stats").innerHTML =
+      '<div class="state"><div class="em">המאגר עדיין נבנה</div>' +
+      '<div class="muted">חזור בעוד רגע.</div></div>';
     return;
   }}
+  const q = new URLSearchParams(location.search);
+  const qk = q.get("kind");
+  if (qk === "lead" || qk === "bidding") SCEN = qk;
   setScenario(SCEN);
+  const lv = q.get("lv"), ty = q.get("type");
+  if (lv || ty) {{
+    if (lv) FILTERS.levels = [+lv];
+    if (ty && FILTERS.kind !== "lead") FILTERS.types = [ty];
+    persist();
+    document.getElementById("fbar").setAttribute("aria-expanded", "true");
+    document.getElementById("fbody").removeAttribute("hidden");
+  }}
 }}
 document.querySelectorAll("#scenario button").forEach(b =>
   b.onclick = () => setScenario(b.dataset.kind));
@@ -865,13 +1141,37 @@ document.getElementById("deal").onclick = () => {{
       (FILTERS.kind !== "lead" && !FILTERS.types.length)) return false;
   const id = pickUnseen(INDEX, FILTERS);
   if (!id) {{
-    alert("You've answered every problem in your selection! " +
-          "Widen your filters, or check back for the next batch.");
+    document.getElementById("stats").innerHTML =
+      '<div class="state"><div class="em">ענית על כל הבעיות בבחירה שלך!</div>' +
+      '<div class="muted">הרחב את הסינון, או חזור בקרוב למנה הבאה.</div></div>';
     return false;
   }}
+  localStorage.setItem("bt_session", JSON.stringify({{
+    kind: FILTERS.kind, size: 10, count: 0, right: 0,
+    levels: FILTERS.levels.slice(), types: FILTERS.types.slice()}}));
   location.href = routeFor(FILTERS.kind, id);
   return false;
 }};
+function renderSessionSummary() {{
+  let s = null;
+  try {{ s = JSON.parse(localStorage.getItem("bt_session")); }} catch (e) {{}}
+  if (!s || !s.count) return;
+  const kindLabel = s.kind === "lead" ? "הובלה" : "הכרזה";
+  const pct = Math.round(100 * s.right / s.count);
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `<h2>סיכום התרגול</h2>` +
+    `<div style="margin-top:6px">ענית על <b>${{s.count}}</b> בעיות ${{kindLabel}} — ` +
+    `<b>${{s.right}}</b> נכונות (${{pct}}%).</div>` +
+    `<div class="wpl" role="img" aria-label="${{pct}}% נכון" style="margin-top:8px">` +
+    `<span class="w" style="width:${{pct}}%">${{pct}}%</span></div>`;
+  const main = document.getElementById("main");
+  main.insertBefore(card, main.querySelector("#scenario"));
+}}
+if (new URLSearchParams(location.search).get("summary")) {{
+  if (document.readyState !== "loading") renderSessionSummary();
+  else addEventListener("DOMContentLoaded", renderSessionSummary);
+}}
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 </script>
@@ -880,42 +1180,45 @@ else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 
 def _problem_html() -> str:
     return f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bidding problem</title>
+<title>בעיית הכרזה</title>
 <style>{_CSS}</style>
 <script type="module" src="bt-firebase.js"></script></head><body>
+<main id="main" tabindex="-1">
 <div class="topbar">
-<a href="index.html">&larr; home</a>
+<a href="index.html">&rarr; דף הבית</a>
 <span id="meta"></span>
 </div>
+<div class="sessribbon" id="sessribbon" hidden></div>
 <div id="problem"></div>
 <div class="candidates" id="cands"></div>
 <div id="confirm"></div>
-<div id="verdict" class="card">
-<div class="headline" id="headline"></div>
+<div id="verdict" class="card" role="status" aria-live="polite">
+<h2 class="headline" id="headline" tabindex="-1"></h2>
 <div class="subline" id="subline"></div>
 <div class="diffline" id="diffline"></div>
 <div id="fog"></div>
-<div class="legend"><i style="background:var(--win)"></i>wins
-<i style="background:var(--push)"></i>push
-<i style="background:var(--loss)"></i>loses</div>
+<div class="legend"><i style="background:var(--win)"></i>זכייה
+<i style="background:var(--push)"></i>שוויון
+<i style="background:var(--loss)"></i>הפסד</div>
 <div id="opts"></div>
 <div class="footnote" id="footnote"></div>
 <div class="footnote" id="source"></div>
-<button class="big" id="next">Next deal &rarr;</button>
-<details class="notes" id="deal-box"><summary>The full deal</summary>
+<button class="big" id="next">הבעיה הבאה &larr;</button>
+<details class="notes" id="deal-box"><summary>החלוקה המלאה</summary>
 <div id="fulldeal"></div></details>
 <details class="notes" id="review-box" style="display:none">
-<summary>Auction, bid by bid</summary><ul id="review"></ul></details>
+<summary>המכרז, הכרזה־הכרזה</summary><ul id="review"></ul></details>
 <details class="notes" id="prose-box" style="display:none">
-<summary>Full analysis</summary><div id="explanation"
+<summary>ניתוח מלא</summary><div id="explanation"
 style="white-space:pre-line;font-size:13px"></div></details>
-<details class="notes" id="meanings-box"><summary>Assumed meanings of the
-auction</summary><ul id="meanings"></ul></details>
-<details class="notes" id="raw-box"><summary>Raw double-dummy view</summary>
+<details class="notes" id="meanings-box"><summary>משמעויות ההכרזות
+במכרז</summary><ul id="meanings"></ul></details>
+<details class="notes" id="raw-box"><summary>תצוגת double-dummy גולמית</summary>
 <table id="rtable" class="plain"></table></details>
 </div>
+</main>
 <script>{_SHARED_JS}
 let P = null, INDEX = null, NOTES = [], OPTSHOWS = {{}};
 function stripNoise(t) {{
@@ -927,7 +1230,7 @@ function evHtml(row, isTop) {{
     ` <small>\\u00b1${{(+row.ci).toFixed(1)}}</small>` : "";
   const ev = (+row.ev).toFixed(1);
   if (isTop) {{
-    return `<span class="best">best</span>` +
+    return `<span class="best">הטוב</span>` +
            (row.ev > 0 ? ` +${{ev}}${{ci}}` : "");
   }}
   return `${{row.ev >= 0 ? "+" : "\\u2212"}}${{Math.abs(+ev).toFixed(1)}}${{ci}}`;
@@ -956,15 +1259,15 @@ function optRowHtml(row, i, chosen, accepted) {{
   const push = row.p_push !== undefined ? row.p_push
              : Math.max(0, 1 - row.p_gain - row.p_loss);
   const tags = (accepted.includes(row.bid)
-                  ? '<span class="tag best">BEST</span>' : "") +
-               (row.bid === chosen ? '<span class="tag you">YOU</span>' : "");
+                  ? '<span class="tag best">הטוב</span>' : "") +
+               (row.bid === chosen ? '<span class="tag you">שלך</span>' : "");
   const shows = row.shows ? `<span class="shows">${{row.shows}}</span>`
                           : '<span class="shows"></span>';
-  const bar = `<div class="wpl" role="img" aria-label="wins ` +
-    `${{Math.round(row.p_gain * 100)}}%, push ${{Math.round(push * 100)}}%, ` +
-    `loses ${{Math.round(row.p_loss * 100)}}%">` +
-    `<span class="w" style="width:${{row.p_gain * 100}}%"></span>` +
-    `<span class="l" style="width:${{row.p_loss * 100}}%"></span></div>`;
+  const gp = Math.round(row.p_gain * 100), lp = Math.round(row.p_loss * 100);
+  const bar = `<div class="wpl" role="img" aria-label="זכייה ` +
+    `${{gp}}%, שוויון ${{Math.round(push * 100)}}%, הפסד ${{lp}}%">` +
+    `<span class="w" style="width:${{row.p_gain * 100}}%">${{gp > 12 ? gp + "%" : ""}}</span>` +
+    `<span class="l" style="width:${{row.p_loss * 100}}%">${{lp > 12 ? lp + "%" : ""}}</span></div>`;
   const mine = row.bid === chosen && !accepted.includes(row.bid);
   return `<div class="opt${{mine ? " mine" : ""}}">` +
     `<div class="l1"><span class="bidchip">${{callHtml(row.bid)}}` +
@@ -988,35 +1291,36 @@ function reveal(chosen) {{
   const rows = v.corrected || [];
   let head;
   if (v.toss_up) {{
-    head = `<span class="${{ok ? "ok" : "no"}}">${{ok ? "\\u2713" : "\\u2717"}}
-</span> Toss-up \\u2014 ${{v.accepted.map(callHtml).join(" or ")}} both fine`;
+    head = `<span class="${{ok ? "ok" : "no"}}">${{ok ? "\\u2713" : "\\u2717"}}</span> ` +
+      `שקול — <span class="ltr">${{v.accepted.map(callHtml).join(" / ")}}</span> שניהם טובים`;
   }} else if (ok) {{
-    head = `<span class="ok">\\u2713</span> ${{callHtml(chosen)}} ` +
-           `\\u2014 best call`;
+    head = `<span class="ok">\\u2713</span> הכרזה מיטבית — ` +
+           `<span class="ltr">${{callHtml(chosen)}}</span>`;
   }} else {{
     const mine = rows.find(r => r.bid === chosen);
-    const gap = mine ? ` (${{(+mine.ev).toFixed(1)}} IMPs)` : "";
-    head = `<span class="no">\\u2717</span> ${{callHtml(chosen)}} \\u2014 ` +
-           `best was ${{callHtml(v.accepted[0])}}${{gap}}`;
+    const gap = mine ? ` (${{(+mine.ev).toFixed(1)}} IMP)` : "";
+    head = `<span class="no">\\u2717</span> עדיף היה ` +
+           `<span class="ltr">${{callHtml(v.accepted[0])}}${{gap}}</span> — בחרת ` +
+           `<span class="ltr">${{callHtml(chosen)}}</span>`;
   }}
   document.getElementById("headline").innerHTML = head;
   const n = (P.quality && P.quality.n_samples) ||
             (P.generator && P.generator.n_deals) || 0;
   document.getElementById("subline").textContent =
-    `IMPs \\u00b7 corrected single-dummy view` +
-    (n ? ` \\u00b7 ${{n}} simulated layouts` : "");
+    `IMP \\u00b7 תצוגת single-dummy מתוקנת` +
+    (n ? ` \\u00b7 ${{n}} חלוקות מדומות` : "");
   document.getElementById("diffline").innerHTML = diffLineHtml(P);
   if (v.fog) document.getElementById("fog").innerHTML =
-    '<div class="fog">\\u26a0 Double-dummy fog: raw and corrected views ' +
-    'disagree \\u2014 lower confidence.</div>';
+    '<div class="fog">\\u26a0 ערפל DD: התצוגה הגולמית והמתוקנת חלוקות \\u2014 ' +
+    'ודאות נמוכה יותר.</div>';
   document.getElementById("opts").innerHTML =
     rows.map((r, i) => optRowHtml(r, i, chosen, v.accepted)).join("");
   const feet = [];
   if ((v.dead_options || []).length)
-    feet.push("\\u2020 never the winner on any simulated layout.");
+    feet.push("\\u2020 לא ניצחה באף חלוקה מדומה.");
   if ((v.flags || []).includes("doubled_heavy"))
-    feet.push("Much of the doubled margin assumes double-dummy defense " +
-              "\\u2014 treat the exact number with care.");
+    feet.push("חלק ניכר מהמרווח בהכפלה מניח הגנת double-dummy \\u2014 " +
+              "התייחס למספר המדויק בזהירות.");
   if (P.explanations && P.explanations.note) {{
     const note = P.explanations.note;
     feet.push(note[0].toUpperCase() + note.slice(1) + ".");
@@ -1025,14 +1329,14 @@ function reveal(chosen) {{
   if (P.source) {{
     const s = P.source;
     document.getElementById("source").innerHTML =
-      `Real deal: <b>${{s.teams}}</b>, ${{s.event}}, board ${{s.board}}.`;
+      `יד אמיתית: <b>${{s.teams}}</b>, ${{s.event}}, לוח ${{s.board}}.`;
   }}
   // bid-by-bid review from the same terse grammar as the tap notes
   const items = [];
   const seats = ["N", "E", "S", "W"];
   let seat = P.dealer;
   P.auction.forEach((tok, j) => {{
-    const who = seat === P.seat ? "You" : seat;
+    const who = seat === P.seat ? "אתה" : seat;
     if (NOTES[j])
       items.push(`<li><b>${{who}} ${{callHtml(tok)}}</b> \\u2014 ` +
                  `${{NOTES[j]}}</li>`);
@@ -1066,8 +1370,8 @@ function reveal(chosen) {{
   }}
   const rbox = document.getElementById("rtable");
   if (v.raw && v.raw.length) {{
-    let h = "<tr><th>Action</th><th>EV (IMPs)</th><th>Wins</th>" +
-            "<th>Loses</th></tr>";
+    let h = "<tr><th>הכרזה</th><th>EV (IMP)</th><th>זכייה</th>" +
+            "<th>הפסד</th></tr>";
     for (const c of v.raw)
       h += `<tr><td>${{callHtml(c.bid)}}</td><td>${{c.ev >= 0 ? "+" : ""}}` +
            `${{c.ev}} \\u00b1 ${{c.ci}}</td>` +
@@ -1080,7 +1384,11 @@ function reveal(chosen) {{
 function choose(action) {{
   if (store()[P.id]) return;
   reveal(action);
-  window.BT.record(P.id, window.BT.gradeBidding(P, action));
+  const rec = window.BT.gradeBidding(P, action);
+  window.BT.record(P.id, rec);
+  bumpSession(rec.correct);
+  const hl = document.getElementById("headline");
+  if (hl) hl.focus();
 }}
 /* two-step selection: first tap shows what the bid means, a second
    (confirm) tap locks the answer in */
@@ -1097,8 +1405,8 @@ function arm(btn) {{
   const shows = OPTSHOWS[a];
   box.innerHTML = `<div class="card confirmbox"><div class="l1">` +
     `<span class="bidchip">${{callHtml(a)}}</span>` +
-    `<span class="shows">${{shows || "no description"}}</span></div>` +
-    `<button class="big" id="go">Bid ${{callHtml(a)}}</button></div>`;
+    `<span class="shows">${{shows || "אין תיאור"}}</span></div>` +
+    `<button class="big" id="go">הכרז <span class="ltr">${{callHtml(a)}}</span></button></div>`;
   document.getElementById("go").onclick = () => {{
     ARMED = null; box.innerHTML = "";
     choose(a);
@@ -1171,11 +1479,12 @@ function normalize() {{
 async function init() {{
   const id = new URLSearchParams(location.search).get("id");
   P = await window.BT.getProblem(id);
-  if (!P) {{ document.getElementById("problem").textContent =
-                "Problem not found."; return; }}
+  if (!P) {{ document.getElementById("problem").innerHTML =
+    '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
+    '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }}
   normalize();
   document.getElementById("meta").textContent =
-    `IMPs \\u00b7 Dealer ${{P.dealer}} \\u00b7 you are ${{P.seat}}` +
+    `IMP \\u00b7 מחלק ${{P.dealer}} \\u00b7 אתה ${{P.seat}}` +
     (P.category && P.category !== "other" ? ` \\u00b7 ${{P.category}}` : "");
   document.getElementById("problem").innerHTML =
     `<div class="card">${{typeBadgeHtml(P)}}${{auctionTableHtml(P, NOTES)}}` +
@@ -1183,6 +1492,14 @@ async function init() {{
     `<div class="hand">${{handHtml(P.hand)}}</div></div>`;
   // tap a bid -> alert-style explanation strip under the auction
   let openNote = -1;
+  document.querySelectorAll(".call.expl").forEach(el => {{
+    el.setAttribute("role", "button"); el.setAttribute("tabindex", "0");
+  }});
+  document.querySelector("table.bidding").addEventListener("keydown", ev => {{
+    if ((ev.key === "Enter" || ev.key === " ") && ev.target.closest(".call.expl")) {{
+      ev.preventDefault(); ev.target.click();
+    }}
+  }});
   document.querySelector("table.bidding").addEventListener("click", ev => {{
     const el = ev.target.closest(".call.expl");
     const box = document.getElementById("bidnote");
@@ -1214,15 +1531,19 @@ async function init() {{
       (c === "P" ? " p" : c === "X" ? " x" : c === "XX" ? " xx" : "");
     b.dataset.action = c;
     b.innerHTML = callHtml(c);
-    if (c === "X") b.setAttribute("aria-label", "Double");
-    if (c === "XX") b.setAttribute("aria-label", "Redouble");
+    b.setAttribute("aria-label", callLabel(c));
     b.onclick = () => arm(b);
     cands.appendChild(b);
   }}
   document.getElementById("next").onclick = async () => {{
+    const s = getSession();
+    if (s && (s.count || 0) >= s.size) {{ location.href = "index.html?summary=1"; return; }}
     if (!INDEX) INDEX = await fetchIndex();
-    const nid = pickUnseen(INDEX, resolveFilters(INDEX, loadFilters(), "bidding"));
-    if (!nid) {{ location.href = "index.html"; return; }}
+    const flt = (s && s.kind === "bidding")
+      ? {{kind: "bidding", levels: s.levels, types: s.types}}
+      : resolveFilters(INDEX, loadFilters(), "bidding");
+    const nid = pickUnseen(INDEX, flt);
+    if (!nid) {{ location.href = "index.html?summary=1"; return; }}
     location.href = "p.html?id=" + encodeURIComponent(nid);
   }};
   const prev = store()[P.id];
@@ -1251,10 +1572,10 @@ function reveal(chosen) {
   });
   const ok = acc.includes(chosen);
   document.getElementById("headline").innerHTML = ok
-    ? '<span class="ok">✓</span> Best lead — ' + cardHtml(chosen)
-    : '<span class="no">✗</span> Better was ' + acc.map(cardHtml).join(" or ");
+    ? '<span class="ok">✓</span> הובלה מיטבית — <span class="ltr">' + cardHtml(chosen) + '</span>'
+    : '<span class="no">✗</span> עדיף היה <span class="ltr">' + acc.map(cardHtml).join(" / ") + '</span>';
   document.getElementById("subhead").innerHTML = acc.length > 1
-    ? "Equally best: " + acc.map(cardHtml).join(", ") : "";
+    ? "טובות באותה מידה: " + acc.map(cardHtml).join(", ") : "";
   const tbl = v.table, maxv = tbl.length ? tbl[0].avg_def_tricks : 1;
   const seen = {}, picked = [];
   tbl.forEach(r => { if (!seen[r.card[0]]) { seen[r.card[0]] = 1; picked.push(r.card); } });
@@ -1262,11 +1583,12 @@ function reveal(chosen) {
   document.getElementById("bars").innerHTML = picked.map(c => {
     const val = avgOf(c), good = acc.includes(c);
     const pct = maxv > 0 ? Math.max(4, Math.round(val / maxv * 100)) : 0;
-    const you = c === chosen ? ' <span class="muted">(your lead)</span>' : "";
-    return '<div class="barrow"><span class="bl">' + cardHtml(c) + '</span>' +
+    const you = c === chosen ? ' <span class="muted">(שלך)</span>' : "";
+    const mark = good ? '<span class="ok" aria-label="הטוב ביותר">✓</span> ' : "";
+    return '<div class="barrow"><span class="bl">' + mark + cardHtml(c) + '</span>' +
       '<span class="bartrack"><span class="' + (good ? "good" : "") +
       '" style="width:' + pct + '%"></span></span>' +
-      '<span class="barval">' + val.toFixed(2) + ' tr' + you + '</span></div>';
+      "<span class=\"barval\">" + val.toFixed(2) + " טר'" + you + '</span></div>';
   }).join("");
   const notes = (P.explanations && P.explanations.cards) || [];
   const noteFor = c => { const n = notes.find(x => x.card === c); return n ? n.text : ""; };
@@ -1274,8 +1596,8 @@ function reveal(chosen) {
   if (!ok) { const y = noteFor(chosen); if (y) expl += "\n\n" + y; }
   document.getElementById("lead-expl").textContent = expl;
   const lv = (P.classification && P.classification.difficulty_level) || P.difficulty;
-  document.getElementById("difficulty").textContent = "Difficulty " + lv + "/5";
-  let rt = "<tr><th>Card</th><th>Avg def. tricks</th><th>vs best</th><th>BEN</th></tr>";
+  document.getElementById("difficulty").textContent = "רמת קושי " + lv + "/5";
+  let rt = "<tr><th>קלף</th><th>טריקים ממוצע</th><th>מול המיטבי</th><th>BEN</th></tr>";
   v.table.forEach(r => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
     rt += "<tr" + g + "><td>" + cardHtml(r.card) + "</td><td>" +
@@ -1299,7 +1621,11 @@ function reveal(chosen) {
 function commit(a) {
   if (store()[P.id]) return;
   reveal(a);
-  window.BT.record(P.id, window.BT.gradeLead(P, a));
+  const rec = window.BT.gradeLead(P, a);
+  window.BT.record(P.id, rec);
+  bumpSession(rec.correct);
+  const hl = document.getElementById("headline");
+  if (hl) hl.focus();
 }
 /* two-step selection: first tap arms the card, a second (confirm) tap
    leads it \\u2014 so one stray tap never locks in a final answer */
@@ -1315,8 +1641,8 @@ function arm(btn) {
   btn.classList.add("chosen");
   box.innerHTML = '<div class="card confirmbox"><div class="l1">' +
     '<span class="bidchip">' + cardHtml(a) + '</span>' +
-    '<span class="shows">Lead this card?</span></div>' +
-    '<button class="big" id="go">Lead ' + cardHtml(a) + '</button></div>';
+    '<span class="shows">להוביל קלף זה?</span></div>' +
+    '<button class="big" id="go">הובל <span class="ltr">' + cardHtml(a) + '</span></button></div>';
   document.getElementById("go").onclick = () => {
     ARMED = null; box.innerHTML = "";
     commit(a);
@@ -1329,18 +1655,25 @@ function loadLead() {
 async function init() {
   const id = new URLSearchParams(location.search).get("id");
   P = await window.BT.getProblem(id);
-  if (!P) { document.getElementById("problem").textContent = "Problem not found."; return; }
+  if (!P) { document.getElementById("problem").innerHTML =
+    '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
+    '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }
   const meanings = (P.explanations && P.explanations.auction) || [];
   document.getElementById("meta").innerHTML =
-    "Contract " + callHtml(P.contract.slice(0, -1)) + " by " + P.declarer +
-    " · you lead (" + P.leader + ")";
+    'חוזה <span class="ltr">' + callHtml(P.contract.slice(0, -1)) +
+    '</span> ע"י ' + P.declarer + " · אתה מוביל (" + P.leader + ")";
   document.getElementById("problem").innerHTML =
     '<div class="card">' + completeAuctionTableHtml(P, meanings) +
     '<div id="bidnote"></div>' +
-    '<p class="muted" style="margin:6px 0 0">Tap any call for its meaning · ' +
-    'tap a card below to lead it.</p></div>';
+    '<p class="muted" style="margin:6px 0 0">הקש הכרזה כדי לראות את משמעותה · ' +
+    'הקש קלף למטה כדי להוביל אותו.</p></div>';
   let openNote = -1;
   const tbl = document.querySelector("table.bidding");
+  if (tbl) tbl.querySelectorAll(".call.expl").forEach(el => {
+    el.setAttribute("role", "button"); el.setAttribute("tabindex", "0"); });
+  if (tbl) tbl.addEventListener("keydown", ev => {
+    if ((ev.key === "Enter" || ev.key === " ") && ev.target.closest(".call.expl")) {
+      ev.preventDefault(); ev.target.click(); } });
   if (tbl) tbl.addEventListener("click", ev => {
     const el = ev.target.closest(".call.expl");
     const box = document.getElementById("bidnote");
@@ -1361,16 +1694,22 @@ async function init() {
   document.getElementById("grid").innerHTML = ["S", "H", "D", "C"].map((s, i) => {
     const btns = (parts[i] || "").split("").map(rk => {
       const face = rk === "T" ? "10" : rk;
-      return '<button class="cardbtn" data-action="' + s + rk + '">' + face + '</button>';
+      return '<button class="cardbtn" aria-label="' + cardLabel(s + rk) +
+        '" data-action="' + s + rk + '">' + face + '</button>';
     }).join("");
     return '<div class="suitrow"><span class="s">' + suitHtml(s) + '</span>' +
       (btns || '<span class="muted">—</span>') + '</div>';
   }).join("");
   document.querySelectorAll("button.cardbtn").forEach(b => b.onclick = () => arm(b));
   document.getElementById("next").onclick = async () => {
+    const s = getSession();
+    if (s && (s.count || 0) >= s.size) { location.href = "index.html?summary=1"; return; }
     if (!INDEX) INDEX = await fetchIndex();
-    const nid = pickUnseen(INDEX, resolveFilters(INDEX, loadLead(), "lead"));
-    if (!nid) { location.href = "index.html"; return; }
+    const flt = (s && s.kind === "lead")
+      ? {kind: "lead", levels: s.levels, types: s.types}
+      : resolveFilters(INDEX, loadLead(), "lead");
+    const nid = pickUnseen(INDEX, flt);
+    if (!nid) { location.href = "index.html?summary=1"; return; }
     location.href = routeFor("lead", nid);
   };
   const prev = store()[P.id];
@@ -1384,30 +1723,32 @@ else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 
 def _lead_html() -> str:
     return (
-        '<!DOCTYPE html>\n<html><head><meta charset="utf-8">\n'
+        '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        '<title>Opening lead problem</title>\n<style>' + _CSS + '</style>\n'
+        '<title>בעיית הובלה</title>\n<style>' + _CSS + '</style>\n'
         '<script type="module" src="bt-firebase.js"></script></head>'
-        '<body data-scenario="lead">\n'
-        '<div class="topbar"><a href="index.html">&larr; home</a>'
+        '<body data-scenario="lead">\n<main id="main" tabindex="-1">\n'
+        '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted" id="meta"></span></div>\n'
+        '<div class="sessribbon" id="sessribbon" hidden></div>\n'
         '<div id="problem"></div>\n'
         '<div class="leadgrid" id="grid"></div>\n'
         '<div id="confirm"></div>\n'
-        '<div id="verdict" class="card" style="display:none">\n'
-        '<div class="headline" id="headline"></div>\n'
+        '<div id="verdict" class="card" style="display:none" role="status" '
+        'aria-live="polite">\n'
+        '<h2 class="headline" id="headline" tabindex="-1"></h2>\n'
         '<p class="muted" id="subhead"></p>\n'
         '<div id="bars"></div>\n'
         '<p id="lead-expl" style="white-space:pre-line"></p>\n'
         '<div class="muted" id="difficulty"></div>\n'
-        '<button class="big" id="next">Next lead &rarr;</button>\n'
-        '<details><summary>All 13 leads, ranked</summary>'
+        '<button class="big" id="next">ההובלה הבאה &larr;</button>\n'
+        '<details><summary>כל 13 ההובלות, מדורגות</summary>'
         '<table class="plain" id="ltable"></table>'
-        '<p class="footnote">Average defensive tricks over a full double-dummy '
-        'simulation. Cards tied for the most are all correct.</p></details>\n'
-        '<details><summary>The full deal</summary>'
+        '<p class="footnote">טריקים הגנתיים ממוצעים על פני סימולציית '
+        'double-dummy מלאה. קלפים שווים במקסימום — כולם נכונים.</p></details>\n'
+        '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
-        '</div>\n<script>' + _SHARED_JS + _LEAD_JS + '</script>\n</body></html>'
+        '</div>\n</main>\n<script>' + _SHARED_JS + _LEAD_JS + '</script>\n</body></html>'
     )
 
 
@@ -1429,15 +1770,17 @@ _DASHBOARD_CSS = """
 .band .bseg { display: flex; align-items: center; justify-content: center;
               font-size: 11px; font-weight: 700; color: #fff; min-width: 0;
               box-shadow: inset -1px 0 0 rgba(0,0,0,.15); }
-.band .bseg.opt { background: #2f7d5b; }
-.band .bseg.near { background: #c2851b; }
-.band .bseg.bl { background: #b04a34; }
+.band .bseg.opt { background: var(--win); }
+.band .bseg.near { background: var(--gold); color: var(--on-gold); }
+.band .bseg.bl { background: var(--loss); }
 .blegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px;
            color: var(--muted); }
 .blegend i.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block;
                 margin-inline-end: 4px; vertical-align: middle; }
-.blegend i.opt { background: #2f7d5b; } .blegend i.near { background: #c2851b; }
-.blegend i.bl { background: #b04a34; }
+.blegend i.opt { background: var(--win); } .blegend i.near { background: var(--gold); }
+.blegend i.bl { background: var(--loss); }
+.catrow { direction: rtl; }
+.catrow .dbar { direction: ltr; }
 .drill { border-top: 1px solid var(--line); }
 .drill > summary { cursor: pointer; padding: 2px 0; }
 .drill > summary .catrow { margin: 5px 0; }
@@ -1447,8 +1790,8 @@ _DASHBOARD_CSS = """
 _DASHBOARD_JS = r"""
 const MIN_N = 5, MIN_TREND = 8;
 // distribution-band thresholds; units differ by scenario (IMPs vs tricks)
-const COST = { bidding: {unit: "IMP", near: 2.0}, lead: {unit: "trick", near: 1.0} };
-const SUIT_NAME = {S: "Spades", H: "Hearts", D: "Diamonds", C: "Clubs"};
+const COST = { bidding: {unit: "IMP", near: 2.0}, lead: {unit: "טריק", near: 1.0} };
+const SUIT_NAME = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
 const RANKS = "AKQJT98765432";
 function num(x) { return typeof x === "number" ? x : (parseFloat(x) || 0); }
 function median(xs) {
@@ -1473,7 +1816,7 @@ function tsMillis(a) {
 function row(label, k, n) {
   if (n < MIN_N)
     return `<div class="catrow"><span>${label}</span>` +
-      `<span class="muted">not enough data</span>` +
+      `<span class="muted">אין מספיק נתונים</span>` +
       `<span class="muted">${k}/${n}</span></div>`;
   const w = wilson(k, n);
   return `<div class="catrow"><span>${label}</span>` +
@@ -1487,7 +1830,7 @@ function diffRows(list) {
     (by[d] ??= {k: 0, n: 0}); by[d].n++; if (a.correct) by[d].k++; });
   const out = [1, 2, 3, 4, 5].filter(d => by[d])
     .map(d => row(DIFF_NAMES[d] || ("level " + d), by[d].k, by[d].n)).join("");
-  return out || '<div class="muted">no data</div>';
+  return out || '<div class="muted">אין נתונים</div>';
 }
 function typeRows(list) {
   const by = {};
@@ -1496,7 +1839,7 @@ function typeRows(list) {
   const es = Object.entries(by).sort((a, b) => b[1].n - a[1].n);
   return es.length
     ? es.map(([t, s]) => row((TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t, s.k, s.n)).join("")
-    : '<div class="muted">no data</div>';
+    : '<div class="muted">אין נתונים</div>';
 }
 function costBand(list, kind) {
   const cfg = COST[kind] || COST.bidding, n = list.length;
@@ -1508,14 +1851,14 @@ function costBand(list, kind) {
   const seg = (cls, v) => v
     ? `<span class="bseg ${cls}" style="width:${(v / n * 100).toFixed(1)}%">` +
       `${Math.round(v / n * 100)}%</span>` : "";
-  return `<div class="costline">avg <b>${mean.toFixed(1)}</b> ${u} below best ` +
-    `<span class="muted">(median ${med.toFixed(1)})</span></div>` +
-    `<div class="band" role="img" aria-label="optimal ${opt}, near-miss ${near}, ` +
-    `blunder ${bl} of ${n}">` + seg("opt", opt) + seg("near", near) + seg("bl", bl) +
+  return `<div class="costline">ממוצע <b>${mean.toFixed(1)}</b> ${u} מתחת למיטבי ` +
+    `<span class="muted">(חציון ${med.toFixed(1)})</span></div>` +
+    `<div class="band" role="img" aria-label="מיטבי ${opt}, כמעט ${near}, ` +
+    `כשל ${bl} מתוך ${n}">` + seg("opt", opt) + seg("near", near) + seg("bl", bl) +
     '</div><div class="blegend">' +
-    '<span><i class="sw opt"></i>optimal</span>' +
-    `<span><i class="sw near"></i>near-miss (&lt;${cfg.near} ${u})</span>` +
-    `<span><i class="sw bl"></i>blunder (≥${cfg.near} ${u})</span></div>`;
+    '<span><i class="sw opt"></i>מיטבי</span>' +
+    `<span><i class="sw near"></i>כמעט (&lt;${cfg.near} ${u})</span>` +
+    `<span><i class="sw bl"></i>כשל (≥${cfg.near} ${u})</span></div>`;
 }
 function suitRows(list) {
   const suits = {S: {k: 0, n: 0, c: {}}, H: {k: 0, n: 0, c: {}},
@@ -1525,7 +1868,7 @@ function suitRows(list) {
     s.n++; if (a.correct) s.k++;
     (s.c[card] ??= {k: 0, n: 0}); s.c[card].n++; if (a.correct) s.c[card].k++; });
   const order = ["S", "H", "D", "C"].filter(st => suits[st].n);
-  if (!order.length) return '<div class="muted">no data</div>';
+  if (!order.length) return '<div class="muted">אין נתונים</div>';
   return order.map(st => {
     const s = suits[st], label = suitHtml(st) + " " + SUIT_NAME[st];
     const cards = Object.keys(s.c)
@@ -1538,24 +1881,48 @@ function suitRows(list) {
 function scenarioCard(title, list, kind) {
   if (!list.length) return "";
   let html = '<div class="card scen"><b>' + title + '</b> ' +
-    '<span class="muted">' + (kind === "lead" ? "tricks" : "IMPs") +
+    '<span class="muted">' + (kind === "lead" ? "טריקים" : "IMP") +
     ' · n=' + list.length + '</span>' +
     costBand(list, kind) +
-    '<div class="subh">By difficulty</div>' + diffRows(list);
+    '<div class="subh">לפי דרגת קושי</div>' + diffRows(list);
   if (kind === "lead") {
-    html += '<div class="subh">By suit led</div>' + suitRows(list) +
+    html += '<div class="subh">לפי סדרת ההובלה</div>' + suitRows(list) +
       '<div class="muted" style="font-size:12px;margin-top:4px">' +
-      'Tap a suit to see the cards.</div>';
+      'הקש סדרה כדי לראות את הקלפים.</div>';
   } else {
-    html += '<div class="subh">By problem type</div>' + typeRows(list);
+    html += '<div class="subh">לפי סוג בעיה</div>' + typeRows(list);
   }
   return html + '</div>';
 }
+function weakArea(scen) {
+  let worst = null;
+  const bt = {};
+  scen.bidding.forEach(a => { const t = a.type; if (!t) return;
+    (bt[t] ??= {k: 0, n: 0}); bt[t].n++; if (a.correct) bt[t].k++; });
+  for (const [t, s] of Object.entries(bt)) if (s.n >= MIN_N) {
+    const r = s.k / s.n;
+    if (!worst || r < worst.r) worst = {r, kind: "bidding",
+      label: (TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t,
+      href: "index.html?kind=bidding&type=" + t};
+  }
+  const ld = {};
+  scen.lead.forEach(a => { const d = a.difficultyLevel; if (!d) return;
+    (ld[d] ??= {k: 0, n: 0}); ld[d].n++; if (a.correct) ld[d].k++; });
+  for (const [d, s] of Object.entries(ld)) if (s.n >= MIN_N) {
+    const r = s.k / s.n;
+    if (!worst || r < worst.r) worst = {r, kind: "lead",
+      label: "הובלה — " + (DIFF_NAMES[d] || d),
+      href: "index.html?kind=lead&lv=" + d};
+  }
+  return worst;
+}
+const OUTCOME_HE = {winner: "מנצחת", "accepted-alt": "חלופה קבילה",
+  dead: "מתה", suboptimal: "לא אופטימלית"};
 function render(attempts) {
   const el = document.getElementById("dash");
   if (!attempts.length) {
-    el.innerHTML = '<div class="card">No attempts yet — ' +
-      '<a href="index.html">answer a problem</a> to start tracking.</div>';
+    el.innerHTML = '<div class="card state"><div class="em">עוד אין נתונים</div>' +
+      '<a class="big" href="index.html">ענה על בעיה כדי להתחיל &larr;</a></div>';
     return;
   }
   const first = attempts.filter(a => a.isFirstAttempt !== false);
@@ -1578,50 +1945,57 @@ function render(attempts) {
     const W = 300, H = 60, step = W / (pts.length - 1);
     const path = pts.map((y, i) =>
       `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
-    trend = '<div class="card"><b>Accuracy over time</b> ' +
-      '<span class="muted">(cumulative first-attempt)</span><br>' +
-      `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;margin-top:6px">` +
+    const last = Math.round(pts[pts.length - 1]);
+    trend = '<div class="card"><b>דיוק לאורך זמן</b> ' +
+      '<span class="muted">(מצטבר, ניסיון ראשון)</span><br>' +
+      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="דיוק מצטבר לאורך זמן, כעת ${last}%" style="width:100%;height:auto;margin-top:6px">` +
       `<line x1="0" y1="${H - 30}" x2="${W}" y2="${H - 30}" stroke="#8884" ` +
       'stroke-dasharray="3"></line>' +
       `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"></path>` +
-      '</svg><div class="muted">dashed line = 50%</div></div>';
+      '</svg><div class="muted">קו מקווקו = 50% · כעת ' + last + '%</div></div>';
   }
   const misses = recent.filter(a => !a.correct).slice(0, 10);
   const missList = misses.length
-    ? '<div class="card"><b>Recent misses</b> <span class="muted">(review)</span>' +
+    ? '<div class="card"><b>טעויות אחרונות</b> <span class="muted">(לחזרה)</span>' +
       '<ul class="notes">' + misses.map(m =>
-        `<li>You chose <b>${m.chosenCall}</b> — ${m.outcomeClass}` +
-        (m.gradedCost ? `, cost ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
+        `<li>בחרת <b class="ltr">${m.chosenCall}</b> — ${OUTCOME_HE[m.outcomeClass] || m.outcomeClass}` +
+        (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
         (m.acceptedSet && m.acceptedSet.length
-          ? `. Best: ${m.acceptedSet.join(", ")}` : "") +
-        ` <a href="${routeFor(m.kind || "bidding", m.problemId)}">retry</a></li>`
+          ? `. מיטבי: <span class="ltr">${m.acceptedSet.join(", ")}</span>` : "") +
+        ` <a href="${routeFor(m.kind || "bidding", m.problemId)}">חזור לתרגל &larr;</a></li>`
       ).join("") + "</ul></div>"
+    : "";
+  const weak = weakArea(scen);
+  const weakCard = weak
+    ? '<div class="card"><b>מה כדאי לתרגל</b>' +
+      `<div style="margin:6px 0 8px">הנקודה החלשה שלך: <b>${weak.label}</b> (${pct(weak.r)}).</div>` +
+      `<a class="big" href="${weak.href}">תרגל 10 כאלה &larr;</a></div>`
     : "";
   el.innerHTML =
     '<div class="card"><div class="statgrid">' +
     `<div class="stat"><b>${n < MIN_N ? "—" : pct(w.p)}</b>` +
-    `<span class="muted">first-attempt accuracy</span></div>` +
-    `<div class="stat"><b>${streak}</b><span class="muted">current streak</span></div>` +
-    `<div class="stat"><b>${n}</b><span class="muted">problems answered</span></div>` +
-    `<div class="stat"><b>${attempts.length}</b><span class="muted">total attempts</span></div>` +
-    '</div></div>' + trend +
-    '<div class="card"><b>By scenario</b>' +
+    `<span class="muted">דיוק ניסיון ראשון</span></div>` +
+    `<div class="stat"><b>${streak}</b><span class="muted">רצף נוכחי</span></div>` +
+    `<div class="stat"><b>${n}</b><span class="muted">בעיות שנענו</span></div>` +
+    `<div class="stat"><b>${attempts.length}</b><span class="muted">סה"כ ניסיונות</span></div>` +
+    '</div></div>' + weakCard + trend +
+    '<div class="card"><b>לפי תרחיש</b>' +
     Object.keys(byKind).map(kd =>
-      row(kd === "lead" ? "Opening lead" : "Bidding", byKind[kd].k, byKind[kd].n)).join("") +
+      row(kd === "lead" ? "הובלה" : "הכרזה", byKind[kd].k, byKind[kd].n)).join("") +
     '</div>' +
-    scenarioCard("Bidding", scen.bidding, "bidding") +
-    scenarioCard("Opening lead", scen.lead, "lead") +
+    scenarioCard("הכרזה", scen.bidding, "bidding") +
+    scenarioCard("הובלה", scen.lead, "lead") +
     missList +
-    '<p class="footnote">First attempts only. Percentages are suppressed until ' +
-    'there are at least ' + MIN_N + '; ranges are 95% Wilson intervals. ' +
-    '“Cost below best” averages IMPs (bidding) or defensive tricks (lead) lost ' +
-    'versus the optimal action; correct answers count as zero.</p>';
+    '<p class="footnote">ניסיון ראשון בלבד. אחוזים מוסתרים עד ' +
+    'לפחות ' + MIN_N + ' ניסיונות; הטווחים הם רווחי־סמך Wilson 95%. ' +
+    '“מתחת למיטבי” = ממוצע ה-IMP (הכרזה) או הטריקים (הובלה) שאבדו ' +
+    'מול הפעולה המיטבית; תשובה נכונה נספרת כאפס.</p>';
 }
 async function init() {
   try { render(await window.BT.allAttempts()); }
   catch (e) {
     document.getElementById("dash").textContent =
-      "Couldn't load your attempts: " + e.message;
+      "לא ניתן לטעון את הנתונים שלך: " + e.message;
   }
 }
 if (window.BT) window.BT.start(init);
@@ -1631,14 +2005,15 @@ else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 
 def _dashboard_html() -> str:
     return (
-        '<!DOCTYPE html>\n<html><head><meta charset="utf-8">\n'
+        '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        '<title>Your progress</title>\n<style>' + _CSS + _DASHBOARD_CSS +
+        '<title>ההתקדמות שלי</title>\n<style>' + _CSS + _DASHBOARD_CSS +
         '</style>\n<script type="module" src="bt-firebase.js"></script></head>'
-        '<body>\n<div class="topbar"><a href="index.html">&larr; home</a>'
-        '<span class="muted">your progress</span></div>\n'
-        '<h1>Your progress</h1>\n<div id="dash" class="muted">Loading&hellip;</div>\n'
-        '<script>' + _SHARED_JS + _DASHBOARD_JS + '</script>\n</body></html>'
+        '<body data-nav="progress">\n<main id="main" tabindex="-1">\n'
+        '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
+        '<span class="muted">ההתקדמות שלי</span></div>\n'
+        '<h1>ההתקדמות שלי</h1>\n<div id="dash" class="muted">טוען&hellip;</div>\n'
+        '</main>\n<script>' + _SHARED_JS + _DASHBOARD_JS + '</script>\n</body></html>'
     )
 
 
