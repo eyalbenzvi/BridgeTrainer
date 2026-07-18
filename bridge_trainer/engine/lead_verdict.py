@@ -121,6 +121,36 @@ def _table(avg: dict, best_avg: float, softmax: dict) -> list:
     return rows
 
 
+def prejudge_lead(le: LeadEvaluation) -> str | None:
+    """Decisive early rule-out for the screening cascade (32 → 64 → full).
+
+    Returns a rejection reason ONLY when we are statistically confident the
+    board is uninteresting; None means "keep sampling". Conservative by
+    design so it never drops a board that might still qualify:
+      * obvious (C1) and doubled don't depend on the sample count.
+      * suit_indifferent fires only when the 95% UPPER bound of the
+        different-suit gap is still below the 0.25-trick threshold.
+    """
+    if le.softmax and max(le.softmax.values()) > P_OBVIOUS:
+        return "obvious"
+    if le.doubled:
+        return "doubled_excluded"
+    avg = _averages(le)
+    winner = max(avg, key=lambda c: avg[c])
+    ds_card, _ds_val = _best_different_suit(avg, winner)
+    if ds_card is None:
+        return None
+    diff = np.asarray(le.def_tricks[winner]) - np.asarray(le.def_tricks[ds_card])
+    n = diff.shape[0]
+    if n < 8:
+        return None
+    gap = float(diff.mean())
+    se = float(diff.std()) / (n ** 0.5)
+    if gap + 1.96 * se < GAP_MIN:      # confident the gap can't reach 0.25
+        return "suit_indifferent"
+    return None
+
+
 def judge_lead(le: LeadEvaluation) -> LeadVerdict:
     avg = _averages(le)
     best_avg = max(avg.values())
