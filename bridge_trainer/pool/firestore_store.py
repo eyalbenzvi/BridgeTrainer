@@ -106,6 +106,39 @@ class FirestorePool:
         self._db.collection("meta").document("index").set(
             _firestore_safe(index))
 
+    def rebuild_index(self) -> dict:
+        """Rebuild meta/index from the FULL remote ``problems`` collection.
+
+        Unlike ``ProblemPool.rebuild_index`` (which sees only a local pool),
+        this reads every document in Firestore, so a producer that holds only
+        a subset of the pool locally cannot drop other producers' problems
+        from the app's index. Entry schema matches ``ProblemPool``.
+        """
+        from datetime import datetime, timezone
+
+        entries = []
+        for snap in self._col.stream():
+            rec = snap.to_dict() or {}
+            cls = rec.get("classification", {}) or {}
+            entries.append({
+                "id": snap.id,
+                "kind": rec.get("kind", "bidding"),
+                "type": cls.get("type"),
+                "difficulty": rec.get("difficulty"),
+                "difficulty_level": cls.get("difficulty_level"),
+                "created_at": rec.get("created_at"),
+            })
+        entries.sort(key=lambda e: e["created_at"] or "", reverse=True)
+        index = {
+            "schema": 1,
+            "updated_at": datetime.now(timezone.utc).isoformat(
+                timespec="seconds"),
+            "count": len(entries),
+            "problems": entries,
+        }
+        self.write_index(index)
+        return index
+
 
 def push_local_pool(local_dir: str | Path, key_path: str | None = None,
                     overwrite: bool = False) -> dict:
@@ -126,6 +159,7 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
             continue
         remote.add(local.get(pid), overwrite=overwrite)
         uploaded += 1
-    # Refresh the meta/index doc so the app sees the new problems/filters.
-    remote.write_index(local.rebuild_index())
+    # Refresh meta/index from the full remote collection (not just the local
+    # pool) so a partial local pool can't drop other producers' problems.
+    remote.rebuild_index()
     return {"uploaded": uploaded, "skipped": skipped, "total": len(local.ids())}
