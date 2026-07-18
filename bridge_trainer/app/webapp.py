@@ -1082,7 +1082,11 @@ function normalize() {{
       p_loss: r.p_loss !== undefined ? r.p_loss
             : Math.max(0, 1 - r.p_gain - r.p_push),
       p_push: r.p_push,
-      contracts: r.top_contracts || [],
+      // Firestore forbids nested arrays, so the uploader wraps each
+      // [contract, count] pair as {{items: [...]}}; unwrap it back here.
+      // Static-file records keep the plain [contract, count] shape.
+      contracts: (r.top_contracts || []).map(
+        x => (x && x.items) ? x.items : x),
       policy: policy[r.bid],
       shows: OPTSHOWS[r.bid] || "",
     }}));
