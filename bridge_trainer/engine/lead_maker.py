@@ -91,6 +91,7 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
     existing = set(pool.ids())
     made, rejections = [], Counter()
     quotas = {"vuls": Counter(), "difficulty": Counter()}
+    stage = Counter()          # per-function wall time across all boards
     t0 = time.perf_counter()
     k = 0
     while len(made) < count and time.perf_counter() - t0 < max_seconds:
@@ -103,6 +104,7 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
             rejections["bid_error"] += 1
             log(f"  seed {seed}: bid error ({type(e).__name__}: {e})")
             continue
+        stage["bid_out_s"] += time.perf_counter() - t_board
 
         fc = final_contract(full_auction, dealer_i)
         if fc is None:
@@ -123,12 +125,14 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
                 hand, leader_i, dealer_i, vul, full_auction,
                 fc["denom"], contract, bool(fc["doubled"]), n_samples=n)
 
+        ts = time.perf_counter()
         try:
             le = evaluate(SCREEN_SAMPLES)
         except Exception as e:
             rejections["evaluate_error"] += 1
             log(f"  seed {seed}: evaluate error ({type(e).__name__}: {e})")
             continue
+        stage["screen_s"] += time.perf_counter() - ts
         v = judge_lead(le)
         if not v.accepted:
             rejections[v.reason] += 1
@@ -136,20 +140,24 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
                 f"gap={v.measured.get('gap')} contract={contract}")
             continue
 
+        tc = time.perf_counter()
         try:
             le = evaluate(CONFIRM_SAMPLES)
         except Exception as e:
             rejections["confirm_error"] += 1
             continue
+        stage["confirm_s"] += time.perf_counter() - tc
         v = judge_lead(le)
         if not v.accepted:
             rejections["confirm_" + v.reason] += 1
             log(f"  seed {seed}: confirm_{v.reason} gap={v.measured.get('gap')}")
             continue
 
+        te = time.perf_counter()
         auc = auction_meanings(engine, hand, leader_i, dealer_i, vul,
                                full_auction)
         notes = card_notes(v)
+        stage["explain_s"] += time.perf_counter() - te
         elapsed = time.perf_counter() - t_board
         rec = build_lead_record(seed, hands, dealer_i, vul, fc, leader_i,
                                 hand, full_auction, le, v, auc, notes, elapsed)
@@ -171,6 +179,7 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
     summary = {
         "made": made, "count": len(made), "wall_s": round(wall, 1),
         "boards_bid": k, "rejections": dict(rejections),
+        "stage_totals_s": {s: round(x, 1) for s, x in stage.items()},
         "per_accepted_s": round(wall / len(made), 1) if made else None,
         "mix": {"vuls": dict(quotas["vuls"]),
                 "difficulty": dict(quotas["difficulty"])},
