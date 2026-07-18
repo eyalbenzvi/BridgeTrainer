@@ -185,6 +185,34 @@ table.bidding td.turn { background: var(--accent-tint); color: var(--accent);
         font-size: 21px; }
 .hand .srow { line-height: 1.5; }
 .hand .cd { margin-right: .18em; }
+/* ---- full deal, placed by table position (N top, W/E sides, S bottom),
+   with a felt compass in the middle \\u2014 the classic bridge diagram ---- */
+.fulldeal { display: grid; grid-template-columns: 1fr 1fr 1fr;
+            grid-template-areas: ".  n  ." "w  c  e" ".  s  ."; gap: 7px;
+            align-items: center; margin: 10px 0 2px; }
+.fd-n { grid-area: n; } .fd-e { grid-area: e; }
+.fd-s { grid-area: s; } .fd-w { grid-area: w; }
+.fdhand { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px;
+          font-size: 13px; line-height: 1.4; background: var(--card); }
+.fdhand.hero { border-color: var(--gold);
+               box-shadow: inset 0 0 0 1px var(--gold); }
+.fdhand .lbl { display: flex; justify-content: space-between; gap: 6px;
+               font-size: 10px; font-weight: 700; letter-spacing: .04em;
+               color: var(--muted); margin-bottom: 3px; }
+.fdhand .lbl .role { font-weight: 700; text-transform: uppercase;
+                     color: var(--accent); }
+.fdhand.hero .lbl .role { color: var(--gold); }
+.fdrow { line-height: 1.45; }
+.fdrow .cd { margin-right: .12em; }
+.fdcompass { grid-area: c; justify-self: center; width: 58px; height: 58px;
+             border-radius: 8px; color: var(--on-felt);
+             background: radial-gradient(circle at 50% 42%, var(--felt),
+                                         var(--felt-deep));
+             display: grid; grid-template-columns: 1fr 1fr 1fr;
+             grid-template-areas: ".  cn  ." "cw  .  ce" ".  cs  .";
+             place-items: center; font-size: 10px; font-weight: 700; }
+.fdcompass .cn { grid-area: cn; } .fdcompass .cw { grid-area: cw; }
+.fdcompass .ce { grid-area: ce; } .fdcompass .cs { grid-area: cs; }
 /* ---- bidding-box candidates ---- */
 .candidates { display: grid; gap: 8px; margin: 12px 0;
               grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
@@ -461,6 +489,31 @@ function handHtml(hand) {
     return `<div class="srow">${suitHtml(s)} ${cards || "\\u2014"}</div>`;
   }).join("");
 }
+/* Full deal laid out by table position: North on top, West/East on the
+   sides, South at the bottom, a compass in the middle. `roles` maps a seat
+   to a short label ("you", "pard", "lead", "decl", "dummy"); "you"/"lead"
+   get the hero highlight. */
+function fullDealHtml(deal, roles) {
+  roles = roles || {};
+  function cell(s) {
+    const parts = (deal[s] || "").split(".");
+    const rows = ["S", "H", "D", "C"].map((st, i) => {
+      const cards = (parts[i] || "").split("").map(
+        c => `<span class="cd">${c === "T" ? "10" : c}</span>`).join("");
+      return `<div class="fdrow">${suitHtml(st)} ${cards || "\\u2014"}</div>`;
+    }).join("");
+    const role = roles[s] || "";
+    const hero = role === "you" || role === "lead" ? " hero" : "";
+    return `<div class="fd fd-${s.toLowerCase()}">` +
+      `<div class="fdhand${hero}"><div class="lbl"><span>${s}</span>` +
+      `<span class="role">${role}</span></div>${rows}</div></div>`;
+  }
+  const compass = `<div class="fdcompass" aria-hidden="true">` +
+    `<span class="cn">N</span><span class="cw">W</span>` +
+    `<span class="ce">E</span><span class="cs">S</span></div>`;
+  return `<div class="fulldeal">${cell("N")}${cell("W")}${compass}` +
+         `${cell("E")}${cell("S")}</div>`;
+}
 /* fixed W-N-E-S auction diagram (BBO layout); vulnerability lives on the
    seat plates: red = vulnerable, green = not. notes[j] non-empty marks a
    call as tappable (alert-style explanation). */
@@ -617,12 +670,6 @@ def _index_html() -> str:
 </div>
 <a class="big" id="deal" href="#">Deal me a hand &rarr;</a>
 <div class="card" id="stats">Loading the problem pool&hellip;</div>
-<p class="topbar" style="display:block">Every problem is a random deal, bid
-to a genuine decision point, its verdict backed by a full double-dummy
-simulation. The pool grows in batches.
-<a href="dashboard.html" style="color:var(--on-felt)">Your progress &rarr;</a>
-&middot;
-<a href="#" id="reset" style="color:var(--on-felt-muted)">Reset progress</a></p>
 <script>{_SHARED_JS}
 let INDEX = null;
 const SCEN_KEY = "bt_scenario";
@@ -778,7 +825,7 @@ function renderStats() {{
   document.getElementById("stats").innerHTML = h;
   const fbar = document.getElementById("fbar");
   document.getElementById("fbar-sub").textContent =
-    narrowed ? `${{matching.length}} of ${{INDEX.count}}` : "All problems";
+    narrowed ? `${{matching.length}} of ${{kindTotal}}` : "All problems";
   fbar.classList.toggle("on", narrowed);
   const deal = document.getElementById("deal");
   const none = !FILTERS.levels.length ||
@@ -825,12 +872,6 @@ document.getElementById("deal").onclick = () => {{
   location.href = routeFor(FILTERS.kind, id);
   return false;
 }};
-document.getElementById("reset").onclick = () => {{
-  if (confirm("Clear all recorded answers?")) {{
-    window.BT.resetAll().then(() => location.reload());
-  }}
-  return false;
-}};
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 </script>
@@ -863,6 +904,8 @@ def _problem_html() -> str:
 <div class="footnote" id="footnote"></div>
 <div class="footnote" id="source"></div>
 <button class="big" id="next">Next deal &rarr;</button>
+<details class="notes" id="deal-box"><summary>The full deal</summary>
+<div id="fulldeal"></div></details>
 <details class="notes" id="review-box" style="display:none">
 <summary>Auction, bid by bid</summary><ul id="review"></ul></details>
 <details class="notes" id="prose-box" style="display:none">
@@ -1010,6 +1053,16 @@ function reveal(chosen) {{
       `<li><b>${{m.seat}}</b>: ${{m.meaning}}</li>`).join("");
   }} else {{
     document.getElementById("meanings-box").style.display = "none";
+  }}
+  if (P.full_deal) {{
+    const seats = ["N", "E", "S", "W"];
+    const pard = seats[(seats.indexOf(P.seat) + 2) % 4];
+    const roles = {{}};
+    roles[P.seat] = "you"; roles[pard] = "pard";
+    document.getElementById("fulldeal").innerHTML =
+      fullDealHtml(P.full_deal, roles);
+  }} else {{
+    document.getElementById("deal-box").style.display = "none";
   }}
   const rbox = document.getElementById("rtable");
   if (v.raw && v.raw.length) {{
@@ -1232,17 +1285,42 @@ function reveal(chosen) {
   });
   document.getElementById("ltable").innerHTML = rt;
   if (P.full_deal) {
-    document.getElementById("fulldeal").innerHTML = ["N", "E", "S", "W"].map(s =>
-      '<div style="margin:6px 0"><b>' + s + '</b> ' + handHtml(P.full_deal[s]) +
-      '</div>').join("");
+    const seats = ["N", "E", "S", "W"];
+    const decl = P.declarer, dummy = seats[(seats.indexOf(decl) + 2) % 4];
+    const pard = seats[(seats.indexOf(P.leader) + 2) % 4];
+    const roles = {};
+    roles[decl] = "decl"; roles[dummy] = "dummy";
+    roles[P.leader] = "lead"; if (!roles[pard]) roles[pard] = "pard";
+    document.getElementById("fulldeal").innerHTML =
+      fullDealHtml(P.full_deal, roles);
   }
   document.getElementById("verdict").style.display = "block";
 }
-function choose(btn) {
+function commit(a) {
   if (store()[P.id]) return;
-  const a = btn.dataset.action;
   reveal(a);
   window.BT.record(P.id, window.BT.gradeLead(P, a));
+}
+/* two-step selection: first tap arms the card, a second (confirm) tap
+   leads it \\u2014 so one stray tap never locks in a final answer */
+let ARMED = null;
+function arm(btn) {
+  if (store()[P.id]) return;
+  const a = btn.dataset.action;
+  const box = document.getElementById("confirm");
+  document.querySelectorAll("button.cardbtn")
+    .forEach(b => b.classList.remove("chosen"));
+  if (ARMED === a) { ARMED = null; box.innerHTML = ""; return; }
+  ARMED = a;
+  btn.classList.add("chosen");
+  box.innerHTML = '<div class="card confirmbox"><div class="l1">' +
+    '<span class="bidchip">' + cardHtml(a) + '</span>' +
+    '<span class="shows">Lead this card?</span></div>' +
+    '<button class="big" id="go">Lead ' + cardHtml(a) + '</button></div>';
+  document.getElementById("go").onclick = () => {
+    ARMED = null; box.innerHTML = "";
+    commit(a);
+  };
 }
 function loadLead() {
   try { return JSON.parse(localStorage.getItem("bt_lead_filters")); }
@@ -1288,7 +1366,7 @@ async function init() {
     return '<div class="suitrow"><span class="s">' + suitHtml(s) + '</span>' +
       (btns || '<span class="muted">—</span>') + '</div>';
   }).join("");
-  document.querySelectorAll("button.cardbtn").forEach(b => b.onclick = () => choose(b));
+  document.querySelectorAll("button.cardbtn").forEach(b => b.onclick = () => arm(b));
   document.getElementById("next").onclick = async () => {
     if (!INDEX) INDEX = await fetchIndex();
     const nid = pickUnseen(INDEX, resolveFilters(INDEX, loadLead(), "lead"));
@@ -1315,6 +1393,7 @@ def _lead_html() -> str:
         '<span class="muted" id="meta"></span></div>\n'
         '<div id="problem"></div>\n'
         '<div class="leadgrid" id="grid"></div>\n'
+        '<div id="confirm"></div>\n'
         '<div id="verdict" class="card" style="display:none">\n'
         '<div class="headline" id="headline"></div>\n'
         '<p class="muted" id="subhead"></p>\n'
