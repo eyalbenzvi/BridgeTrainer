@@ -11,7 +11,7 @@ import pytest
 from bridge_trainer.engine.conventions import (
     contract_str, final_contract, opening_leader)
 from bridge_trainer.engine.lead_verdict import (
-    GAP_MIN, N_MIN, P_OBVIOUS, LeadEvaluation, judge_lead)
+    GAP_MIN, N_MIN, P_OBVIOUS, LeadEvaluation, judge_lead, prejudge_lead)
 
 
 # --------------------------------------------------------------------------
@@ -173,6 +173,43 @@ def test_difficulty_clear_is_easy():
     assert v.accepted, v.reason
     assert v.measured["trap"] is False
     assert v.difficulty <= 2
+
+
+# --------------------------------------------------------------------------
+# prescreen cascade (early rule-out)
+# --------------------------------------------------------------------------
+
+def test_prejudge_rules_out_indifferent_early():
+    # all suits ~equal at just 32 samples -> confidently suit_indifferent
+    avg = {c: 4.0 for c in _hand13()}
+    avg["DA"] = 4.05
+    v = _eval(avg, n=32, jitter=0.05, softmax={c: 0.1 for c in _hand13()})
+    assert prejudge_lead(v) == "suit_indifferent"
+
+
+def test_prejudge_keeps_clear_winner():
+    # a decisive cross-suit gap must NOT be ruled out early
+    avg = {c: 3.5 for c in _hand13()}
+    avg["DA"] = 4.7
+    v = _eval(avg, n=32, jitter=0.1, softmax={c: 0.1 for c in _hand13()})
+    assert prejudge_lead(v) is None
+
+
+def test_prejudge_keeps_borderline():
+    # gap right at the threshold with noise -> not confident -> keep sampling
+    avg = {c: 4.0 for c in _hand13()}
+    avg["DA"] = 4.0 + GAP_MIN
+    v = _eval(avg, n=32, jitter=0.4, softmax={c: 0.1 for c in _hand13()})
+    assert prejudge_lead(v) is None
+
+
+def test_prejudge_obvious_and_doubled():
+    avg = {c: 4.0 for c in _hand13()}; avg["DA"] = 4.7
+    sm = {c: 0.02 for c in _hand13()}; sm["DA"] = P_OBVIOUS + 0.05
+    assert prejudge_lead(_eval(avg, n=32, softmax=sm)) == "obvious"
+    assert prejudge_lead(_eval(avg, n=32, doubled=True,
+                              softmax={c: 0.1 for c in _hand13()})) \
+        == "doubled_excluded"
 
 
 # --------------------------------------------------------------------------

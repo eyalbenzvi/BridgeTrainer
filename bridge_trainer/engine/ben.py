@@ -254,6 +254,84 @@ class BenEngine:
             n_samples=n, quality=float(quality) if n else 0.0,
             contract=contract, doubled=doubled)
 
+    def lead_open(self, hand_pbn: str, seat_i: int, dealer_i: int,
+                  vuln: tuple[bool, bool], auction: list[str],
+                  contract: str, doubled: bool, pool_n: int = 128):
+        """Sample the opening-lead layouts ONCE, then hand back a grader that
+        double-dummies incremental slices — so the screening cascade can rule
+        a board out after 32/64 solves instead of the full 128, and each
+        layout is DD-solved at most once.
+
+        Returns (grade, n_available, top_softmax):
+          grade(n) -> LeadEvaluation over the first n sampled layouts (DDs
+                      only the newly-needed ones);
+          top_softmax lets the caller reject 'obvious' boards before any DD.
+        """
+        from bidding import bidding as bb
+
+        from .lead_verdict import LeadEvaluation
+
+        held = cards_of(hand_pbn)
+        padded = pad(dealer_i, auction)
+        bot = self.lead_bot(hand_pbn, seat_i, dealer_i, vuln)
+
+        # criterion-1 policy (cheap NN, no double-dummy)
+        try:
+            _c, lead_softmax = bot.get_opening_lead_candidates(padded)
+            smx = np.asarray(lead_softmax, dtype=float).reshape(-1)
+        except Exception:
+            smx = np.zeros(32)
+        softmax = {t: (float(smx[lead_code32(t)])
+                       if lead_code32(t) < smx.shape[0] else 0.0)
+                   for t in held}
+        codes = sorted({lead_code32(t) for t in held})
+
+        # sample once, WITHOUT double-dummy (mirror BotLead.simulate's sampler
+        # call), then shuffle so every prefix slice is an unbiased subsample
+        ben_contract = bb.get_contract(padded)
+        decl_i = bb.get_decl_i(ben_contract)
+        lead_index = (decl_i + 1) % 4
+        bot.rng = bot.get_random_generator()
+        saved = self.sampler.sample_hands_opening_lead
+        self.sampler.sample_hands_opening_lead = pool_n
+        try:
+            accepted, _sc, _ph, _psh, quality, _n = \
+                self.sampler.generate_samples_iterative(
+                    padded, lead_index,
+                    self.sampler.sample_boards_for_auction_opening_lead,
+                    self.sampler.sample_hands_opening_lead,
+                    bot.rng, bot.hand_str, bot.vuln, self.models, [], {})
+        finally:
+            self.sampler.sample_hands_opening_lead = saved
+
+        navail = int(accepted.shape[0]) if hasattr(accepted, "shape") else 0
+        if navail:
+            order = np.arange(navail)
+            bot.rng.shuffle(order)
+            accepted = accepted[order][:pool_n]
+            navail = int(accepted.shape[0])
+
+        state = {"solved": 0, "by_code": {c: [] for c in codes}}
+
+        def grade(n: int):
+            n = min(n, navail)
+            if navail and n > state["solved"]:
+                sl = accepted[state["solved"]:n]
+                tricks = bot.double_dummy_estimates(codes, ben_contract, sl)
+                for j, c in enumerate(codes):
+                    state["by_code"][c].append(
+                        13.0 - np.asarray(tricks[:, j, 0], dtype=float))
+                state["solved"] = n
+            m = state["solved"]
+            def_tricks = {t: (np.concatenate(state["by_code"][lead_code32(t)])
+                              if m else np.zeros(0)) for t in held}
+            return LeadEvaluation(
+                cards=held, def_tricks=def_tricks, softmax=softmax,
+                n_samples=m, quality=float(quality) if navail else 0.0,
+                contract=contract, doubled=doubled)
+
+        return grade, navail, (max(softmax.values()) if softmax else 0.0)
+
     # -- convention-card explanations (BBA/EPBot via ben) --------------------
     def explain_calls(self, bot, dealer_i: int,
                       auction: list[str]) -> list[dict]:

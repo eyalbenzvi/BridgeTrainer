@@ -18,11 +18,12 @@ from datetime import datetime, timezone
 from ..pool.store import ProblemPool
 from .conventions import (SEATS, contract_str, final_contract,
                           opening_leader)
-from .lead_verdict import judge_lead
+from .lead_verdict import P_OBVIOUS, judge_lead, prejudge_lead
 from .scanner import VUL_NAMES, bid_out
 
-SCREEN_SAMPLES = 128    # cheap rejection pass
+SCREEN_SAMPLES = 128    # full screen sample pool
 CONFIRM_SAMPLES = 512   # published evidence
+PRESCREEN_STEPS = (32, 64)   # decisive rule-out checkpoints before full screen
 
 
 def _hand_ok(hand: str) -> bool:
@@ -119,20 +120,41 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
             rejections["round_trip"] += 1
             continue
         contract = contract_str(fc)
+        dbl = bool(fc["doubled"])
 
         def evaluate(n):
             return engine.lead_evaluate(
                 hand, leader_i, dealer_i, vul, full_auction,
-                fc["denom"], contract, bool(fc["doubled"]), n_samples=n)
+                fc["denom"], contract, dbl, n_samples=n)
 
+        # ---- screening cascade: sample the layouts once, double-dummy them
+        # 32 -> 64 -> 128, and bail as soon as the board is a confident
+        # rule-out. Most boards die at 32/64, so most DD runs are saved.
         ts = time.perf_counter()
         try:
-            le = evaluate(SCREEN_SAMPLES)
+            grade, navail, top_soft = engine.lead_open(
+                hand, leader_i, dealer_i, vul, full_auction, contract, dbl,
+                pool_n=SCREEN_SAMPLES)
         except Exception as e:
             rejections["evaluate_error"] += 1
-            log(f"  seed {seed}: evaluate error ({type(e).__name__}: {e})")
+            log(f"  seed {seed}: sample error ({type(e).__name__}: {e})")
             continue
+        if top_soft > P_OBVIOUS:            # obvious: no DD needed at all
+            rejections["pre_obvious"] += 1
+            stage["screen_s"] += time.perf_counter() - ts
+            continue
+        ruled = None
+        for n in PRESCREEN_STEPS:
+            pv = prejudge_lead(grade(n))
+            if pv:
+                ruled = pv
+                break
+        le = grade(SCREEN_SAMPLES) if not ruled else None
         stage["screen_s"] += time.perf_counter() - ts
+        if ruled:
+            rejections["pre_" + ruled] += 1
+            log(f"  seed {seed}: pre_{ruled} contract={contract}")
+            continue
         v = judge_lead(le)
         if not v.accepted:
             rejections[v.reason] += 1
