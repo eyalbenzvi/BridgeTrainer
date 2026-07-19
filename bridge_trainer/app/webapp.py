@@ -1631,8 +1631,20 @@ function reveal(chosen) {
       '" style="width:' + pct + '%"></span></span>' +
       "<span class=\"barval\">" + val.toFixed(2) + " טר'" + you + '</span></div>';
   }).join("");
-  const notes = (P.explanations && P.explanations.cards) || [];
-  const noteFor = c => { const n = notes.find(x => x.card === c); return n ? n.text : ""; };
+  // Card explanation, built here in Hebrew from the verdict numbers (the pool
+  // stores an English phrasing we intentionally don't surface).
+  const noteFor = c => {
+    const i = v.table.findIndex(r => r.card === c);
+    if (i < 0) return "";
+    const r = v.table[i], a = r.avg_def_tricks.toFixed(2);
+    if (acc.includes(c))
+      return "ההובלה המיטבית — ההגנה לוקחת בממוצע " + a +
+             " טריקים, יותר מכל קלף אחר.";
+    const vs = (r.vs_best >= 0 ? "+" : "") + r.vs_best.toFixed(2);
+    return "בממוצע " + a + " טריקים הגנתיים (" + vs +
+           " מול ההובלה המיטבית · מדורג " + (i + 1) + " מתוך " +
+           v.table.length + ").";
+  };
   let expl = noteFor(acc[0]);
   if (!ok) { const y = noteFor(chosen); if (y) expl += "\n\n" + y; }
   document.getElementById("lead-expl").textContent = expl;

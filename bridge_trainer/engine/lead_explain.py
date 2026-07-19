@@ -40,11 +40,11 @@ def card_notes(verdict) -> list[dict]:
         c = row["card"]
         avg = row["avg_def_tricks"]
         if c in best:
-            text = (f"Best lead — the defense averages {avg:.2f} tricks, "
-                    f"more than any other card.")
+            text = (f"ההובלה המיטבית — ההגנה לוקחת בממוצע {avg:.2f} טריקים, "
+                    f"יותר מכל קלף אחר.")
         else:
-            text = (f"Averages {avg:.2f} defensive tricks "
-                    f"({row['vs_best']:+.2f} vs the best lead; "
-                    f"rank {rank} of {n}).")
+            text = (f"בממוצע {avg:.2f} טריקים הגנתיים "
+                    f"({row['vs_best']:+.2f} מול ההובלה המיטבית · "
+                    f"מדורג {rank} מתוך {n}).")
         out.append({"card": c, "text": text})
     return out
