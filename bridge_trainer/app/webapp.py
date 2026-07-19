@@ -511,8 +511,7 @@ function resolveFilters(index, raw, kind) {
 function matchesFilters(p, f) {
   if (kindOf(p) !== (f.kind || "bidding")) return false;
   if (!f.levels.includes(p.difficulty_level)) return false;
-  if (kindOf(p) === "lead") return true;      // leads: difficulty only
-  return f.types.includes(p.type);            // bidding: difficulty + type
+  return f.types.includes(p.type);            // both scenarios: difficulty + type
 }
 function pickUnseen(index, filters) {
   const s = store();
@@ -732,6 +731,14 @@ const TYPE_NAMES = {
     "\\u05dc\\u05d3\\u05e8\\u05d5\\u05e1 \\u05d0\\u05ea \\u05d4\\u05d7\\u05d5\\u05d6\\u05d4 \\u05e9\\u05dc\\u05d4\\u05dd \\u05d1\\u05de\\u05d7\\u05d9\\u05e8 \\u05de\\u05d9\\u05e0\\u05d5\\u05e1, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05d2\\u05df?"],
   describe_hand: ["\\u05ea\\u05d9\\u05d0\\u05d5\\u05e8 \\u05d4\\u05d9\\u05d3",
     "\\u05d0\\u05d9\\u05d6\\u05d5 \\u05d4\\u05db\\u05e8\\u05d6\\u05d4 \\u05d1\\u05d5\\u05e0\\u05d4 \\u05de\\u05ea\\u05d0\\u05e8\\u05ea \\u05d4\\u05db\\u05d9 \\u05d8\\u05d5\\u05d1 \\u05d0\\u05ea \\u05d4\\u05db\\u05d5\\u05d7 \\u05d5\\u05d4\\u05e6\\u05d5\\u05e8\\u05d4?"],
+  // opening-lead categories (engine/lead_classify.py): one per problem, a
+  // mechanical fact of the contract you lead against. lead_ prefix keeps them
+  // disjoint from bidding types in the shared facet counts.
+  lead_part_score: ["חוזה חלקי", "הובלה נגד חוזה חלקי (מתחת למשחק מלא)"],
+  lead_3nt: ["3NT", "הובלה נגד משחק ללא שליט"],
+  lead_suit_game: ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 בגבוה / 5 בנמוך)"],
+  lead_slam: ["סלם", "הובלה נגד סלם (רמה 6 או 7)"],
+  lead_doubled: ["חוזה מוכפל", "הובלה נגד חוזה מוכפל"],
 };
 const DIFF_NAMES = ["", "\\u05e7\\u05dc", "\\u05d1\\u05d9\\u05e0\\u05d5\\u05e0\\u05d9", "\\u05de\\u05d0\\u05ea\\u05d2\\u05e8", "\\u05e7\\u05e9\\u05d4", "\\u05de\\u05d5\\u05de\\u05d7\\u05d4"];
 /* Hebrew suit + card names for screen-reader labels (glyphs stay four-color) */
@@ -951,8 +958,6 @@ function setScenario(kind) {{
   document.body.dataset.scenario = kind;
   document.querySelectorAll("#scenario button").forEach(b =>
     b.setAttribute("aria-pressed", b.dataset.kind === kind ? "true" : "false"));
-  document.getElementById("type-group").style.display =
-    kind === "lead" ? "none" : "";
   FILTERS = resolveFilters(INDEX, loadCur(), kind);
   buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
 }}
@@ -988,7 +993,7 @@ function facetCounts(index, flt) {{
   const levelCount = {{}}, typeCount = {{}};
   for (const p of index.problems) {{
     if (kindOf(p) !== flt.kind) continue;
-    if (p.difficulty_level && (flt.kind === "lead" || flt.types.includes(p.type)))
+    if (p.difficulty_level && flt.types.includes(p.type))
       levelCount[p.difficulty_level] =
         (levelCount[p.difficulty_level] || 0) + 1;
     if (p.type && flt.levels.includes(p.difficulty_level))
@@ -1026,7 +1031,7 @@ function applyFilterUi() {{
 function persist() {{
   const f = poolFacets(INDEX, FILTERS.kind);
   const full = FILTERS.levels.length >= f.levels.length &&
-    (FILTERS.kind === "lead" || FILTERS.types.length >= f.types.length);
+    FILTERS.types.length >= f.types.length;
   if (full) localStorage.removeItem(curKey());   // everything -> follow the pool
   else saveCur({{levels: FILTERS.levels, types: FILTERS.types}});
   applyFilterUi(); updateFacetCounts(); renderStats();
@@ -1068,7 +1073,7 @@ function renderStats() {{
   const kindTotal =
     INDEX.problems.filter(p => kindOf(p) === FILTERS.kind).length;
   const narrowed = FILTERS.levels.length < f.levels.length ||
-    (FILTERS.kind !== "lead" && FILTERS.types.length < f.types.length);
+    FILTERS.types.length < f.types.length;
   const label = FILTERS.kind === "lead" ? "בעיות הובלה" : "בעיות הכרזה";
   const waiting = matching.length - done;
   let h = (narrowed
@@ -1092,14 +1097,12 @@ function renderStats() {{
     narrowed ? `${{matching.length}} מתוך ${{kindTotal}}` : "כל הבעיות";
   fbar.classList.toggle("on", narrowed);
   const deal = document.getElementById("deal");
-  const none = !FILTERS.levels.length ||
-    (FILTERS.kind !== "lead" && !FILTERS.types.length);
+  const none = !FILTERS.levels.length || !FILTERS.types.length;
   deal.classList.toggle("off", none);
   const dealLabel = FILTERS.kind === "lead"
     ? "התחל תרגול הובלה &larr;" : "התחל תרגול הכרזה &larr;";
   deal.innerHTML = none
-    ? (FILTERS.kind === "lead" ? "בחר דרגת קושי"
-       : "בחר דרגת קושי וסוג")
+    ? "בחר דרגת קושי וסוג"
     : dealLabel + (waiting
       ? ` <span style="font-weight:400;opacity:.85">(${{waiting}} ממתינות)` +
         `</span>`
@@ -1120,7 +1123,7 @@ async function init() {{
   const lv = q.get("lv"), ty = q.get("type");
   if (lv || ty) {{
     if (lv) FILTERS.levels = [+lv];
-    if (ty && FILTERS.kind !== "lead") FILTERS.types = [ty];
+    if (ty) FILTERS.types = [ty];
     persist();
     document.getElementById("fbar").setAttribute("aria-expanded", "true");
     document.getElementById("fbody").removeAttribute("hidden");
@@ -1137,8 +1140,7 @@ document.getElementById("fbar").onclick = () => {{
 }};
 document.getElementById("deal").onclick = () => {{
   if (!INDEX) return false;
-  if (!FILTERS.levels.length ||
-      (FILTERS.kind !== "lead" && !FILTERS.types.length)) return false;
+  if (!FILTERS.levels.length || !FILTERS.types.length) return false;
   const id = pickUnseen(INDEX, FILTERS);
   if (!id) {{
     document.getElementById("stats").innerHTML =
@@ -1659,11 +1661,17 @@ async function init() {
     '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
     '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }
   const meanings = (P.explanations && P.explanations.auction) || [];
+  // contract is {level}{denom}{declarer}{doubled}, e.g. 4HE / 3NTWx / 6SSxx —
+  // strip the declarer seat AND any double marker, then show a doubled tag.
+  const cm = /^(\d(?:NT|[CDHS]))[NESW](x{0,2})$/.exec(P.contract);
+  const callPart = cm ? cm[1] : P.contract.slice(0, -1);
+  const dblTag = cm && cm[2] === "xx" ? " XX" : cm && cm[2] === "x" ? " X" : "";
   document.getElementById("meta").innerHTML =
-    'חוזה <span class="ltr">' + callHtml(P.contract.slice(0, -1)) +
+    'חוזה <span class="ltr">' + callHtml(callPart) + dblTag +
     '</span> ע"י ' + P.declarer + " · אתה מוביל (" + P.leader + ")";
   document.getElementById("problem").innerHTML =
-    '<div class="card">' + completeAuctionTableHtml(P, meanings) +
+    '<div class="card">' + typeBadgeHtml(P) +
+    completeAuctionTableHtml(P, meanings) +
     '<div id="bidnote"></div>' +
     '<p class="muted" style="margin:6px 0 0">הקש הכרזה כדי לראות את משמעותה · ' +
     'הקש קלף למטה כדי להוביל אותו.</p></div>';
@@ -1886,7 +1894,8 @@ function scenarioCard(title, list, kind) {
     costBand(list, kind) +
     '<div class="subh">לפי דרגת קושי</div>' + diffRows(list);
   if (kind === "lead") {
-    html += '<div class="subh">לפי סדרת ההובלה</div>' + suitRows(list) +
+    html += '<div class="subh">לפי סוג חוזה</div>' + typeRows(list) +
+      '<div class="subh">לפי סדרת ההובלה</div>' + suitRows(list) +
       '<div class="muted" style="font-size:12px;margin-top:4px">' +
       'הקש סדרה כדי לראות את הקלפים.</div>';
   } else {

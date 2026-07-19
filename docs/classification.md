@@ -84,10 +84,32 @@ auction with the engine's call meanings, vulnerability, candidates with
 policy, and the verdict winner; answers strict JSON (closed enum,
 validated, one retry) plus a one-sentence reason stored for audit.
 
+## Type (leads, engine/lead_classify.py)
+
+Opening-lead problems carry the same `classification.type`, but the category
+is a **mechanical fact of the final contract**, not an LLM judgment — so it is
+computed directly (exact, no model, trivially backfilled). One per problem;
+doubled takes precedence over the level/strain buckets.
+
+| id | he | contract |
+|---|---|---|
+| `lead_part_score` | חוזה חלקי | below game |
+| `lead_3nt` | 3NT | notrump game (3NT; rare 4NT/5NT) |
+| `lead_suit_game` | משחק בשליט | 4+ major / 5+ minor, below slam |
+| `lead_slam` | סלם | level 6 or 7 |
+| `lead_doubled` | חוזה מוכפל | any doubled contract |
+
+Set at generation by `lead_maker`; `index.json` exposes it alongside the
+bidding types (the `lead_` prefix keeps the two disjoint in the shared
+client-side facet counts).
+
 ## Operations
 
 ```
 # after a forge batch (or as one-time backfill):
 python3 scripts/classify_pool.py data              # difficulty + type
 python3 scripts/classify_pool.py data --difficulty-only
+
+# backfill lead categories directly onto the live Firestore pool:
+trainer pool backfill-leads --key sa-key.json      # --dry-run to preview
 ```

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from ..pool.store import ProblemPool
 from .conventions import (SEATS, contract_str, final_contract,
                           opening_leader)
+from .lead_classify import classify_contract
 from .lead_verdict import P_OBVIOUS, judge_lead, prejudge_lead
 from .scanner import VUL_NAMES, bid_out
 
@@ -37,10 +38,13 @@ def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
     return {
         "schema": 1,
         "kind": "lead",
-        # main's index reads difficulty_level from classification; leads carry
-        # their own 1-5 difficulty there so the difficulty filter includes them
-        # (no type taxonomy for leads — difficulty is the only lead facet).
-        "classification": {"difficulty_level": verdict.difficulty},
+        # main's index reads difficulty_level + type from classification. Leads
+        # carry their 1-5 difficulty and a category derived deterministically
+        # from the final contract (engine/lead_classify.py) — no LLM needed,
+        # since the category is a mechanical fact of what you lead against.
+        "classification": {"difficulty_level": verdict.difficulty,
+                           "type": classify_contract(
+                               fc["level"], fc["denom"], fc["doubled"])},
         "id": f"lead1-{seed:08x}",
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "generator": {"engine": "ben BEN-21GF", "seed": seed,
@@ -110,9 +114,6 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
         fc = final_contract(full_auction, dealer_i)
         if fc is None:
             rejections["passed_out"] += 1
-            continue
-        if fc["doubled"]:
-            rejections["doubled_excluded"] += 1
             continue
         leader_i = opening_leader(fc["declarer_i"])
         hand = hands[leader_i]

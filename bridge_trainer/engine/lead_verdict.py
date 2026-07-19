@@ -127,14 +127,12 @@ def prejudge_lead(le: LeadEvaluation) -> str | None:
     Returns a rejection reason ONLY when we are statistically confident the
     board is uninteresting; None means "keep sampling". Conservative by
     design so it never drops a board that might still qualify:
-      * obvious (C1) and doubled don't depend on the sample count.
+      * obvious (C1) does not depend on the sample count.
       * suit_indifferent fires only when the 95% UPPER bound of the
         different-suit gap is still below the 0.25-trick threshold.
     """
     if le.softmax and max(le.softmax.values()) > P_OBVIOUS:
         return "obvious"
-    if le.doubled:
-        return "doubled_excluded"
     avg = _averages(le)
     winner = max(avg, key=lambda c: avg[c])
     ds_card, _ds_val = _best_different_suit(avg, winner)
@@ -179,11 +177,11 @@ def judge_lead(le: LeadEvaluation) -> LeadVerdict:
     if le.n_samples < N_MIN:
         return reject("insufficient_samples")
 
-    # ---- v1 exclusion: doubled contracts (DD defense is unrealistic, and
-    # Lightner/lead-directing doubles demand a convention-specific lead the
-    # sampler can't infer from the bare X token) -------------------------
-    if le.doubled:
-        return reject("doubled_excluded")
+    # NOTE: doubled contracts are no longer excluded — they form the
+    # `lead_doubled` category. Their double-dummy defense is still the least
+    # realistic (Lightner/lead-directing doubles ask for a specific lead the
+    # sampler can't infer from the bare X token), so treat the numbers on
+    # doubled boards with more caution than undoubled ones.
 
     # ---- owner criterion 1: BEN too sure => obvious --------------------
     if le.softmax and max(le.softmax.values()) > P_OBVIOUS:
