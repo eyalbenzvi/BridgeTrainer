@@ -6,7 +6,7 @@ layouts consistent with the bidding. The correct answer is every card tied
 for the maximum average (touching cards land on identical values and all
 count). Two "uninteresting deal" filters, both the owner's:
 
-  C1  BEN's opening-lead policy puts > 70% on any single card  -> too obvious
+  C1  BEN's opening-lead policy on the answer set is > 50%      -> too obvious
   C2  the best card beats the best card of a DIFFERENT suit by < 0.25 tricks
       -> the suit choice does not really matter
 
@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 # -- the owner's two criteria ------------------------------------------------
-P_OBVIOUS = 0.70        # C1: max lead-policy mass above this = no problem
+P_OBVIOUS = 0.50        # C1: BEN policy mass on the answer set above this = no problem
 GAP_MIN = 0.25          # C2: best minus best-different-suit, in DD tricks
 
 # -- mechanical guards -------------------------------------------------------
@@ -177,7 +177,7 @@ def judge_lead(le: LeadEvaluation, force: bool = False) -> LeadVerdict:
     # force=True: caller wants this board accepted regardless of the
     # "interesting" gates (used for the lead_doubled category, where the
     # defining feature is the doubled contract, not suit-choice tension —
-    # the C1 70% and C2 0.25-trick rules deliberately do not apply). The
+    # the C1 (P_OBVIOUS) and C2 0.25-trick rules deliberately do not apply). The
     # best-card set and difficulty are still the real double-dummy grade.
     if force:
         return LeadVerdict(True, "accepted", best=best_cards,
