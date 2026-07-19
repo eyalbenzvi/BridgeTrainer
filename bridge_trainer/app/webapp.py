@@ -65,6 +65,9 @@ a { color: var(--accent); }
                  align-items: baseline; gap: 8px;
                  color: var(--on-felt-muted); font-size: 12px; }
 .topbar a { color: var(--on-felt); }
+/* meta text (e.g. the contract line) rides on the green felt, not a card, so
+   it needs the on-felt muted tone — the card --muted is too dark to read. */
+.topbar .muted, .meta .muted { color: var(--on-felt-muted); }
 .muted { color: var(--muted); font-size: 13px; }
 .pill { display: inline-block; border-radius: 999px; padding: 1px 8px;
         font-size: 12px; border: 1px solid #ffffff55; }
