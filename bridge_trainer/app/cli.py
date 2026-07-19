@@ -131,7 +131,10 @@ def cmd_lead_forge(args: argparse.Namespace) -> int:
     from ..engine.lead_maker import forge_lead_batch
     summary = forge_lead_batch(
         pool_dir=args.pool, count=args.count, base_seed=args.seed,
-        max_seconds=args.max_seconds)
+        max_seconds=args.max_seconds, workers=args.workers,
+        require_doubled=args.only_doubled,
+        doubled_min_gap=args.doubled_min_gap,
+        doubled_apply_obvious=args.doubled_obvious)
     import json as _json
     print(_json.dumps(summary, indent=1))
     return 0 if summary["count"] == args.count else 1
@@ -254,6 +257,21 @@ def main(argv: list[str] | None = None) -> int:
     lf_p.add_argument("--count", type=int, default=20)
     lf_p.add_argument("--seed", type=int, default=1)
     lf_p.add_argument("--max-seconds", type=float, default=3600.0)
+    lf_p.add_argument("--only-doubled", action="store_true",
+                      help="lead_doubled category: keep only doubled final "
+                           "contracts and accept every one (skips the 70%% "
+                           "obvious / 0.25-trick suit-indifferent gates)")
+    lf_p.add_argument("--doubled-min-gap", type=float, default=0.0,
+                      help="with --only-doubled, require the best lead to beat "
+                           "the best different-suit lead by >= this many DD "
+                           "tricks (0 = accept every doubled board)")
+    lf_p.add_argument("--doubled-obvious", action="store_true",
+                      help="with --only-doubled, also apply the C1 70%% rule: "
+                           "reject doubled boards where BEN's lead policy puts "
+                           ">70%% on one card")
+    lf_p.add_argument("--workers", type=int, default=1,
+                      help="parallel forge workers; 0 = auto "
+                           "(each holds a ~1.2 GB engine)")
     lf_p.set_defaults(func=cmd_lead_forge)
 
     pool_p = sub.add_parser("pool", help="add/remove/list pool problems")

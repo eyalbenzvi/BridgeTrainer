@@ -34,17 +34,23 @@ def index_entry(rec: dict) -> dict:
     }
 
 
-def build_index(records) -> dict:
-    """Assemble the meta/index document from an iterable of problem records
-    (newest first)."""
-    entries = [index_entry(r) for r in records]
-    entries.sort(key=lambda e: e["created_at"] or "", reverse=True)
+def index_from_entries(entries) -> dict:
+    """Assemble the meta/index document from already-built index rows
+    (newest first). Lets callers update the index incrementally without
+    re-reading every problem document."""
+    entries = sorted(entries, key=lambda e: e["created_at"] or "", reverse=True)
     return {
         "schema": SCHEMA_VERSION,
         "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "count": len(entries),
         "problems": entries,
     }
+
+
+def build_index(records) -> dict:
+    """Assemble the meta/index document from an iterable of problem records
+    (newest first)."""
+    return index_from_entries(index_entry(r) for r in records)
 
 
 class ProblemPool:

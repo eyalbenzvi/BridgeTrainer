@@ -24,7 +24,10 @@ _STOP_GRACE_S = 90.0     # a board in flight can legitimately take ~1 min
 
 
 def _worker_main(worker_id: int, task_q, result_q, stop, dds_threads: int,
-                 audit_prescreen: bool) -> None:
+                 audit_prescreen: bool, domain: str = "bidding",
+                 require_doubled: bool = False,
+                 doubled_min_gap: float = 0.0,
+                 doubled_apply_obvious: bool = False) -> None:
     # Thread caps BEFORE anything imports TensorFlow: with board-level
     # parallelism as the only parallelism, each worker gets 1 compute
     # thread plus its DDS slice.
@@ -39,7 +42,10 @@ def _worker_main(worker_id: int, task_q, result_q, stop, dds_threads: int,
         pass  # already initialized (env vars still apply)
 
     from .ben import get_engine
-    from .maker import forge_one
+    if domain == "lead":
+        from .lead_maker import forge_lead_one as forge_one
+    else:
+        from .maker import forge_one
 
     try:
         t0 = time.perf_counter()
@@ -54,7 +60,13 @@ def _worker_main(worker_id: int, task_q, result_q, stop, dds_threads: int,
                 continue
             if seed is None:
                 break
-            out = forge_one(engine, seed, audit_prescreen)
+            if domain == "lead":
+                out = forge_one(engine, seed, audit_prescreen,
+                                require_doubled=require_doubled,
+                                doubled_min_gap=doubled_min_gap,
+                                doubled_apply_obvious=doubled_apply_obvious)
+            else:
+                out = forge_one(engine, seed, audit_prescreen)
             result_q.put(("board", worker_id, out))
     except Exception as e:  # engine failed to load, or a crash between boards
         result_q.put(("fatal", worker_id, f"{type(e).__name__}: {e}"))
@@ -64,8 +76,14 @@ def _worker_main(worker_id: int, task_q, result_q, stop, dds_threads: int,
 
 def forge_batch_parallel(pool_dir: str, count: int, base_seed: int,
                          max_seconds: float, log, workers: int,
-                         audit_prescreen: bool) -> dict:
-    from .maker import _BatchState
+                         audit_prescreen: bool, domain: str = "bidding",
+                         require_doubled: bool = False,
+                         doubled_min_gap: float = 0.0,
+                         doubled_apply_obvious: bool = False) -> dict:
+    if domain == "lead":
+        from .lead_maker import _LeadBatchState as _BatchState
+    else:
+        from .maker import _BatchState
 
     ctx = mp.get_context("spawn")   # TF is not fork-safe
     task_q, result_q = ctx.Queue(), ctx.Queue()
@@ -73,7 +91,8 @@ def forge_batch_parallel(pool_dir: str, count: int, base_seed: int,
     dds_threads = max(1, (os.cpu_count() or workers) // workers)
     procs = [ctx.Process(target=_worker_main,
                          args=(w, task_q, result_q, stop, dds_threads,
-                               audit_prescreen),
+                               audit_prescreen, domain, require_doubled,
+                               doubled_min_gap, doubled_apply_obvious),
                          daemon=True, name=f"forge-w{w}")
              for w in range(workers)]
     for p in procs:

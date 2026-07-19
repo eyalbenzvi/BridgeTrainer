@@ -1,10 +1,19 @@
 // Firebase layer for the trainer, exposed as a single global `window.BT` so
 // the (classic, non-module) page scripts can call it without imports. It
 // provides: a Google sign-in gate (sign-in is REQUIRED — there is no guest
-// mode), the problem pool read from Firestore (index doc + per-problem
+// mode), the problem pool read from Firestore (sharded index doc + per-problem
 // docs), and the per-user attempt (measurement) stream. Loaded as a module;
 // dispatches `bt-ready` once window.BT is set, and `bt-user-changed`
 // whenever the signed-in state flips (so the page nav can refresh).
+//
+// Read-cost discipline (Firestore free tier = 50k reads/day, shared):
+//   * a persistent IndexedDB cache is enabled so repeat doc reads across the
+//     multi-page site are served locally, not re-billed;
+//   * the pool index is read as a small pointer + shard docs, never the whole
+//     problems collection;
+//   * per-user attempts are synced INCREMENTALLY (only docs newer than the
+//     last-seen timestamp), cached in localStorage, and attempts are stored
+//     one-doc-per-problem so the collection can't grow without bound.
 import { initializeApp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
@@ -12,24 +21,56 @@ import {
   onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, getDocs, collection, addDoc, writeBatch,
-  serverTimestamp,
+  initializeFirestore, getFirestore, persistentLocalCache,
+  persistentMultipleTabManager, doc, getDoc, getDocs, collection, setDoc,
+  writeBatch, serverTimestamp, query, where, orderBy, increment,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, isConfigured } from "./firebase-config.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
-const db = getFirestore(app);
+
+// Persistent local cache: survives page navigations (the site is multi-page),
+// so meta/index, already-seen problem docs, and attempts are not re-read from
+// the server on every load. Falls back to the default in-memory client if the
+// browser can't provide IndexedDB persistence.
+let db;
+try {
+  db = initializeFirestore(app, {
+    localCache: persistentLocalCache(
+      { tabManager: persistentMultipleTabManager() }),
+  });
+} catch (e) {
+  console.warn("persistent Firestore cache unavailable, using default", e);
+  db = getFirestore(app);
+}
 const provider = new GoogleAuthProvider();
 
 let USER = null;
 let ATTEMPTS = {};   // {problemId: record}, preloaded at sign-in
+let LAST_TS = 0;     // max attempt timestamp (ms) synced so far
 
 function tsMillis(a) {
   if (!a || !a.ts) return 0;
   if (typeof a.ts.toMillis === "function") return a.ts.toMillis();
   if (a.ts.seconds) return a.ts.seconds * 1000;
   return 0;
+}
+
+// ---- per-user attempt cache in localStorage --------------------------
+function cacheKey(uid) { return "bt_attempts_" + uid; }
+function loadCache(uid) {
+  try {
+    const c = JSON.parse(localStorage.getItem(cacheKey(uid)));
+    if (c && c.byId) return c;
+  } catch (e) { /* ignore */ }
+  return { byId: {}, lastTs: 0 };
+}
+function saveCache(uid) {
+  try {
+    localStorage.setItem(cacheKey(uid),
+      JSON.stringify({ byId: ATTEMPTS, lastTs: LAST_TS }));
+  } catch (e) { /* quota/private-mode: cache is best-effort */ }
 }
 
 function doSignIn() {
@@ -70,10 +111,27 @@ function gate(mode) {
 function ungate() { const g = document.getElementById("bt-gate"); if (g) g.remove(); }
 
 async function preloadAttempts(uid) {
-  const snap = await getDocs(collection(db, "users", uid, "attempts"));
-  const all = snap.docs.map((d) => d.data()).sort((a, b) => tsMillis(a) - tsMillis(b));
-  ATTEMPTS = {};
-  for (const a of all) if (!ATTEMPTS[a.problemId]) ATTEMPTS[a.problemId] = a;
+  const cache = loadCache(uid);
+  ATTEMPTS = cache.byId || {};
+  LAST_TS = cache.lastTs || 0;
+  const coll = collection(db, "users", uid, "attempts");
+  let snap;
+  try {
+    snap = await getDocs(LAST_TS
+      ? query(coll, where("ts", ">", new Date(LAST_TS)), orderBy("ts"))
+      : query(coll, orderBy("ts")));
+  } catch (e) {
+    // missing index / offline / legacy docs without ts: one-time full read
+    console.warn("incremental attempt sync failed, full read", e);
+    snap = await getDocs(coll);
+  }
+  for (const d of snap.docs) {
+    const a = d.data();
+    const ms = tsMillis(a);
+    if (ms > LAST_TS) LAST_TS = ms;
+    ATTEMPTS[a.problemId || d.id] = a;   // one doc per problem
+  }
+  saveCache(uid);
 }
 
 // ---- grading (compute the stored measurement from the verdict) --------
@@ -129,30 +187,56 @@ const BT = {
   signIn: () => doSignIn(),
   signOut: () => signOut(auth).catch((e) => console.error(e)),
 
+  // Read the sharded pool index: a small pointer doc lists shard doc ids;
+  // each shard holds a slice of the problem rows. (Legacy single-doc indexes,
+  // which carry `problems` inline, still work.)
   async fetchIndex() {
-    const s = await getDoc(doc(db, "meta", "index"));
-    if (!s.exists()) throw new Error("no pool index");
-    return s.data();
+    const ptr = await getDoc(doc(db, "meta", "index"));
+    if (!ptr.exists()) throw new Error("no pool index");
+    const data = ptr.data();
+    if (Array.isArray(data.problems)) return data;   // legacy single-doc
+    const problems = [];
+    for (const sid of (data.shards || [])) {
+      const s = await getDoc(doc(db, "meta", sid));
+      if (s.exists()) {
+        const sd = s.data();
+        if (Array.isArray(sd.problems)) problems.push(...sd.problems);
+      }
+    }
+    return { ...data, problems };
   },
   async getProblem(id) {
     const s = await getDoc(doc(db, "problems", id));
     return s.exists() ? s.data() : null;
   },
+  // Served from the in-memory cache preloaded/synced at sign-in — no extra
+  // Firestore reads on the dashboard.
   async allAttempts() {
-    if (!USER) return [];
-    const snap = await getDocs(collection(db, "users", USER.uid, "attempts"));
-    return snap.docs.map((d) => d.data());
+    return Object.values(ATTEMPTS);
   },
   async record(problemId, rec) {
     if (!USER) return;
-    const full = { ...rec, problemId,
-                   isFirstAttempt: !ATTEMPTS[problemId],
-                   attemptNo: 1 };
-    ATTEMPTS[problemId] = full;              // update the sync cache now
-    try {
-      await addDoc(collection(db, "users", USER.uid, "attempts"),
-                   { ...full, ts: serverTimestamp() });
-    } catch (e) { console.error("could not save attempt", e); }
+    const ref = doc(db, "users", USER.uid, "attempts", problemId);
+    const existing = ATTEMPTS[problemId];
+    if (!existing) {
+      // first attempt: one doc per problem, keyed by problemId (bounds the
+      // collection size to distinct problems answered).
+      const stored = { ...rec, problemId, isFirstAttempt: true,
+                       attemptCount: 1, ts: serverTimestamp() };
+      ATTEMPTS[problemId] = { ...rec, problemId, isFirstAttempt: true,
+                             attemptCount: 1,
+                             ts: { seconds: Math.floor(Date.now() / 1000) } };
+      try { await setDoc(ref, stored); }
+      catch (e) { console.error("could not save attempt", e); }
+    } else {
+      // re-answer: keep the first-attempt grading, just count it.
+      ATTEMPTS[problemId].attemptCount = (existing.attemptCount || 1) + 1;
+      try {
+        await setDoc(ref, { attemptCount: increment(1),
+                            lastTs: serverTimestamp() }, { merge: true });
+      } catch (e) { console.error("could not update attempt", e); }
+    }
+    saveCache(USER.uid);
   },
   async resetAll() {
     if (!USER) return;
@@ -163,7 +247,8 @@ const BT = {
       if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
     }
     if (n) await batch.commit();
-    ATTEMPTS = {};
+    ATTEMPTS = {}; LAST_TS = 0;
+    try { localStorage.removeItem(cacheKey(USER.uid)); } catch (e) { /* */ }
   },
 
   // Sign-in is required. Gate the whole app until authenticated; preload the
@@ -173,7 +258,7 @@ const BT = {
     let handedOff = false;
     onAuthStateChanged(auth, async (u) => {
       if (!u) {
-        USER = null; ATTEMPTS = {};
+        USER = null; ATTEMPTS = {}; LAST_TS = 0;
         window.dispatchEvent(new Event("bt-user-changed"));
         gate("signin");
         return;

@@ -32,6 +32,31 @@ LEAD_TYPE_IDS = [t[0] for t in LEAD_TAXONOMY]
 LEAD_LABELS_EN = {t[0]: t[1] for t in LEAD_TAXONOMY}
 LEAD_LABELS_HE = {t[0]: t[2] for t in LEAD_TAXONOMY}
 
+# Ben's 32-card lead encoding (mirrors engine/ben.lead_code32, kept here as a
+# pure, TensorFlow-free copy so the verdict gate and offline tooling can dedupe
+# equivalent cards without importing the engine). Spot cards 7..2 fold into one
+# "low card per suit" slot, so a suit's low spots share a single policy mass.
+_RANKS = "AKQJT98765432"
+
+
+def lead_code32(token: str) -> int:
+    """Return Ben's 32-card lead code for a card token like 'HK' or 'S7'."""
+    return "SHDC".index(token[0]) * 8 + min(_RANKS.index(token[1]), 7)
+
+
+def answer_policy_mass(best_cards, softmax: dict) -> float:
+    """BEN's opening-lead policy mass on the ANSWER (tied-best) set, deduped by
+    32-card code: touching honors count separately (distinct codes) but folded
+    low spots (e.g. H3/H2) share one code and are counted once. This is the
+    correct 'how sure is BEN of the answer' measure for the C1 obvious gate."""
+    seen, mass = set(), 0.0
+    for c in best_cards:
+        code = lead_code32(c)
+        if code not in seen:
+            seen.add(code)
+            mass += softmax.get(c, 0.0)
+    return mass
+
 _MAJORS = ("H", "S")
 _MINORS = ("C", "D")
 

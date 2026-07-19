@@ -149,7 +149,7 @@ def prejudge_lead(le: LeadEvaluation) -> str | None:
     return None
 
 
-def judge_lead(le: LeadEvaluation) -> LeadVerdict:
+def judge_lead(le: LeadEvaluation, force: bool = False) -> LeadVerdict:
     avg = _averages(le)
     best_avg = max(avg.values())
     best_cards = [c for c in le.cards if avg[c] >= best_avg - TIE_EPS]
@@ -171,7 +171,18 @@ def judge_lead(le: LeadEvaluation) -> LeadVerdict:
     }
 
     def reject(reason: str) -> LeadVerdict:
-        return LeadVerdict(False, reason, measured=measured, table=table)
+        return LeadVerdict(False, reason, best=best_cards, difficulty=diff_level,
+                           measured=measured, table=table)
+
+    # force=True: caller wants this board accepted regardless of the
+    # "interesting" gates (used for the lead_doubled category, where the
+    # defining feature is the doubled contract, not suit-choice tension —
+    # the C1 70% and C2 0.25-trick rules deliberately do not apply). The
+    # best-card set and difficulty are still the real double-dummy grade.
+    if force:
+        return LeadVerdict(True, "accepted", best=best_cards,
+                           difficulty=diff_level, flags=["accept_forced"],
+                           measured=measured, table=table)
 
     # ---- mechanical evidence floor -------------------------------------
     if le.n_samples < N_MIN:
@@ -184,7 +195,12 @@ def judge_lead(le: LeadEvaluation) -> LeadVerdict:
     # doubled boards with more caution than undoubled ones.
 
     # ---- owner criterion 1: BEN too sure => obvious --------------------
-    if le.softmax and max(le.softmax.values()) > P_OBVIOUS:
+    # Sum BEN's policy over the tied-best ANSWER set (deduped by 32-card lead
+    # code), not just the single top card: touching honors split the mass
+    # (e.g. HK 61% + HA 28% = 89% on "a top heart") yet are one decision, so a
+    # single-card check wrongly passes them. Folded low spots share one code.
+    from .lead_classify import answer_policy_mass
+    if le.softmax and answer_policy_mass(best_cards, le.softmax) > P_OBVIOUS:
         return reject("obvious")
 
     # ---- owner criterion 2: suit choice doesn't matter ----------------

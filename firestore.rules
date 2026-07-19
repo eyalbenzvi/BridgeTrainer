@@ -2,26 +2,37 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Problems are read-only to signed-in users. Writes come from the
-    // generator via the Admin SDK, which bypasses these rules entirely, so
-    // client writes are simply denied.
+    // Problems are read-only to signed-in users, and only ONE AT A TIME by id.
+    // `get` (single doc) is allowed; `list` (collection query) is denied, so a
+    // client cannot run getDocs(collection("problems")) and read the whole
+    // pool (~20k docs = 20k reads) in one call — that would let any signed-in
+    // Google account drain the shared free-tier read quota. The app never
+    // lists problems: it reads meta/index and then fetches problems by id.
+    // Writes come from the generator via the Admin SDK, which bypasses rules.
     match /problems/{id} {
-      allow read: if request.auth != null;
+      allow get: if request.auth != null;
+      allow list: if false;
       allow write: if false;
     }
 
-    // The lightweight pool index (meta/index) the app reads to build its
-    // problem list + filters. Read-only to clients; written by the Admin SDK.
+    // The lightweight, sharded pool index (meta/index + meta/index_shard_*)
+    // the app reads to build its problem list + filters. Single-doc reads
+    // only (the client reads the pointer then each shard by id); listing the
+    // meta collection is denied. Written by the Admin SDK.
     match /meta/{doc} {
-      allow read: if request.auth != null;
+      allow get: if request.auth != null;
+      allow list: if false;
       allow write: if false;
     }
 
     // Each user owns their measurement stream and profile: read/write only
     // your own subtree. The {doc=**} wildcard is required — subcollection
-    // rules do NOT cascade without it.
+    // rules do NOT cascade without it. Writes are size-capped so a client
+    // cannot balloon its own subtree (which also inflates its own read cost).
     match /users/{uid}/{doc=**} {
-      allow read, write: if request.auth != null && request.auth.uid == uid;
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if request.auth != null && request.auth.uid == uid
+                   && request.resource.size() < 20000;
     }
   }
 }
