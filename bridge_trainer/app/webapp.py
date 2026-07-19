@@ -65,6 +65,9 @@ a { color: var(--accent); }
                  align-items: baseline; gap: 8px;
                  color: var(--on-felt-muted); font-size: 12px; }
 .topbar a { color: var(--on-felt); }
+/* meta text (e.g. the contract line) rides on the green felt, not a card, so
+   it needs the on-felt muted tone — the card --muted is too dark to read. */
+.topbar .muted, .meta .muted { color: var(--on-felt-muted); }
 .muted { color: var(--muted); font-size: 13px; }
 .pill { display: inline-block; border-radius: 999px; padding: 1px 8px;
         font-size: 12px; border: 1px solid #ffffff55; }
@@ -1559,9 +1562,15 @@ else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 
 _LEAD_JS = r"""
 let P = null, INDEX = null;
-function avgOf(card) {
-  const r = P.verdict.table.find(x => x.card === card);
-  return r ? r.avg_def_tricks : 0;
+const RANKS = "23456789TJQKA";
+/* Label one bar. A group of interchangeable cards (same suit, same result)
+   shows as one line, e.g. "♥ 5/4/3"; a lone card keeps its normal form. */
+function groupLabel(g) {
+  if (g.cards.length === 1) return cardHtml(g.cards[0]);
+  const ranks = g.cards.slice()
+    .sort((a, b) => RANKS.indexOf(b[1]) - RANKS.indexOf(a[1]))
+    .map(c => c[1] === "T" ? "10" : c[1]);
+  return suitHtml(g.suit) + " " + ranks.join("/");
 }
 function reveal(chosen) {
   const v = P.verdict, acc = v.accepted;
@@ -1579,21 +1588,63 @@ function reveal(chosen) {
   document.getElementById("subhead").innerHTML = acc.length > 1
     ? "טובות באותה מידה: " + acc.map(cardHtml).join(", ") : "";
   const tbl = v.table, maxv = tbl.length ? tbl[0].avg_def_tricks : 1;
-  const seen = {}, picked = [];
-  tbl.forEach(r => { if (!seen[r.card[0]]) { seen[r.card[0]] = 1; picked.push(r.card); } });
-  if (picked.indexOf(chosen) < 0) picked.push(chosen);
-  document.getElementById("bars").innerHTML = picked.map(c => {
-    const val = avgOf(c), good = acc.includes(c);
+  // Group the ranked cards into per-suit buckets of equal outcome: cards in
+  // the same suit that yield the same average are interchangeable, so they
+  // collapse into a single line (e.g. "♥ 5/4/3"). A suit can still contribute
+  // more than one line when its cards give genuinely different results
+  // (e.g. ♥A at 5.19 vs the low hearts at 5.13).
+  const groups = [], byKey = {};
+  tbl.forEach(r => {
+    const key = r.card[0] + ":" + r.avg_def_tricks.toFixed(2);
+    let g = byKey[key];
+    if (!g) { g = {suit: r.card[0], val: r.avg_def_tricks, cards: []};
+              byKey[key] = g; groups.push(g); }
+    g.cards.push(r.card);
+  });
+  // Always keep each suit's best line; also surface any higher-ranked
+  // alternative that beats the weakest suit-best — a strong option that would
+  // otherwise stay hidden behind its own suit's top card.
+  const suitBest = {};
+  groups.forEach(g => {
+    if (!suitBest[g.suit] || g.val > suitBest[g.suit].val) suitBest[g.suit] = g;
+  });
+  const bests = Object.keys(suitBest).map(s => suitBest[s]);
+  const bestSet = new Set(bests);
+  const minBest = bests.length ? Math.min.apply(null, bests.map(g => g.val)) : 0;
+  const MAX_BARS = 6;
+  let picked = groups.filter(g => bestSet.has(g) || g.val > minBest);
+  if (picked.length > MAX_BARS) {
+    const extras = picked.filter(g => !bestSet.has(g));
+    picked = bests.concat(extras.slice(0, Math.max(0, MAX_BARS - bests.length)));
+  }
+  const chosenGroup = groups.find(g => g.cards.indexOf(chosen) >= 0);
+  if (chosenGroup && picked.indexOf(chosenGroup) < 0) picked.push(chosenGroup);
+  picked.sort((a, b) => b.val - a.val);
+  document.getElementById("bars").innerHTML = picked.map(g => {
+    const val = g.val, good = g.cards.some(c => acc.includes(c));
+    const mine = g.cards.indexOf(chosen) >= 0;
     const pct = maxv > 0 ? Math.max(4, Math.round(val / maxv * 100)) : 0;
-    const you = c === chosen ? ' <span class="muted">(שלך)</span>' : "";
+    const you = mine ? ' <span class="muted">(שלך)</span>' : "";
     const mark = good ? '<span class="ok" aria-label="הטוב ביותר">✓</span> ' : "";
-    return '<div class="barrow"><span class="bl">' + mark + cardHtml(c) + '</span>' +
+    return '<div class="barrow"><span class="bl">' + mark + groupLabel(g) + '</span>' +
       '<span class="bartrack"><span class="' + (good ? "good" : "") +
       '" style="width:' + pct + '%"></span></span>' +
       "<span class=\"barval\">" + val.toFixed(2) + " טר'" + you + '</span></div>';
   }).join("");
-  const notes = (P.explanations && P.explanations.cards) || [];
-  const noteFor = c => { const n = notes.find(x => x.card === c); return n ? n.text : ""; };
+  // Card explanation, built here in Hebrew from the verdict numbers (the pool
+  // stores an English phrasing we intentionally don't surface).
+  const noteFor = c => {
+    const i = v.table.findIndex(r => r.card === c);
+    if (i < 0) return "";
+    const r = v.table[i], a = r.avg_def_tricks.toFixed(2);
+    if (acc.includes(c))
+      return "ההובלה המיטבית — ההגנה לוקחת בממוצע " + a +
+             " טריקים, יותר מכל קלף אחר.";
+    const vs = (r.vs_best >= 0 ? "+" : "") + r.vs_best.toFixed(2);
+    return "בממוצע " + a + " טריקים הגנתיים (" + vs +
+           " מול ההובלה המיטבית · מדורג " + (i + 1) + " מתוך " +
+           v.table.length + ").";
+  };
   let expl = noteFor(acc[0]);
   if (!ok) { const y = noteFor(chosen); if (y) expl += "\n\n" + y; }
   document.getElementById("lead-expl").textContent = expl;
