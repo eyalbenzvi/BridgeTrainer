@@ -164,13 +164,8 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
         # true confidence in the answer, e.g. HK 61% + HA 28% = 89% (two honor
         # codes) is obvious, while H3 57% + H2 57% is one 57% low-heart code.
         if doubled_apply_obvious and le.softmax:
-            from .ben import lead_code32
-            seen, best_mass = set(), 0.0
-            for c in v.best:
-                code = lead_code32(c)
-                if code not in seen:
-                    seen.add(code)
-                    best_mass += le.softmax.get(c, 0.0)
+            from .lead_classify import answer_policy_mass
+            best_mass = answer_policy_mass(v.best, le.softmax)
             if best_mass > P_OBVIOUS:
                 return LeadOutcome(
                     seed, "rejected", "obvious", timings=t,

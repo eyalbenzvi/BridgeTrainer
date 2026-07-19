@@ -195,7 +195,12 @@ def judge_lead(le: LeadEvaluation, force: bool = False) -> LeadVerdict:
     # doubled boards with more caution than undoubled ones.
 
     # ---- owner criterion 1: BEN too sure => obvious --------------------
-    if le.softmax and max(le.softmax.values()) > P_OBVIOUS:
+    # Sum BEN's policy over the tied-best ANSWER set (deduped by 32-card lead
+    # code), not just the single top card: touching honors split the mass
+    # (e.g. HK 61% + HA 28% = 89% on "a top heart") yet are one decision, so a
+    # single-card check wrongly passes them. Folded low spots share one code.
+    from .lead_classify import answer_policy_mass
+    if le.softmax and answer_policy_mass(best_cards, le.softmax) > P_OBVIOUS:
         return reject("obvious")
 
     # ---- owner criterion 2: suit choice doesn't matter ----------------
