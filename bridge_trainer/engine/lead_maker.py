@@ -106,7 +106,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
     (the parallel harness passes it uniformly); leads have no prescreen audit.
 
     `require_doubled` builds the ``lead_doubled`` category: keep ONLY doubled
-    final contracts, and accept every one of them regardless of the C1 (70%
+    final contracts, and accept every one of them regardless of the C1 (P_OBVIOUS
     obvious) / C2 (0.25-trick suit-indifferent) gates — leading against a
     doubled contract is the skill being drilled, so the "interesting" filters
     deliberately do not apply. The double-dummy grade (best cards, difficulty)
@@ -156,7 +156,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
             return LeadOutcome(seed, "error", "no_samples", timings=t,
                                detail=f"no samples contract={contract}")
         v = judge_lead(le, force=True)
-        # optional C1 70% "obvious" gate for doubled boards. Sum BEN's policy
+        # optional C1 (P_OBVIOUS) "obvious" gate for doubled boards. Sum BEN's policy
         # over the tied-best set, but DEDUP by Ben's 32-card lead code: spot
         # cards (7..2) fold into one "low card per suit" slot and share a
         # single policy mass stored on every held spot, so summing raw

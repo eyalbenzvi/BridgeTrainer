@@ -259,16 +259,16 @@ def main(argv: list[str] | None = None) -> int:
     lf_p.add_argument("--max-seconds", type=float, default=3600.0)
     lf_p.add_argument("--only-doubled", action="store_true",
                       help="lead_doubled category: keep only doubled final "
-                           "contracts and accept every one (skips the 70%% "
+                           "contracts and accept every one (skips the C1 "
                            "obvious / 0.25-trick suit-indifferent gates)")
     lf_p.add_argument("--doubled-min-gap", type=float, default=0.0,
                       help="with --only-doubled, require the best lead to beat "
                            "the best different-suit lead by >= this many DD "
                            "tricks (0 = accept every doubled board)")
     lf_p.add_argument("--doubled-obvious", action="store_true",
-                      help="with --only-doubled, also apply the C1 70%% rule: "
+                      help="with --only-doubled, also apply the C1 obvious rule: "
                            "reject doubled boards where BEN's lead policy puts "
-                           ">70%% on one card")
+                           "> P_OBVIOUS on the answer set)")
     lf_p.add_argument("--workers", type=int, default=1,
                       help="parallel forge workers; 0 = auto "
                            "(each holds a ~1.2 GB engine)")

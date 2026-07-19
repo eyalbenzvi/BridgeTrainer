@@ -3,7 +3,8 @@
 
 The rule: BEN's opening-lead policy, summed over the tied-best ANSWER set and
 deduped by Ben's 32-card lead code (so touching honors count separately but
-folded low spots share one code), must be <= threshold (default 0.70). A
+folded low spots share one code), must be <= threshold (default: the engine's
+P_OBVIOUS). A
 problem where BEN is that sure of the answer is obvious and not a real problem.
 
 Operates directly on Firestore (the live pool), so it also catches records that
@@ -20,7 +21,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-P_OBVIOUS = 0.70
+from bridge_trainer.engine.lead_verdict import P_OBVIOUS  # single source of truth
 
 
 def find_failures(records, threshold: float) -> list[str]:
