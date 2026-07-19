@@ -64,11 +64,13 @@ if [ -z "$KEY_FILE" ] || [ ! -s "$KEY_FILE" ]; then
 fi
 
 # 3) Generate the problems into data/.
+# WORKERS>1 runs board-level parallel workers (each holds a ~1.2 GB engine);
+# 0 = auto (min(3, cpus)). Default 3 to match the 4-core reference box.
 SEED="${SEED:-$(( $(date +%s) / 86400 ))000}"
-echo ">> forging $COUNT lead problems (seed $SEED)"
+echo ">> forging $COUNT lead problems (seed $SEED, ${WORKERS:-3} workers)"
 BEN_HOME="$BEN_HOME" "$PY" -m bridge_trainer.app.cli \
   lead-forge --count "$COUNT" --seed "$SEED" --pool "$REPO_DIR/data" \
-  --max-seconds "${MAX_SECONDS:-6000}"
+  --workers "${WORKERS:-3}" --max-seconds "${MAX_SECONDS:-6000}"
 
 # 4) Push the pool to Firestore (skips docs already present).
 echo ">> pushing pool to Firestore"
