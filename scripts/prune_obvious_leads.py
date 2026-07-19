@@ -65,9 +65,13 @@ def main(argv=None) -> int:
     if args.dry_run:
         print("dry-run: no deletions")
         return 0
+    from bridge_trainer.pool.store import build_index
+    drop = set(fails)
     for pid in fails:
         pool.remove(pid)
-    pool.rebuild_index()
+    # rebuild the index from the records already in memory (minus the dropped
+    # ones) — no second full-collection scan.
+    pool.write_index(build_index(r for r in records if r.get("id") not in drop))
     print(f"deleted {len(fails)} from Firestore; meta/index rebuilt")
     return 0
 
