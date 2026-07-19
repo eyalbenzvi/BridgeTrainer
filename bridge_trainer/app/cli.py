@@ -131,7 +131,8 @@ def cmd_lead_forge(args: argparse.Namespace) -> int:
     from ..engine.lead_maker import forge_lead_batch
     summary = forge_lead_batch(
         pool_dir=args.pool, count=args.count, base_seed=args.seed,
-        max_seconds=args.max_seconds, workers=args.workers)
+        max_seconds=args.max_seconds, workers=args.workers,
+        require_doubled=args.only_doubled)
     import json as _json
     print(_json.dumps(summary, indent=1))
     return 0 if summary["count"] == args.count else 1
@@ -139,7 +140,8 @@ def cmd_lead_forge(args: argparse.Namespace) -> int:
 
 def cmd_pool(args: argparse.Namespace) -> int:
     from ..pool.store import ProblemPool
-    pool = ProblemPool(args.pool)
+    # Firestore-only subcommands (push/backfill-leads) don't take --pool.
+    pool = ProblemPool(args.pool) if getattr(args, "pool", None) else None
     if args.pool_cmd == "ls":
         import json
         for pid in pool.ids():
@@ -177,6 +179,14 @@ def cmd_pool(args: argparse.Namespace) -> int:
                                   overwrite=args.overwrite)
         print(f"uploaded {summary['uploaded']}, skipped {summary['skipped']} "
               f"(pool has {summary['total']}); meta/index refreshed")
+        return 0
+    if args.pool_cmd == "backfill-leads":
+        from ..pool.firestore_store import backfill_lead_types
+        summary = backfill_lead_types(key_path=args.key, dry_run=args.dry_run)
+        verb = "would update" if args.dry_run else "updated"
+        print(f"{verb} {summary['updated']} of {summary['lead_total']} lead "
+              f"problems in Firestore ({summary['total']} total); "
+              f"meta/index {'unchanged (dry run)' if args.dry_run else 'refreshed'}")
         return 0
     return 2
 
@@ -245,6 +255,10 @@ def main(argv: list[str] | None = None) -> int:
     lf_p.add_argument("--count", type=int, default=20)
     lf_p.add_argument("--seed", type=int, default=1)
     lf_p.add_argument("--max-seconds", type=float, default=3600.0)
+    lf_p.add_argument("--only-doubled", action="store_true",
+                      help="lead_doubled category: keep only doubled final "
+                           "contracts and accept every one (skips the 70%% "
+                           "obvious / 0.25-trick suit-indifferent gates)")
     lf_p.add_argument("--workers", type=int, default=1,
                       help="parallel forge workers; 0 = auto "
                            "(each holds a ~1.2 GB engine)")
@@ -277,6 +291,16 @@ def main(argv: list[str] | None = None) -> int:
     pp.add_argument("--overwrite", action="store_true",
                     help="replace documents that already exist")
     pp.set_defaults(func=cmd_pool)
+
+    pb = pool_sub.add_parser(
+        "backfill-leads",
+        help="assign lead categories to existing lead problems in Firestore")
+    pb.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pb.add_argument("--dry-run", action="store_true",
+                    help="report counts without writing")
+    pb.set_defaults(func=cmd_pool)
 
     args = parser.parse_args(argv)
     return args.func(args)

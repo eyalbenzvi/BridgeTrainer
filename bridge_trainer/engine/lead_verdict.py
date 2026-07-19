@@ -127,14 +127,12 @@ def prejudge_lead(le: LeadEvaluation) -> str | None:
     Returns a rejection reason ONLY when we are statistically confident the
     board is uninteresting; None means "keep sampling". Conservative by
     design so it never drops a board that might still qualify:
-      * obvious (C1) and doubled don't depend on the sample count.
+      * obvious (C1) does not depend on the sample count.
       * suit_indifferent fires only when the 95% UPPER bound of the
         different-suit gap is still below the 0.25-trick threshold.
     """
     if le.softmax and max(le.softmax.values()) > P_OBVIOUS:
         return "obvious"
-    if le.doubled:
-        return "doubled_excluded"
     avg = _averages(le)
     winner = max(avg, key=lambda c: avg[c])
     ds_card, _ds_val = _best_different_suit(avg, winner)
@@ -151,7 +149,7 @@ def prejudge_lead(le: LeadEvaluation) -> str | None:
     return None
 
 
-def judge_lead(le: LeadEvaluation) -> LeadVerdict:
+def judge_lead(le: LeadEvaluation, force: bool = False) -> LeadVerdict:
     avg = _averages(le)
     best_avg = max(avg.values())
     best_cards = [c for c in le.cards if avg[c] >= best_avg - TIE_EPS]
@@ -173,17 +171,28 @@ def judge_lead(le: LeadEvaluation) -> LeadVerdict:
     }
 
     def reject(reason: str) -> LeadVerdict:
-        return LeadVerdict(False, reason, measured=measured, table=table)
+        return LeadVerdict(False, reason, best=best_cards, difficulty=diff_level,
+                           measured=measured, table=table)
+
+    # force=True: caller wants this board accepted regardless of the
+    # "interesting" gates (used for the lead_doubled category, where the
+    # defining feature is the doubled contract, not suit-choice tension —
+    # the C1 70% and C2 0.25-trick rules deliberately do not apply). The
+    # best-card set and difficulty are still the real double-dummy grade.
+    if force:
+        return LeadVerdict(True, "accepted", best=best_cards,
+                           difficulty=diff_level, flags=["accept_forced"],
+                           measured=measured, table=table)
 
     # ---- mechanical evidence floor -------------------------------------
     if le.n_samples < N_MIN:
         return reject("insufficient_samples")
 
-    # ---- v1 exclusion: doubled contracts (DD defense is unrealistic, and
-    # Lightner/lead-directing doubles demand a convention-specific lead the
-    # sampler can't infer from the bare X token) -------------------------
-    if le.doubled:
-        return reject("doubled_excluded")
+    # NOTE: doubled contracts are no longer excluded — they form the
+    # `lead_doubled` category. Their double-dummy defense is still the least
+    # realistic (Lightner/lead-directing doubles ask for a specific lead the
+    # sampler can't infer from the bare X token), so treat the numbers on
+    # doubled boards with more caution than undoubled ones.
 
     # ---- owner criterion 1: BEN too sure => obvious --------------------
     if le.softmax and max(le.softmax.values()) > P_OBVIOUS:

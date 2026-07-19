@@ -21,9 +21,31 @@ Two "uninteresting deal" filters, both the owner's:
    across suits.)
 
 Mechanical guards: minimum sample count; split-half stability on the headline
-gap; and a v1 exclusion of **doubled contracts** (double-dummy defense of
-doubled contracts is unrealistic, and Lightner/lead-directing doubles demand a
-convention-specific lead the sampler cannot infer from the bare `X` token).
+gap. (Doubled contracts were excluded in v1; they are now **included** and
+form the `lead_doubled` category — see *Categories* below. Their double-dummy
+defense is still the least realistic — Lightner/lead-directing doubles ask for
+a specific lead the sampler cannot infer from the bare `X` token — so treat the
+numbers on doubled boards with more caution than undoubled ones.)
+
+## Categories
+
+Every lead problem carries a `classification.type` — one of five categories,
+a **deterministic function of the final contract** (no LLM, unlike the bidding
+taxonomy): what you are leading against. A doubled contract takes precedence
+over the level/strain buckets.
+
+| id | he | contract |
+|---|---|---|
+| `lead_part_score` | חוזה חלקי | below game |
+| `lead_3nt` | 3NT | notrump game (3NT; rare 4NT/5NT) |
+| `lead_suit_game` | משחק בשליט | 4+ major / 5+ minor, below slam |
+| `lead_slam` | סלם | level 6 or 7 |
+| `lead_doubled` | חוזה מוכפל | any doubled contract |
+
+Computed in `engine/lead_classify.py`, set at generation by
+`lead_maker.build_lead_record`, and backfilled onto existing records —
+locally by `scripts/classify_pool.py` and directly in Firestore by
+`trainer pool backfill-leads`.
 
 ## Difficulty (1–5)
 
@@ -44,7 +66,8 @@ wrong natural lead raises it:
 1. `scanner.bid_out` — deal, BEN bids all four seats to conclusion (drop
    passed-out).
 2. `conventions.final_contract` — level/denom/declarer/doubled; leader = LHO of
-   declarer. Doubled contracts are excluded here.
+   declarer. The contract also fixes the problem's category
+   (`lead_classify.classify_contract`).
 3. `ben.lead_evaluate` — sample hidden layouts consistent with the auction
    (proven BotBid sampler), one DD pass per layout scoring all 13 cards, plus
    BEN's lead policy (`ben.lead_softmax`). Screen 128 → confirm 512.
@@ -73,7 +96,8 @@ force all 13 cards through the supported `find_opening_lead`/`CardResp` path.
 ## Record schema (`type: "lead"`)
 
 ```
-schema, type="lead", id="lead1-XXXXXXXX", created_at, generator{...}
+schema, kind="lead", id="lead1-XXXXXXXX", created_at, generator{...}
+classification: {difficulty_level: 1-5, type: "<lead category id>"}
 scoring_form="tricks"
 dealer, vul, declarer, contract ("4HE"), leader, seat(=leader)
 hand, auction (complete)
@@ -90,7 +114,9 @@ full_deal, engine_auction_complete
 - `type` added to records and `index.json` (`rebuild_index` defaults legacy
   records to `"bidding"`).
 - Home page: a persisted **Bidding / Opening lead / Either** toggle (`bt_mode`)
-  driving `pickUnseen(index, mode)` and `problemUrl`; per-type stats.
+  driving `pickUnseen(index, mode)` and `problemUrl`; per-type stats. Both
+  scenarios expose the same difficulty **and category** filter (leads on the
+  contract categories above); the lead page shows a category badge.
 - New `lead.html`: the hand is the input (four suit rows of tappable cards);
   the **completed auction is clickable** — tap any call to read its meaning;
   the reveal leads with a ✓/✗ headline, a small per-suit bar comparison, then a
@@ -101,6 +127,7 @@ full_deal, engine_auction_complete
 ## Testing
 
 `tests/test_lead_verdict.py` covers the contract mechanics and every verdict
-path (C1, C2, ties, within-suit choice, doubled exclusion, difficulty) with no
-BEN dependency. `lead.html` was smoke-tested end-to-end in a headless browser.
+path (C1, C2, ties, within-suit choice, doubled-now-judged, difficulty) with
+no BEN dependency; `tests/test_lead_classify.py` covers the category function.
+`lead.html` was smoke-tested end-to-end in a headless browser.
 The BEN-touching layer is exercised only in the `generate` CI job.

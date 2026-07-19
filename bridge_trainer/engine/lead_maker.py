@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from ..pool.store import ProblemPool
 from .conventions import (SEATS, contract_str, final_contract,
                           opening_leader)
+from .lead_classify import classify_contract
 from .lead_verdict import P_OBVIOUS, judge_lead, prejudge_lead
 from .scanner import VUL_NAMES, bid_out
 
@@ -38,10 +39,13 @@ def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
     return {
         "schema": 1,
         "kind": "lead",
-        # main's index reads difficulty_level from classification; leads carry
-        # their own 1-5 difficulty there so the difficulty filter includes them
-        # (no type taxonomy for leads — difficulty is the only lead facet).
-        "classification": {"difficulty_level": verdict.difficulty},
+        # main's index reads difficulty_level + type from classification. Leads
+        # carry their 1-5 difficulty and a category derived deterministically
+        # from the final contract (engine/lead_classify.py) — no LLM needed,
+        # since the category is a mechanical fact of what you lead against.
+        "classification": {"difficulty_level": verdict.difficulty,
+                           "type": classify_contract(
+                               fc["level"], fc["denom"], fc["doubled"])},
         "id": f"lead1-{seed:08x}",
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "generator": {"engine": "ben BEN-21GF", "seed": seed,
@@ -90,14 +94,21 @@ class LeadOutcome:
     detail: str = ""               # preformatted log tail (no [i/count])
 
 
-def forge_lead_one(engine, seed: int, audit_prescreen: bool = False
-                   ) -> LeadOutcome:
+def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
+                   require_doubled: bool = False) -> LeadOutcome:
     """The whole per-board pipeline: bid out -> final contract -> screening
     cascade (32/64/128) -> 512-sample confirm -> explanations. Self-contained
     so the sequential loop and the parallel workers share one implementation.
 
     `audit_prescreen` is accepted for signature parity with maker.forge_one
     (the parallel harness passes it uniformly); leads have no prescreen audit.
+
+    `require_doubled` builds the ``lead_doubled`` category: keep ONLY doubled
+    final contracts, and accept every one of them regardless of the C1 (70%
+    obvious) / C2 (0.25-trick suit-indifferent) gates — leading against a
+    doubled contract is the skill being drilled, so the "interesting" filters
+    deliberately do not apply. The double-dummy grade (best cards, difficulty)
+    is still computed honestly; only the accept/reject gates are bypassed.
     """
     from .lead_explain import auction_meanings, card_notes
 
@@ -113,8 +124,10 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False
     fc = final_contract(full_auction, dealer_i)
     if fc is None:
         return LeadOutcome(seed, "rejected", "passed_out", timings=t)
-    if fc["doubled"]:
-        return LeadOutcome(seed, "rejected", "doubled_excluded", timings=t)
+    # doubled contracts are no longer excluded: they form the lead_doubled
+    # category. In require_doubled mode we keep ONLY them.
+    if require_doubled and not fc["doubled"]:
+        return LeadOutcome(seed, "rejected", "not_doubled", timings=t)
     leader_i = opening_leader(fc["declarer_i"])
     hand = hands[leader_i]
     if not _hand_ok(hand):
@@ -126,6 +139,35 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False
         return engine.lead_evaluate(
             hand, leader_i, dealer_i, vul, full_auction,
             fc["denom"], contract, dbl, n_samples=n)
+
+    # ---- lead_doubled category: skip the screening cascade and the
+    # interesting-ness gates entirely; grade at confirm size and force-accept.
+    if require_doubled:
+        tc = time.perf_counter()
+        try:
+            le = evaluate(CONFIRM_SAMPLES)
+        except Exception as e:
+            return LeadOutcome(seed, "error", "confirm_error", timings=t,
+                               detail=f"confirm error ({type(e).__name__}: {e})")
+        t["confirm_s"] = time.perf_counter() - tc
+        if not le.cards or le.n_samples == 0:
+            return LeadOutcome(seed, "error", "no_samples", timings=t,
+                               detail=f"no samples contract={contract}")
+        v = judge_lead(le, force=True)
+        te = time.perf_counter()
+        auc = auction_meanings(engine, hand, leader_i, dealer_i, vul,
+                               full_auction)
+        notes = card_notes(v)
+        t["explain_s"] = time.perf_counter() - te
+        elapsed = time.perf_counter() - t_board
+        rec = build_lead_record(seed, hands, dealer_i, vul, fc, leader_i,
+                                hand, full_auction, le, v, auc, notes, elapsed)
+        detail = (f"ACCEPTED {rec['id']} lead {SEATS[leader_i]} vs {contract} "
+                  f"(doubled) best={'/'.join(v.best)} "
+                  f"gap={v.measured.get('gap')} diff={v.difficulty} "
+                  f"[{elapsed:.1f}s]")
+        return LeadOutcome(seed, "accepted", "accepted", rec=rec, timings=t,
+                           detail=detail)
 
     # ---- screening cascade: sample the layouts once, double-dummy them
     # 32 -> 64 -> 128, and bail as soon as the board is a confident
@@ -243,7 +285,7 @@ class _LeadBatchState:
 
 def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
                      max_seconds: float = 3600.0, log=print,
-                     workers: int = 1) -> dict:
+                     workers: int = 1, require_doubled: bool = False) -> dict:
     pool_dir = os.path.abspath(pool_dir)   # before engine chdir's into ben
 
     if workers == 0:
@@ -252,7 +294,8 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
     if workers > 1:
         from .parallel import forge_batch_parallel
         return forge_batch_parallel(pool_dir, count, base_seed, max_seconds,
-                                    log, workers, False, domain="lead")
+                                    log, workers, False, domain="lead",
+                                    require_doubled=require_doubled)
 
     from .ben import get_engine
 
@@ -264,7 +307,8 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
     t0 = time.perf_counter()
     k = 0
     while len(state.made) < count and time.perf_counter() - t0 < max_seconds:
-        state.absorb(forge_lead_one(engine, base_seed + k))
+        state.absorb(forge_lead_one(engine, base_seed + k,
+                                    require_doubled=require_doubled))
         k += 1
 
     wall = time.perf_counter() - t0
