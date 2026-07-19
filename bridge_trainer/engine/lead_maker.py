@@ -156,14 +156,26 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
             return LeadOutcome(seed, "error", "no_samples", timings=t,
                                detail=f"no samples contract={contract}")
         v = judge_lead(le, force=True)
-        # optional C1 70% "obvious" gate for doubled boards: reject when BEN's
-        # opening-lead policy puts more than P_OBVIOUS on a single card.
+        # optional C1 70% "obvious" gate for doubled boards. Sum BEN's policy
+        # over the tied-best set, but DEDUP by Ben's 32-card lead code: spot
+        # cards (7..2) fold into one "low card per suit" slot and share a
+        # single policy mass stored on every held spot, so summing raw
+        # per-card values double-counts them. Summing distinct codes gives the
+        # true confidence in the answer, e.g. HK 61% + HA 28% = 89% (two honor
+        # codes) is obvious, while H3 57% + H2 57% is one 57% low-heart code.
         if doubled_apply_obvious and le.softmax:
-            top = max(le.softmax.values())
-            if top > P_OBVIOUS:
+            from .ben import lead_code32
+            seen, best_mass = set(), 0.0
+            for c in v.best:
+                code = lead_code32(c)
+                if code not in seen:
+                    seen.add(code)
+                    best_mass += le.softmax.get(c, 0.0)
+            if best_mass > P_OBVIOUS:
                 return LeadOutcome(
                     seed, "rejected", "obvious", timings=t,
-                    detail=f"obvious ben={top:.2f} contract={contract}")
+                    detail=f"obvious ben_best={best_mass:.2f} "
+                           f"({'/'.join(v.best)}) contract={contract}")
         # optional cross-suit gap cut for doubled boards: require the best
         # lead to beat the best DIFFERENT-suit lead by at least this many DD
         # tricks (0.0 = accept every doubled board).
