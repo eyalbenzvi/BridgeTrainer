@@ -33,6 +33,11 @@ META = "meta"
 INDEX_DOC = "index"                 # pointer doc: {shards:[...], count, ...}
 SHARD_PREFIX = "index_shard_"       # meta/index_shard_0, _1, ...
 SHARD_MAX_ENTRIES = 3000            # ~150-200 B/entry -> well under 1 MiB
+# While the whole index still fits comfortably in one doc, keep the LEGACY
+# single-doc format (inline `problems`, no shards) so older deployed clients
+# that read meta/index.problems directly keep working. Only shard once the pool
+# outgrows this — by which point the sharded-aware client must be deployed.
+SINGLE_DOC_MAX_ENTRIES = 4000       # ~4000 * 200 B ~= 0.8 MiB, safe under 1 MiB
 _MAX_TRANSIENT_RETRIES = 4
 
 
@@ -177,21 +182,31 @@ class FirestorePool:
         return {**data, "problems": problems}
 
     def write_index(self, index: dict) -> None:
-        """Store the pool index, sharded so no single doc nears 1 MiB. The
-        pointer doc ``meta/index`` lists the shard doc ids; each shard holds up
-        to SHARD_MAX_ENTRIES rows. The web app reads the pointer + shards
-        instead of the whole ``problems`` collection."""
+        """Store the pool index. While it fits one document it is written in the
+        LEGACY single-doc form (inline ``problems``), which every client — old
+        or sharded-aware — can read. Once it outgrows SINGLE_DOC_MAX_ENTRIES it
+        is SHARDED (pointer ``meta/index`` lists shard ids; each shard holds up
+        to SHARD_MAX_ENTRIES rows) so no doc nears the 1 MiB limit."""
         entries = list(index.get("problems", []))
-        shards = [entries[i:i + SHARD_MAX_ENTRIES]
-                  for i in range(0, len(entries), SHARD_MAX_ENTRIES)] or [[]]
-        shard_ids = [f"{SHARD_PREFIX}{i}" for i in range(len(shards))]
 
         # learn the previous shard set (1 read) so we can delete stale shards
-        # after a shrink (e.g. a big prune) without leaving orphans behind.
+        # when we shrink or fall back to single-doc, leaving no orphans.
         prev = self._meta.document(INDEX_DOC).get()
         old_shards = set((prev.to_dict() or {}).get("shards", [])
                          if prev.exists else [])
 
+        if len(entries) <= SINGLE_DOC_MAX_ENTRIES:
+            doc = {k: v for k, v in index.items() if k != "shards"}
+            doc["count"] = len(entries)
+            _retry_transient(lambda: self._meta.document(INDEX_DOC).set(
+                _firestore_safe(doc)))
+            for sid in old_shards:                 # drop any old shards
+                _retry_transient(self._meta.document(sid).delete)
+            return
+
+        shards = [entries[i:i + SHARD_MAX_ENTRIES]
+                  for i in range(0, len(entries), SHARD_MAX_ENTRIES)]
+        shard_ids = [f"{SHARD_PREFIX}{i}" for i in range(len(shards))]
         batch = self._db.batch()
         for sid, chunk in zip(shard_ids, shards):
             batch.set(self._meta.document(sid),
@@ -201,7 +216,6 @@ class FirestorePool:
         ptr["count"] = len(entries)
         batch.set(self._meta.document(INDEX_DOC), _firestore_safe(ptr))
         _retry_transient(batch.commit)
-
         for sid in old_shards - set(shard_ids):
             _retry_transient(self._meta.document(sid).delete)
 
