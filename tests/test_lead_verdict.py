@@ -132,13 +132,17 @@ def test_within_suit_choice_survives_c2():
     assert v.best == ["SA"]
 
 
-def test_doubled_excluded():
+def test_doubled_now_judged_normally():
+    # Doubled contracts are no longer excluded (they form the lead_doubled
+    # category): a doubled board with a clear cross-suit winner is accepted
+    # like any other, and carries the doubled flag in `measured`.
     avg = {c: 4.0 for c in _hand13()}
     avg["DA"] = 4.6
     v = judge_lead(_eval(avg, doubled=True,
                          softmax={c: 0.1 for c in _hand13()}))
-    assert not v.accepted
-    assert v.reason == "doubled_excluded"
+    assert v.accepted, v.reason
+    assert v.best == ["DA"]
+    assert v.measured["doubled"] is True
 
 
 def test_insufficient_samples():
@@ -203,13 +207,19 @@ def test_prejudge_keeps_borderline():
     assert prejudge_lead(v) is None
 
 
-def test_prejudge_obvious_and_doubled():
+def test_prejudge_obvious():
     avg = {c: 4.0 for c in _hand13()}; avg["DA"] = 4.7
     sm = {c: 0.02 for c in _hand13()}; sm["DA"] = P_OBVIOUS + 0.05
     assert prejudge_lead(_eval(avg, n=32, softmax=sm)) == "obvious"
-    assert prejudge_lead(_eval(avg, n=32, doubled=True,
-                              softmax={c: 0.1 for c in _hand13()})) \
-        == "doubled_excluded"
+
+
+def test_prejudge_does_not_rule_out_doubled():
+    # doubled is no longer an early rule-out: a doubled board with a decisive
+    # cross-suit gap must survive prescreening like any other.
+    avg = {c: 3.5 for c in _hand13()}; avg["DA"] = 4.7
+    v = _eval(avg, n=32, jitter=0.1, doubled=True,
+              softmax={c: 0.1 for c in _hand13()})
+    assert prejudge_lead(v) is None
 
 
 # --------------------------------------------------------------------------

@@ -18,6 +18,35 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 
 
+def index_entry(rec: dict) -> dict:
+    """The lightweight per-problem row the web app reads for its list and
+    filters (kind / type / difficulty). Shared by the local and Firestore
+    index builders so both stay in lock-step."""
+    cls = rec.get("classification", {})
+    return {
+        "id": rec["id"],
+        # scenario router; legacy records predate it and are bidding
+        "kind": rec.get("kind", "bidding"),
+        "type": cls.get("type"),
+        "difficulty": rec.get("difficulty"),
+        "difficulty_level": cls.get("difficulty_level"),
+        "created_at": rec.get("created_at"),
+    }
+
+
+def build_index(records) -> dict:
+    """Assemble the meta/index document from an iterable of problem records
+    (newest first)."""
+    entries = [index_entry(r) for r in records]
+    entries.sort(key=lambda e: e["created_at"] or "", reverse=True)
+    return {
+        "schema": SCHEMA_VERSION,
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "count": len(entries),
+        "problems": entries,
+    }
+
+
 class ProblemPool:
     def __init__(self, root: str | Path):
         self.root = Path(root)
@@ -45,26 +74,7 @@ class ProblemPool:
 
     def rebuild_index(self) -> dict:
         """Rewrite data/index.json from the stored documents."""
-        entries = []
-        for pid in self.ids():
-            rec = self.get(pid)
-            cls = rec.get("classification", {})
-            entries.append({
-                "id": pid,
-                # scenario router; legacy records predate it and are bidding
-                "kind": rec.get("kind", "bidding"),
-                "type": cls.get("type"),
-                "difficulty": rec.get("difficulty"),
-                "difficulty_level": cls.get("difficulty_level"),
-                "created_at": rec.get("created_at"),
-            })
-        entries.sort(key=lambda e: e["created_at"] or "", reverse=True)
-        index = {
-            "schema": SCHEMA_VERSION,
-            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "count": len(entries),
-            "problems": entries,
-        }
+        index = build_index(self.get(pid) for pid in self.ids())
         self.root.mkdir(parents=True, exist_ok=True)
         (self.root / "index.json").write_text(
             json.dumps(index, separators=(",", ":")))

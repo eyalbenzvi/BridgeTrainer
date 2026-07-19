@@ -84,6 +84,10 @@ class FirestorePool:
     def ids(self) -> list[str]:
         return sorted(d.id for d in self._col.stream())
 
+    def stream_records(self) -> list[dict]:
+        """Every problem document, read once (one stream, not id+get pairs)."""
+        return [d.to_dict() for d in self._col.stream()]
+
     def get(self, pid: str) -> dict:
         snap = self._col.document(pid).get()
         if not snap.exists:
@@ -129,3 +133,43 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
     # Refresh the meta/index doc so the app sees the new problems/filters.
     remote.write_index(local.rebuild_index())
     return {"uploaded": uploaded, "skipped": skipped, "total": len(local.ids())}
+
+
+def backfill_lead_types(key_path: str | None = None,
+                        dry_run: bool = False) -> dict:
+    """Assign the opening-lead category to every lead problem *in Firestore*.
+
+    Firestore is the live pool and can run ahead of the local JSON checkout,
+    so this works directly against the remote docs: it reads each lead
+    record, computes its category from the contract
+    (engine/lead_classify.py — deterministic, no LLM), and writes back only
+    ``classification.type`` (a merge, so difficulty_level is preserved). The
+    meta/index doc is then rebuilt from the remote contents so the app's
+    filters pick up the categories. Bidding docs are read but never written.
+
+    Returns {lead_total, updated, total}. ``dry_run`` reports the same counts
+    without writing anything.
+    """
+    from ..engine.lead_classify import classify_lead_record
+    from .store import build_index
+
+    remote = FirestorePool(key_path)
+    records = remote.stream_records()
+    updated = lead_total = 0
+    for rec in records:
+        if rec.get("kind") != "lead":
+            continue
+        lead_total += 1
+        want = classify_lead_record(rec)
+        cls = rec.setdefault("classification", {})
+        if cls.get("type") == want:
+            continue
+        cls["type"] = want
+        updated += 1
+        if not dry_run:
+            remote._col.document(rec["id"]).set(
+                {"classification": {"type": want}}, merge=True)
+    if not dry_run:
+        remote.write_index(build_index(records))
+    return {"lead_total": lead_total, "updated": updated,
+            "total": len(records)}
