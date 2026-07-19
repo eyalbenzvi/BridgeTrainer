@@ -25,7 +25,8 @@ _STOP_GRACE_S = 90.0     # a board in flight can legitimately take ~1 min
 
 def _worker_main(worker_id: int, task_q, result_q, stop, dds_threads: int,
                  audit_prescreen: bool, domain: str = "bidding",
-                 require_doubled: bool = False) -> None:
+                 require_doubled: bool = False,
+                 doubled_min_gap: float = 0.0) -> None:
     # Thread caps BEFORE anything imports TensorFlow: with board-level
     # parallelism as the only parallelism, each worker gets 1 compute
     # thread plus its DDS slice.
@@ -60,7 +61,8 @@ def _worker_main(worker_id: int, task_q, result_q, stop, dds_threads: int,
                 break
             if domain == "lead":
                 out = forge_one(engine, seed, audit_prescreen,
-                                require_doubled=require_doubled)
+                                require_doubled=require_doubled,
+                                doubled_min_gap=doubled_min_gap)
             else:
                 out = forge_one(engine, seed, audit_prescreen)
             result_q.put(("board", worker_id, out))
@@ -73,7 +75,8 @@ def _worker_main(worker_id: int, task_q, result_q, stop, dds_threads: int,
 def forge_batch_parallel(pool_dir: str, count: int, base_seed: int,
                          max_seconds: float, log, workers: int,
                          audit_prescreen: bool, domain: str = "bidding",
-                         require_doubled: bool = False) -> dict:
+                         require_doubled: bool = False,
+                         doubled_min_gap: float = 0.0) -> dict:
     if domain == "lead":
         from .lead_maker import _LeadBatchState as _BatchState
     else:
@@ -85,7 +88,8 @@ def forge_batch_parallel(pool_dir: str, count: int, base_seed: int,
     dds_threads = max(1, (os.cpu_count() or workers) // workers)
     procs = [ctx.Process(target=_worker_main,
                          args=(w, task_q, result_q, stop, dds_threads,
-                               audit_prescreen, domain, require_doubled),
+                               audit_prescreen, domain, require_doubled,
+                               doubled_min_gap),
                          daemon=True, name=f"forge-w{w}")
              for w in range(workers)]
     for p in procs:

@@ -132,7 +132,8 @@ def cmd_lead_forge(args: argparse.Namespace) -> int:
     summary = forge_lead_batch(
         pool_dir=args.pool, count=args.count, base_seed=args.seed,
         max_seconds=args.max_seconds, workers=args.workers,
-        require_doubled=args.only_doubled)
+        require_doubled=args.only_doubled,
+        doubled_min_gap=args.doubled_min_gap)
     import json as _json
     print(_json.dumps(summary, indent=1))
     return 0 if summary["count"] == args.count else 1
@@ -259,6 +260,10 @@ def main(argv: list[str] | None = None) -> int:
                       help="lead_doubled category: keep only doubled final "
                            "contracts and accept every one (skips the 70%% "
                            "obvious / 0.25-trick suit-indifferent gates)")
+    lf_p.add_argument("--doubled-min-gap", type=float, default=0.0,
+                      help="with --only-doubled, require the best lead to beat "
+                           "the best different-suit lead by >= this many DD "
+                           "tricks (0 = accept every doubled board)")
     lf_p.add_argument("--workers", type=int, default=1,
                       help="parallel forge workers; 0 = auto "
                            "(each holds a ~1.2 GB engine)")

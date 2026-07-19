@@ -95,7 +95,8 @@ class LeadOutcome:
 
 
 def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
-                   require_doubled: bool = False) -> LeadOutcome:
+                   require_doubled: bool = False,
+                   doubled_min_gap: float = 0.0) -> LeadOutcome:
     """The whole per-board pipeline: bid out -> final contract -> screening
     cascade (32/64/128) -> 512-sample confirm -> explanations. Self-contained
     so the sequential loop and the parallel workers share one implementation.
@@ -154,6 +155,15 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
             return LeadOutcome(seed, "error", "no_samples", timings=t,
                                detail=f"no samples contract={contract}")
         v = judge_lead(le, force=True)
+        # optional cross-suit gap cut for doubled boards: keep the C1 70%
+        # bypass, but require the best lead to beat the best DIFFERENT-suit
+        # lead by at least this many DD tricks (0.0 = accept every doubled).
+        gap = v.measured.get("gap", 0.0)
+        if gap < doubled_min_gap:
+            return LeadOutcome(
+                seed, "rejected", "below_gap", timings=t,
+                detail=f"below_gap gap={gap} < {doubled_min_gap} "
+                       f"contract={contract}")
         te = time.perf_counter()
         auc = auction_meanings(engine, hand, leader_i, dealer_i, vul,
                                full_auction)
@@ -285,7 +295,8 @@ class _LeadBatchState:
 
 def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
                      max_seconds: float = 3600.0, log=print,
-                     workers: int = 1, require_doubled: bool = False) -> dict:
+                     workers: int = 1, require_doubled: bool = False,
+                     doubled_min_gap: float = 0.0) -> dict:
     pool_dir = os.path.abspath(pool_dir)   # before engine chdir's into ben
 
     if workers == 0:
@@ -295,7 +306,8 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
         from .parallel import forge_batch_parallel
         return forge_batch_parallel(pool_dir, count, base_seed, max_seconds,
                                     log, workers, False, domain="lead",
-                                    require_doubled=require_doubled)
+                                    require_doubled=require_doubled,
+                                    doubled_min_gap=doubled_min_gap)
 
     from .ben import get_engine
 
@@ -308,7 +320,8 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
     k = 0
     while len(state.made) < count and time.perf_counter() - t0 < max_seconds:
         state.absorb(forge_lead_one(engine, base_seed + k,
-                                    require_doubled=require_doubled))
+                                    require_doubled=require_doubled,
+                                    doubled_min_gap=doubled_min_gap))
         k += 1
 
     wall = time.perf_counter() - t0
