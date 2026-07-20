@@ -256,7 +256,8 @@ class BenEngine:
 
     def lead_open(self, hand_pbn: str, seat_i: int, dealer_i: int,
                   vuln: tuple[bool, bool], auction: list[str],
-                  contract: str, doubled: bool, pool_n: int = 128):
+                  contract: str, doubled: bool, pool_n: int = 128,
+                  obvious_p: float | None = None):
         """Sample the opening-lead layouts ONCE, then hand back a grader that
         double-dummies incremental slices — so the screening cascade can rule
         a board out after 32/64 solves instead of the full 128, and each
@@ -266,6 +267,13 @@ class BenEngine:
           grade(n) -> LeadEvaluation over the first n sampled layouts (DDs
                       only the newly-needed ones);
           top_softmax lets the caller reject 'obvious' boards before any DD.
+
+        `obvious_p`: when set, apply the C1 'obvious' gate on ben's lead
+        policy (a cheap NN pass) BEFORE the expensive layout sampling. If the
+        top policy mass already exceeds `obvious_p` the board is a certain
+        pre_obvious reject, so we skip sampling entirely and return
+        (None, 0, top_softmax) — the caller sees the same top_softmax and
+        rejects without paying for 128 sampled layouts.
         """
         from bidding import bidding as bb
 
@@ -284,6 +292,14 @@ class BenEngine:
         softmax = {t: (float(smx[lead_code32(t)])
                        if lead_code32(t) < smx.shape[0] else 0.0)
                    for t in held}
+        top_soft = max(softmax.values()) if softmax else 0.0
+
+        # C1 'obvious' gate BEFORE the expensive sampling: ben's policy above
+        # is a cheap NN pass and does not depend on the sampled layouts, so a
+        # board it already calls obvious never needs the 128-layout sample.
+        if obvious_p is not None and top_soft > obvious_p:
+            return None, 0, top_soft
+
         codes = sorted({lead_code32(t) for t in held})
 
         # sample once, WITHOUT double-dummy (mirror BotLead.simulate's sampler
@@ -330,7 +346,7 @@ class BenEngine:
                 n_samples=m, quality=float(quality) if navail else 0.0,
                 contract=contract, doubled=doubled)
 
-        return grade, navail, (max(softmax.values()) if softmax else 0.0)
+        return grade, navail, top_soft
 
     # -- convention-card explanations (BBA/EPBot via ben) --------------------
     def explain_calls(self, bot, dealer_i: int,

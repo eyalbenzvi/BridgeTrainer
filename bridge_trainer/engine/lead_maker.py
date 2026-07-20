@@ -200,14 +200,20 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
     # rule-out. Most boards die at 32/64, so most DD runs are saved.
     ts = time.perf_counter()
     try:
+        # obvious_p lets lead_open apply the C1 gate on ben's (cheap) lead
+        # policy BEFORE sampling 128 layouts, so obvious boards cost only the
+        # policy pass, not a wasted sample+shuffle.
         grade, navail, top_soft = engine.lead_open(
             hand, leader_i, dealer_i, vul, full_auction, contract, dbl,
-            pool_n=SCREEN_SAMPLES)
+            pool_n=SCREEN_SAMPLES, obvious_p=P_OBVIOUS)
     except Exception as e:
         t["screen_s"] = time.perf_counter() - ts
         return LeadOutcome(seed, "error", "evaluate_error", timings=t,
                            detail=f"sample error ({type(e).__name__}: {e})")
-    if top_soft > P_OBVIOUS:            # obvious: no DD needed at all
+    # grade is None iff lead_open skipped sampling under the obvious_p gate;
+    # keep the `top_soft > P_OBVIOUS` test too so the reject reason is explicit
+    # and the two stay correct even if the gate constant ever changes.
+    if grade is None or top_soft > P_OBVIOUS:   # obvious: no sampling, no DD
         t["screen_s"] = time.perf_counter() - ts
         return LeadOutcome(seed, "rejected", "pre_obvious", timings=t)
     ruled = None
