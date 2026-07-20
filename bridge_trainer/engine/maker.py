@@ -212,9 +212,8 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
                    f"[{t['confirm_s']:.1f}s]")
 
     t_e = time.perf_counter()
-    stem_expl = stem_explanations(engine, spot, hero_bot)
-    opt_expl = option_explanations(spot, v, dict(spot.candidates),
-                                   engine=engine, ev=ev, hero_bot=hero_bot)
+    stem_expl = stem_explanations(spot)
+    opt_expl = option_explanations(spot, v, dict(spot.candidates), ev=ev)
     t["explain_s"] = time.perf_counter() - t_e
 
     elapsed = time.perf_counter() - t_board

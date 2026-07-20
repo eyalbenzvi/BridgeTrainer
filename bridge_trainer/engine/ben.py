@@ -98,12 +98,21 @@ class BenEngine:
         from ddsolver.ddsolver import DDSolver
 
         configuration = conf.load(os.path.join(self.ben_home, CONF_REL))
-        # BBA/EPBot (native lib, ships with ben) stays ON per the stock
-        # config: it supplies convention-card explanations and keycard
-        # handling (owner r6: everything from the engine).
         # Verdict evidence floor (bridge review rec 3): 128 samples beats
         # the stock 50; CI half-width scales with 1/sqrt(n).
         configuration["sampling"]["sample_hands_auction"] = "128"
+        # BBA/EPBot is removed entirely. The candidate set, the rollout and
+        # keycard handling are ALL Ben-neural; explanations come from GIB
+        # (engine/gib_explain.py). Force every BBA switch off and drop the
+        # convention cards so the native EPBot library is never loaded or
+        # consulted — no rule engine ever shapes a candidate, a rollout or a
+        # meaning here. (The old stock config left these on, which injected
+        # rule-engine bids into the candidate list and bid the rollouts.)
+        for key in ("use_bba", "consult_bba", "use_bba_rollout",
+                    "use_bba_to_count_aces"):
+            configuration["models"][key] = "False"
+        configuration["models"]["bba_our_cc"] = ""
+        configuration["models"]["bba_their_cc"] = ""
         self.models = Models.from_conf(configuration, self.ben_home)
         self.sampler = Sample.from_conf(configuration, verbose)
         # dds_max_threads=0 keeps DDS's default (one solver thread per
@@ -348,72 +357,9 @@ class BenEngine:
 
         return grade, navail, top_soft
 
-    # -- convention-card explanations (BBA/EPBot via ben) --------------------
-    def explain_calls(self, bot, dealer_i: int,
-                      auction: list[str]) -> list[dict]:
-        """Per call: BBA/EPBot's interpreted meaning plus its full numeric
-        state — HCP band, MIN *and* MAX suit lengths, and the alert /
-        forcing flags.
-
-        Mirrors ben's own ``BBABotBid.explain_last_bid`` (the supported
-        API) instead of poking the raw player: for each auction prefix we
-        re-seat the whole auction with ``set_arr_bids`` and read the LAST
-        call's interpreted card at that seat. That matters because a seat's
-        earlier calls must be explained in their own context — reading a
-        seat's info once at the end returns only its most recent call and
-        silently mis-attributes it to the earlier ones (the old bug).
-
-        No hand-written bridge — only the engine's card, read through the
-        very convention card ben bids with (``bba_our_cc``, BEN-21GF.bbsa),
-        so the meaning matches Ben's own 2/1 style (owner r6/r7)."""
-        from bidding import bidding as bb
-        from bba.BBA import _str_array
-
-        def empty():
-            return {"text": "", "hcp": None, "minlen": {}, "maxlen": {},
-                    "alert": False, "forcing": False}
-
-        bba = getattr(bot, "bbabot", None)
-        if bba is None:
-            return [empty() for _ in auction]
-        player = bba.players[bba.position]
-
-        out = []
-        for k in range(1, len(auction) + 1):
-            arr_bids = []
-            for tok in auction[:k]:
-                bidid = bb.BID2ID[to_ben(tok)]
-                if bidid < 2:
-                    continue  # PAD entries
-                arr_bids.append(f"{bidid - 2 if bidid < 5 else bidid:02}")
-            no_bids = len(arr_bids)
-            if no_bids == 0:
-                out.append(empty())
-                continue
-            # exactly ben's explain_last_bid setup (BBA.py:643-663)
-            player.new_hand((no_bids + bba.dealer) % 4,
-                            _str_array(bba.hand_str), bba.dealer,
-                            bba.bba_vul(bba.vuln_nsew))
-            player.set_arr_bids(_str_array(arr_bids + [""] * (64 - no_bids)))
-            pos = (no_bids - 1 + bba.dealer) % 4
-            meaning = (player.get_info_meaning(pos) or "").strip()
-            if meaning == "calculated bid":
-                meaning = ""  # a plain natural call — say it with the bands
-            feats = player.get_info_feature(pos)
-            minl = player.get_info_min_length(pos)
-            maxl = player.get_info_max_length(pos)
-            out.append({
-                "text": meaning,
-                "hcp": (int(feats[402]), int(feats[403])),
-                "minlen": {"CDHS"[j]: int(minl[j]) for j in range(4)},
-                "maxlen": {"CDHS"[j]: int(maxl[j]) for j in range(4)},
-                # 443 = game-forcing, 412 = forcing (BBA.extract_hcp)
-                "alert": bool(player.get_info_alerting(pos)),
-                "forcing": bool(feats[443]) or bool(feats[412]),
-            })
-        while len(out) < len(auction):
-            out.append(empty())
-        return out
+    # Bid meanings/explanations are NOT produced here anymore. BBA/EPBot has
+    # been removed; the meaning of each call comes from GIB (BBO gibrest) via
+    # engine/gib_explain.py, which needs only the auction, not this engine.
 
     # -- meaning-band sampling at an auction prefix -------------------------
     def sample_prefix(self, bot, dealer_i: int, prefix: list[str],

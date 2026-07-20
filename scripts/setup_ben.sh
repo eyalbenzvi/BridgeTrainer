@@ -18,6 +18,14 @@ git -C "$BEN_HOME" fetch -q origin "$BEN_COMMIT" 2>/dev/null || true
 git -C "$BEN_HOME" checkout -q "$BEN_COMMIT" 2>/dev/null || \
   echo "warning: pinned commit unavailable (shallow clone?) — using HEAD"
 
+# BBA/EPBot is NOT used by this project: bidding, the candidate set, the
+# rollout and keycard handling are all Ben-neural, and bid explanations come
+# from GIB (bridge_trainer/engine/gib_explain.py). The engine is configured
+# with every BBA switch off (see engine/ben.py), so the native EPBot library
+# is never loaded. Remove its binaries and convention cards outright so the
+# rule engine cannot be invoked even by accident.
+rm -rf "$BEN_HOME/bin/BBA" "$BEN_HOME/BBA" 2>/dev/null || true
+
 if [ ! -x "$VENV/bin/python" ]; then
   "$PYTHON" -m venv "$VENV"
 fi

@@ -559,8 +559,11 @@ function terse(card, call) {
     const p = part.trim().replace(/[.]+$/, "");
     if (!p) continue;
     const low = p.toLowerCase();
-    if (["artificial", "forcing", "bidable suit",
-         "calculated bid"].includes(low)) continue;
+    // drop a few non-informative fragments; mirrors engine/explain.py
+    // _FILLER_PARTS. GIB's names are already canonical, so this is minimal.
+    if (["artificial", "forcing", "bidable suit", "calculated bid"]
+        .includes(low))
+      continue;
     if (low === "balanced") {
       if (denom !== "NT" && !name) name = "Balanced";
       continue;
