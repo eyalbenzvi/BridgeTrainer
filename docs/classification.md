@@ -31,8 +31,8 @@ named factors:
   renormalized over the candidates — how little of the "field's" mass the
   winning call carries. `misled` is 1 when the natural compass points
   wrong: `quality.trap` (the policy argmax loses ≥ 0.8 IMPs) OR dissonance
-  (the winner loses more layouts than it wins, or win-rate overruled a
-  sub-0.5-IMP EV edge). Trap and dissonance are mutually exclusive by
+  (the winner loses more layouts than it wins — an EV edge carried by a few
+  large swings). Trap and dissonance are mutually exclusive by
   construction. The Master-Solvers literature says the "instinct is wrong"
   factor is the strongest predictor of human error, hence half the scale.
 - **CLOSENESS** — how nearly tied the decision is, measured twice and
