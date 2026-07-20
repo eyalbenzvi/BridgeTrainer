@@ -1,8 +1,8 @@
 """Explanations for opening-lead problems.
 
 Two computed artifacts, no hand-authored bridge:
-  * auction meanings — one entry per call of the COMPLETE auction, from the
-    engine's convention card, so the UI can make every bid clickable.
+  * auction meanings — one entry per call of the COMPLETE auction, from GIB
+    (BBO gibrest), so the UI can make every bid clickable.
   * card notes — per candidate lead, phrased purely in the owner's currency
     (average defensive tricks and rank).
 """
@@ -12,21 +12,17 @@ from .conventions import SEATS, seat_of
 from .explain import terse_meaning
 
 
-def auction_meanings(engine, hand_pbn, leader_i, dealer_i, vul,
-                     full_auction) -> list[dict]:
-    """Per-call meaning for the whole auction (idx, seat, call, text)."""
-    try:
-        bot = engine.bot(hand_pbn, leader_i, dealer_i, vul)
-        cards = engine.explain_calls(bot, dealer_i, full_auction)
-    except Exception:
-        cards = [{"text": "", "hcp": None, "minlen": {}}
-                 for _ in full_auction]
+def auction_meanings(dealer_i, full_auction) -> list[dict]:
+    """Per-call meaning for the whole auction (idx, seat, call, text, card).
+    Each call's meaning comes from GIB interpreting the auction prefix; the
+    meaning depends only on the auction, so no hand/engine is needed."""
+    from . import gib_explain
     out = []
     for j, tok in enumerate(full_auction):
         seat_i = seat_of(dealer_i, j)
-        meaning = terse_meaning(cards[j], call=tok) if j < len(cards) else ""
+        card = gib_explain.card_for_auction(list(full_auction[:j + 1]))
         out.append({"idx": j, "seat": SEATS[seat_i], "call": tok,
-                    "text": meaning})
+                    "text": terse_meaning(card, call=tok), "card": card})
     return out
 
 

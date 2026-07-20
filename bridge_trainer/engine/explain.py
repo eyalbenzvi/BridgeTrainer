@@ -18,7 +18,17 @@ BAND_N_MIN = 30
 
 # HCP upper bounds at/above this mean "no real upper bound"
 _HCP_OPEN_TOP = 25
+# GIB's meaning strings are already canonical 2/1 names (Stayman, Blackwood,
+# Weak two bid, Forcing two over one, Cappelletti, …); we keep them verbatim.
+# These few fragments carry no information a reader wants as a bid's "name"
+# (the suit/HCP bands already say it), so they are dropped from the label.
 _FILLER_PARTS = {"artificial", "forcing", "bidable suit", "calculated bid"}
+
+
+def _is_filler(low: str) -> bool:
+    return low in _FILLER_PARTS
+
+
 _SUIT_PART_RE = re.compile(r"^(\d+)\s*\+?\s*!?([SHDC])$")
 _HCP_PART_RE = re.compile(r"\d+\s*(\+|-\s*\d+)?\s*HCP", re.I)
 _CONTRACT_RE = re.compile(r"^(\d)([CDHSN])([NESW])$")
@@ -31,7 +41,7 @@ def _call_name(tok: str) -> str:
 
 
 def _glyphify(text: str) -> str:
-    """EPBot's !S/!H/!D/!C chat markers → suit glyphs."""
+    """The engine's !S/!H/!D/!C suit markers → suit glyphs."""
     for k, g in SUIT_GLYPH.items():
         text = text.replace(f"!{k}", g)
     return text
@@ -64,7 +74,7 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
         if not p:
             continue
         low = p.lower()
-        if low in _FILLER_PARTS:
+        if _is_filler(low):
             continue
         if low == "balanced":
             # implied by a NT call; informative enough elsewhere
@@ -122,40 +132,30 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
     return ", ".join(frags)
 
 
-def stem_explanations(engine, spot, hero_bot) -> list[dict]:
-    """One entry per stem call, meaning from the ENGINE's convention
-    card (text + numeric state); silent calls get no note."""
-    try:
-        card = engine.explain_calls(hero_bot, spot.dealer_i, spot.stem)
-    except Exception:
-        card = [{"text": "", "hcp": None, "minlen": {}}] * len(spot.stem)
+def stem_explanations(spot) -> list[dict]:
+    """One entry per stem call; the meaning of each call comes from GIB
+    (BBO gibrest), which interprets the auction prefix through that call.
+    Silent calls get no note."""
+    from . import gib_explain
     out = []
     for j, tok in enumerate(spot.stem):
         seat_i = seat_of(spot.dealer_i, j)
-        meaning = terse_meaning(card[j], call=tok)
-        entry = {
-            "idx": j, "seat": SEATS[seat_i], "call": tok,
-            "card": card[j],
-        }
+        card = gib_explain.card_for_auction(spot.stem[:j + 1])
+        meaning = terse_meaning(card, call=tok)
+        entry = {"idx": j, "seat": SEATS[seat_i], "call": tok, "card": card}
         entry["text"] = (f"{_call_name(tok)} ({SEATS[seat_i]}): {meaning}"
                          if meaning else "")
         out.append(entry)
     return out
 
 
-def option_explanations(spot, verdict, policy_map, engine=None,
-                        ev=None, hero_bot=None) -> list[dict]:
-    """Outcome-first, terse. What each option shows, where it leads and
-    how it scores — no process narration (the old "next call is usually
-    …" continuations were noise and are gone for good)."""
+def option_explanations(spot, verdict, policy_map, ev=None) -> list[dict]:
+    """Outcome-first, terse. What each option shows (GIB's meaning of
+    stem+option), where it leads and how it scores — no process narration."""
+    from . import gib_explain
     cards = {}
-    if engine is not None and hero_bot is not None:
-        for b in [r["bid"] for r in verdict.table]:
-            try:
-                cards[b] = engine.explain_calls(
-                    hero_bot, spot.dealer_i, spot.stem + [b])[-1]
-            except Exception:
-                cards[b] = {"text": "", "hcp": None, "minlen": {}}
+    for b in [r["bid"] for r in verdict.table]:
+        cards[b] = gib_explain.card_for_auction(spot.stem + [b])
     out = []
     for row in verdict.table:
         b = row["bid"]

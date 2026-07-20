@@ -181,8 +181,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
                 detail=f"below_gap gap={gap} < {doubled_min_gap} "
                        f"contract={contract}")
         te = time.perf_counter()
-        auc = auction_meanings(engine, hand, leader_i, dealer_i, vul,
-                               full_auction)
+        auc = auction_meanings(dealer_i, full_auction)
         notes = card_notes(v)
         t["explain_s"] = time.perf_counter() - te
         elapsed = time.perf_counter() - t_board
@@ -248,7 +247,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
             detail=f"confirm_{v.reason} gap={v.measured.get('gap')}")
 
     te = time.perf_counter()
-    auc = auction_meanings(engine, hand, leader_i, dealer_i, vul, full_auction)
+    auc = auction_meanings(dealer_i, full_auction)
     notes = card_notes(v)
     t["explain_s"] = time.perf_counter() - te
     elapsed = time.perf_counter() - t_board
