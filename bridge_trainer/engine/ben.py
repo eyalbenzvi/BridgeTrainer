@@ -351,38 +351,68 @@ class BenEngine:
     # -- convention-card explanations (BBA/EPBot via ben) --------------------
     def explain_calls(self, bot, dealer_i: int,
                       auction: list[str]) -> list[dict]:
-        """Per call: the engine card's meaning TEXT plus its NUMERIC
-        state for the bidder (HCP band, minimum suit lengths) — no
-        hand-written bridge anywhere, only the engine's card (owner r6/r7)."""
+        """Per call: BBA/EPBot's interpreted meaning plus its full numeric
+        state — HCP band, MIN *and* MAX suit lengths, and the alert /
+        forcing flags.
+
+        Mirrors ben's own ``BBABotBid.explain_last_bid`` (the supported
+        API) instead of poking the raw player: for each auction prefix we
+        re-seat the whole auction with ``set_arr_bids`` and read the LAST
+        call's interpreted card at that seat. That matters because a seat's
+        earlier calls must be explained in their own context — reading a
+        seat's info once at the end returns only its most recent call and
+        silently mis-attributes it to the earlier ones (the old bug).
+
+        No hand-written bridge — only the engine's card, read through the
+        very convention card ben bids with (``bba_our_cc``, BEN-21GF.bbsa),
+        so the meaning matches Ben's own 2/1 style (owner r6/r7)."""
         from bidding import bidding as bb
         from bba.BBA import _str_array
+
+        def empty():
+            return {"text": "", "hcp": None, "minlen": {}, "maxlen": {},
+                    "alert": False, "forcing": False}
+
         bba = getattr(bot, "bbabot", None)
         if bba is None:
-            return [{"text": "", "hcp": None, "minlen": {}}
-                    for _ in auction]
+            return [empty() for _ in auction]
         player = bba.players[bba.position]
-        player.new_hand(bba.position, _str_array(bba.hand_str),
-                        bba.dealer, bba.bba_vul(bba.vuln_nsew))
+
         out = []
-        position = bba.dealer
-        for tok in pad(dealer_i, auction):
-            bidid = bb.BID2ID[tok]
-            if bidid < 2:
-                continue  # PAD entries
-            epbot_bid = bidid - 2 if bidid < 5 else bidid
-            seat = position % 4
-            player.set_bid(seat, epbot_bid)
-            meaning = (player.get_info_meaning(seat) or "").strip()
-            feats = player.get_info_feature(seat)
-            minl = player.get_info_min_length(seat)
+        for k in range(1, len(auction) + 1):
+            arr_bids = []
+            for tok in auction[:k]:
+                bidid = bb.BID2ID[to_ben(tok)]
+                if bidid < 2:
+                    continue  # PAD entries
+                arr_bids.append(f"{bidid - 2 if bidid < 5 else bidid:02}")
+            no_bids = len(arr_bids)
+            if no_bids == 0:
+                out.append(empty())
+                continue
+            # exactly ben's explain_last_bid setup (BBA.py:643-663)
+            player.new_hand((no_bids + bba.dealer) % 4,
+                            _str_array(bba.hand_str), bba.dealer,
+                            bba.bba_vul(bba.vuln_nsew))
+            player.set_arr_bids(_str_array(arr_bids + [""] * (64 - no_bids)))
+            pos = (no_bids - 1 + bba.dealer) % 4
+            meaning = (player.get_info_meaning(pos) or "").strip()
+            if meaning == "calculated bid":
+                meaning = ""  # a plain natural call — say it with the bands
+            feats = player.get_info_feature(pos)
+            minl = player.get_info_min_length(pos)
+            maxl = player.get_info_max_length(pos)
             out.append({
                 "text": meaning,
                 "hcp": (int(feats[402]), int(feats[403])),
                 "minlen": {"CDHS"[j]: int(minl[j]) for j in range(4)},
+                "maxlen": {"CDHS"[j]: int(maxl[j]) for j in range(4)},
+                # 443 = game-forcing, 412 = forcing (BBA.extract_hcp)
+                "alert": bool(player.get_info_alerting(pos)),
+                "forcing": bool(feats[443]) or bool(feats[412]),
             })
-            position += 1
         while len(out) < len(auction):
-            out.append({"text": "", "hcp": None, "minlen": {}})
+            out.append(empty())
         return out
 
     # -- meaning-band sampling at an auction prefix -------------------------

@@ -568,7 +568,9 @@ function terse(card, call) {
     if (/\\d+\\s*(\\+|-\\s*\\d+)?\\s*HCP/i.test(p)) continue;
     const m = /^(\\d+)\\s*\\+?\\s*!?([SHDC])$/.exec(p);
     if (m) { tsuits.push([+m[1], m[2]]); continue; }
-    if (!name && p.length <= 18) name = p;
+    // keep the whole convention name — do NOT drop long ones (RKC Blackwood,
+    // Lebensohl after double); that cap is what left conventions unexplained.
+    if (!name) name = p;
   }
   const byst = {};
   for (const st of "SHDC") {
@@ -585,7 +587,13 @@ function terse(card, call) {
         name = name.slice(0, -(" to !" + st).length);
   const frags = [];
   if (name) frags.push(glyphify(name));
-  for (const [st, v] of suits) frags.push(v + "+" + suitHtml(st));
+  const maxlen = card.maxlen || {};
+  for (const [st, v] of suits) {
+    const mx = (maxlen[st] === undefined) ? 13 : maxlen[st];
+    if (v <= mx && mx < 13)
+      frags.push((v === mx ? v : v + "-" + mx) + suitHtml(st));
+    else frags.push(v + "+" + suitHtml(st));
+  }
   const hcp = card.hcp;
   if (hcp) {
     const [lo, hi] = hcp;

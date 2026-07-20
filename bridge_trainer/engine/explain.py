@@ -18,7 +18,6 @@ BAND_N_MIN = 30
 
 # HCP upper bounds at/above this mean "no real upper bound"
 _HCP_OPEN_TOP = 25
-_NAME_MAX_CHARS = 18
 _FILLER_PARTS = {"artificial", "forcing", "bidable suit", "calculated bid"}
 _SUIT_PART_RE = re.compile(r"^(\d+)\s*\+?\s*!?([SHDC])$")
 _HCP_PART_RE = re.compile(r"\d+\s*(\+|-\s*\d+)?\s*HCP", re.I)
@@ -78,7 +77,11 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
         if m:
             text_suits.append((int(m.group(1)), m.group(2)))
             continue
-        if name is None and len(p) <= _NAME_MAX_CHARS:
+        if name is None and p:
+            # keep the whole convention name — a long one (e.g. "Roman Key
+            # Card Blackwood", "Lebensohl after double") is EXACTLY what must
+            # not be silently dropped; that truncation is what left 4NT and
+            # other conventions unexplained.
             name = _glyphify(p)
     by_suit: dict[str, int] = {}
     for st in "SHDC":
@@ -96,8 +99,18 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
         for st, _ in suits:
             if name.endswith(f" to {SUIT_GLYPH[st]}"):
                 name = name[:-len(f" to {SUIT_GLYPH[st]}")]
+    maxlen = card.get("maxlen") or {}
+
+    def _suit_frag(st: str, v: int) -> str:
+        # use the engine's UPPER bound too: "5-6♠", "6♠" (exactly), "5+♠"
+        mx = maxlen.get(st, 13)
+        if v <= mx < 13:
+            return f"{v}{SUIT_GLYPH[st]}" if v == mx \
+                else f"{v}-{mx}{SUIT_GLYPH[st]}"
+        return f"{v}+{SUIT_GLYPH[st]}"
+
     frags = ([name] if name else []) + \
-        [f"{v}+{SUIT_GLYPH[st]}" for st, v in suits]
+        [_suit_frag(st, v) for st, v in suits]
     hcp = card.get("hcp")
     if hcp:
         lo, hi = int(hcp[0]), int(hcp[1])
