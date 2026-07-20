@@ -11,6 +11,10 @@ import numpy as np
 from ..scoring.tables import imps
 
 GAP_MAX = 2.5           # accept band (IMPs)
+MIN_WINNER_GAP = 0.3    # IMPs the EV-best call must clear the runner-up by;
+                        # below this the deal has no clear resolution and is
+                        # rejected. The EV gap is the sole arbiter — win rate
+                        # never overrules it.
 CI_MAX = 1.5            # evidence cap: wider than this = insufficient evidence
 N_MIN = 100             # minimum samples
 STAKES_MIN = 0.5        # E|top-2 per-sample IMP swing|
@@ -233,17 +237,14 @@ def judge(ev, policy_top: str | None = None,
     pl = float((diff < 0).mean())
     measured["p_top_wins"] = round(pg, 3)
     measured["p_second_wins"] = round(pl, 3)
-    if gap >= 0.5:
-        winner = best                    # >= 0.5 IMPs: the EV edge decides
-    elif pg - pl > 0.10:
-        winner = best                    # IMPs near-equal: win rate decides
-    elif pl - pg > 0.10:
-        winner = second                  # percentages overrule a tiny EV edge
-        measured["winner_by"] = "win-rate over a sub-0.5-IMP EV edge"
-    else:
+    # The EV gap is the sole arbiter of the winner: the EV-best call must
+    # clear the runner-up by at least MIN_WINNER_GAP IMPs. A thinner edge
+    # has no clear resolution, so the deal is rejected — win rate never
+    # promotes the runner-up over the EV edge anymore.
+    if gap < MIN_WINNER_GAP:
         return reject("no_clear_winner")
-    measured.setdefault(
-        "winner_by", "EV gap >= 0.5 IMPs" if gap >= 0.5 else "win rate +10%")
+    winner = best
+    measured["winner_by"] = f"EV gap >= {MIN_WINNER_GAP} IMPs"
     # A winner the engine itself would almost never choose is suspect —
     # likely a rollout artifact, and bad teaching (owner r5 #1).
     if policy_map is not None and policy_map.get(winner, 0.0) < 0.15:
