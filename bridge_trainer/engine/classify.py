@@ -96,36 +96,75 @@ def _auction_lines(rec: dict) -> list[str]:
             for j, t in enumerate(rec["auction"])]
 
 
-def classification_prompt(rec: dict) -> str:
-    taxonomy = "\n".join(f"{i + 1}. {tid} — {name}: {desc}"
-                         for i, (tid, name, _, desc) in enumerate(TAXONOMY))
+def _taxonomy_block() -> str:
+    return "\n".join(f"{i + 1}. {tid} — {name}: {desc}"
+                     for i, (tid, name, _, desc) in enumerate(TAXONOMY))
+
+
+def _problem_facts(rec: dict) -> str:
+    """The per-problem decision facts (hand, auction, candidates, winner)
+    shared by the single-problem and batch prompts."""
     cands = ", ".join(f"{c['call']} (engine policy {c['policy']:.0%})"
                       for c in rec["candidates"])
     winner = rec["verdict"]["accepted"]
     auction = "\n".join(f"  {ln}" for ln in _auction_lines(rec)) or \
         "  (hero opens the auction)"
-    return f"""You are an expert bridge player and teacher. Classify the \
-following bidding problem into exactly ONE category of the fixed taxonomy.
-Classify by what the DECISION is about, not by the auction stage.
-
-## Taxonomy
-{taxonomy}
-
-## Tie-break rules
-{TIE_BREAK}
-
-## Problem
-Scoring: {rec.get('scoring_form', 'IMPs')}. Both sides play standard 2/1 \
-Game Force.
+    return f"""Scoring: {rec.get('scoring_form', 'IMPs')}. Both sides play \
+standard 2/1 Game Force.
 Vulnerability: {rec['vul']} (seats: NS / EW). Dealer: {rec['dealer']}.
 Hero sits {rec['seat']} and holds: {pretty_hand(rec['hand'])}
 Auction so far (with the engine's call meanings):
 {auction}
 Hero must now choose among: {cands}
-The simulation verdict says the winning call is: {winner}
+The simulation verdict says the winning call is: {winner}"""
+
+
+def classification_prompt(rec: dict) -> str:
+    return f"""You are an expert bridge player and teacher. Classify the \
+following bidding problem into exactly ONE category of the fixed taxonomy.
+Classify by what the DECISION is about, not by the auction stage.
+
+## Taxonomy
+{_taxonomy_block()}
+
+## Tie-break rules
+{TIE_BREAK}
+
+## Problem
+{_problem_facts(rec)}
 
 Respond with ONLY a JSON object, no other text:
 {{"type": "<one of: {', '.join(TYPE_IDS)}>", "reason": "<one short sentence>"}}"""
+
+
+def batch_classification_prompt(recs: list[dict]) -> str:
+    """One prompt covering MANY problems, so the whole pool is classified in
+    a single ``claude`` CLI invocation (the CLI's cold start — Node runtime,
+    agent harness, MCP handshake — is paid once, not once per problem).
+
+    Each problem is tagged with its record id; the model must answer with a
+    JSON array of one ``{"id", "type", "reason"}`` object per problem."""
+    problems = "\n\n".join(
+        f"### Problem {i + 1} (id: {rec['id']})\n{_problem_facts(rec)}"
+        for i, rec in enumerate(recs))
+    return f"""You are an expert bridge player and teacher. Classify EACH of \
+the following {len(recs)} bidding problems into exactly ONE category of the \
+fixed taxonomy. Classify by what the DECISION is about, not by the auction \
+stage. Judge every problem independently.
+
+## Taxonomy
+{_taxonomy_block()}
+
+## Tie-break rules
+{TIE_BREAK}
+
+## Problems
+{problems}
+
+Respond with ONLY a JSON array — one object per problem, using each \
+problem's given id, no other text:
+[{{"id": "<problem id>", "type": "<one of: {', '.join(TYPE_IDS)}>", \
+"reason": "<one short sentence>"}}, ...]"""
 
 
 def run_claude_cli(prompt: str, model: str = MODEL) -> str:
@@ -161,3 +200,65 @@ def classify_record(rec: dict, run=run_claude_cli, model: str = MODEL,
             prompt += ("\n\nYour previous answer was invalid "
                        f"({e}). Respond with ONLY the JSON object.")
     raise ValueError(f"classification failed after retries: {last_err}")
+
+
+def parse_batch_response(text: str, valid_ids: set[str] | None = None) -> dict:
+    """Extract the JSON array and return {id: {"type", "type_reason"}} for
+    every well-formed, in-enum entry. Malformed or unknown-type entries are
+    skipped (the caller retries whatever ids are still missing). ``valid_ids``,
+    when given, drops entries whose id was not in the batch."""
+    start, end = text.find("["), text.rfind("]")
+    if start < 0 or end <= start:
+        raise ValueError(f"no JSON array in response: {text[:200]!r}")
+    arr = json.loads(text[start:end + 1])
+    out = {}
+    for obj in arr:
+        if not isinstance(obj, dict):
+            continue
+        pid, typ = obj.get("id"), obj.get("type")
+        if typ not in TYPE_IDS:
+            continue
+        if valid_ids is not None and pid not in valid_ids:
+            continue
+        out[pid] = {"type": typ, "type_reason": str(obj.get("reason", ""))}
+    return out
+
+
+def classify_records(recs: list[dict], run=run_claude_cli, model: str = MODEL,
+                     chunk_size: int | None = None, retries: int = 1,
+                     log=lambda _m: None) -> dict:
+    """Classify many records with as few CLI invocations as possible.
+
+    Sends the whole batch (or ``chunk_size``-sized chunks) in one prompt, so
+    the ``claude`` CLI is loaded once per chunk rather than once per problem.
+    Returns {id: {"type", "type_reason"}}; ids that never came back valid
+    after ``retries`` passes are omitted, so the caller leaves them
+    unclassified (and a later run can pick them up).
+    """
+    if not recs:
+        return {}
+    chunks = ([recs] if not chunk_size else
+              [recs[i:i + chunk_size] for i in range(0, len(recs), chunk_size)])
+    results: dict = {}
+    for ci, chunk in enumerate(chunks):
+        pending = list(chunk)
+        for attempt in range(retries + 1):
+            if not pending:
+                break
+            ids = {r["id"] for r in pending}
+            prompt = batch_classification_prompt(pending)
+            if attempt:
+                prompt += ("\n\nYour previous answer was missing or invalid "
+                           "for some problems. Respond with ONLY the JSON "
+                           "array, one object per problem shown above.")
+            try:
+                got = parse_batch_response(run(prompt, model=model), ids)
+            except (ValueError, json.JSONDecodeError) as e:
+                log(f"  chunk {ci + 1}: batch parse failed ({e}); retrying")
+                got = {}
+            results.update(got)
+            pending = [r for r in pending if r["id"] not in results]
+        if pending:
+            log(f"  chunk {ci + 1}: {len(pending)} unclassified after "
+                f"{retries + 1} tries: {[r['id'] for r in pending]}")
+    return results
