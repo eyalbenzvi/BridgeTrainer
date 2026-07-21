@@ -21,6 +21,9 @@ pool_live/
 # JSON pool is a scratch staging area for generation and is not committed.
 data/problems/
 data/index.json
+# Transient per-batch staging pools used while classifying/pushing.
+data_bid/
+data_lead/
 
 # Firebase service-account keys — never commit these
 *service-account*.json
