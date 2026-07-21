@@ -20,10 +20,10 @@ P_TOP = 0.70
 P_SECOND = 0.15
 P_TOP_3WAY = 0.60
 P_23_SUM = 0.25
-P_OPTION = 0.08
+P_OPTION = 0.03
 STEM_MASS_FLOOR = 0.05
 MAX_NONPASS_STEM = 10
-MAX_CANDIDATES = 5
+MAX_CANDIDATES = 6
 
 
 @dataclass
@@ -105,8 +105,12 @@ def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
                 and not any(t.eligible for t in turns):
             return None
         seat_i = seat_of(dealer_i, n)
+        # FULL softmax (not get_bid_candidates): see BenEngine.policy_full.
+        # The argmax — hence the bid-out and every board's auction — is
+        # unchanged; the decision point just sees the true 2nd/3rd mass and
+        # a candidate list no longer clipped at Ben's 0.10 search_threshold.
         policy = [(it.bid, it.p) for it in
-                  engine.policy(bots[seat_i], dealer_i, auction)]
+                  engine.policy_full(bots[seat_i], dealer_i, auction)]
         p1 = policy[0][1] if policy else 1.0
         p2 = policy[1][1] if len(policy) > 1 else 0.0
         p3 = policy[2][1] if len(policy) > 2 else 0.0
@@ -146,6 +150,11 @@ def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
         if pmap.get(t.chosen, 0.0) < STEM_MASS_FLOOR:
             return None  # engine-weird stem, discard board
 
+    # every call carrying >= P_OPTION (3%) policy mass is offered — a low
+    # enough floor to surface the natural alternatives a human weighs (a
+    # simple raise, a jump to game) that Ben's own 0.10 cutoff discarded.
+    # The verdict's interest layer is anchored to the highest-policy call,
+    # so these extra low-policy options never distort which board qualifies.
     candidates = [(b, p) for b, p in best.policy if p >= P_OPTION]
     if not any(b == best.policy[0][0] for b, _ in candidates):
         candidates.insert(0, best.policy[0])

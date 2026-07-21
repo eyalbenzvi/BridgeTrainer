@@ -112,7 +112,7 @@ can return later for curriculum drilling of specific decisions.
   by your standard (req 2/4)? If no → BBA/EPBot fallback path.
   **Gate (engineering)**: measured budget table fits <60 s.
 - **P1 — Scanner + candidates (~2–3 days).** Random-deal scan loop,
-  policy thresholds (P_TOP≈0.70, P_2ND≈0.15, P_OPT≈0.08 — tuned on the
+  policy thresholds (P_TOP≈0.70, P_2ND≈0.15, P_OPT≈0.03 — tuned on the
   known-answer set below), V1 legality, candidate records.
   **Calibration set**: the owner's flagged non-problems (e50006-19's
   1NT hand, b2-000273ee's Stayman hand) must fail the scan; the b1

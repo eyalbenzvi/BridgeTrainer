@@ -1,13 +1,13 @@
-"""The ever-growing problem pool.
+"""The problem pool (local filesystem backend).
 
-v1 backend: a directory of JSON documents plus an index file, served as
-static assets (deployed on the gh-pages branch under data/). The web app
-fetches data/index.json, picks a random unseen id, then fetches
-data/problems/<id>.json. The producer appends documents and rewrites the
-index; nothing else in the site needs rebuilding.
+A directory of JSON documents plus an index file. This is now a SCRATCH
+staging area for generation only — it is not committed and not served.
+Production reads from Firestore (``pool.firestore_store``): the generator
+writes problems here, then ``trainer pool push`` uploads them and the web
+app fetches each document live from the ``problems`` collection.
 
-The interface is deliberately database-shaped (add / list / get) so a
-Firestore backend can replace it without touching the producer or the app.
+The interface is deliberately database-shaped (add / list / get) so the
+Firestore backend mirrors it without touching the producer.
 """
 from __future__ import annotations
 

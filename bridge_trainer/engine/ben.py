@@ -140,6 +140,40 @@ class BenEngine:
         out.sort(key=lambda x: -x.p)
         return out
 
+    # -- FULL policy at a turn --------------------------------------------
+    def policy_full(self, bot, dealer_i: int,
+                    auction: list[str]) -> list[PolicyItem]:
+        """The neural policy over EVERY legal call, read straight from the
+        bidder's softmax.
+
+        Unlike ``policy`` (``bot.get_bid_candidates``) this does NOT truncate
+        at Ben's own ``search_threshold`` — 0.10 for a first bid — which
+        otherwise hides legitimate lower-probability calls (e.g. a natural
+        raise the network rates at 4-6%). The scanner thresholds the list
+        itself (``scanner.P_OPTION``), so it needs the raw distribution.
+
+        The argmax is identical to ``get_bid_candidates`` (both take the
+        highest-softmax legal call), so replacing ``policy`` with this in the
+        scanner leaves the bid-out — and therefore every board's auction —
+        unchanged; only the candidate list at the decision point grows.
+        """
+        from bidding import bidding as bb
+
+        padded = pad(dealer_i, auction)
+        bid_softmax, _alerts = bot.next_bid_np(padded)
+        p = np.asarray(bid_softmax, dtype=float).reshape(-1)
+        out = []
+        for idx in range(p.shape[0]):
+            try:
+                name = bb.ID2BID[int(idx)]
+            except (KeyError, IndexError):
+                continue
+            if not bb.can_bid(name, padded):
+                continue
+            out.append(PolicyItem(bid=from_ben(name), p=float(p[idx])))
+        out.sort(key=lambda x: -x.p)
+        return out
+
     # -- the searched table call (accurate stem bidding) -------------------
     def choose(self, bot, dealer_i: int, auction: list[str]):
         resp = bot.bid(pad(dealer_i, auction))

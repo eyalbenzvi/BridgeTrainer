@@ -4,7 +4,9 @@ from pathlib import Path
 from bridge_trainer.engine.difficulty import (
     CUTS, difficulty_classification, _contested, _level)
 
-POOL = Path(__file__).parent.parent / "data" / "problems"
+# The problem bank lives in Firestore now (data/problems is no longer
+# committed); the coverage test runs on a checked-in sample record.
+SAMPLE = Path(__file__).parent / "fixtures" / "ben1_sample.json"
 
 
 def rec(*, accepted="3S", policy=None, gap=1.5, p_top=0.6, p_second=0.2,
@@ -106,13 +108,11 @@ def test_boundary_guard_takes_median_of_halves():
     assert guarded["difficulty_level"] == base["difficulty_level"] + 1
 
 
-def test_runs_on_every_published_record():
-    for path in POOL.glob("*.json"):
-        rec = json.loads(path.read_text())
-        # difficulty_classification is bidding-specific; opening-lead records
-        # carry their own 1-5 difficulty (engine/lead_verdict.py).
-        if rec.get("kind") == "lead":
-            continue
-        out = difficulty_classification(rec)
-        assert 0 <= out["difficulty_score"] <= 100
-        assert 1 <= out["difficulty_level"] <= 5
+def test_runs_on_sample_record():
+    # difficulty_classification is bidding-specific; opening-lead records
+    # carry their own 1-5 difficulty (engine/lead_verdict.py).
+    rec = json.loads(SAMPLE.read_text())
+    assert rec.get("kind") != "lead"
+    out = difficulty_classification(rec)
+    assert 0 <= out["difficulty_score"] <= 100
+    assert 1 <= out["difficulty_level"] <= 5

@@ -57,8 +57,12 @@ policy distribution *before* committing Ben's chosen call:
 
 - **Dilemma signal**: `p(top) < 0.70 AND p(second) >= 0.15` (tunable;
   calibrated in deliverable 4).
-- **Candidates**: calls with policy ≥ 0.08, union the top call, capped
-  at 5; if fewer than 2 → not a problem.
+- **Candidates**: calls with policy ≥ 0.03, union the top call, capped
+  at 6; if fewer than 2 → not a problem. The distribution is read from
+  the raw bidder softmax (`BenEngine.policy_full`), NOT
+  `get_bid_candidates`, whose own 0.10 search_threshold would otherwise
+  hide legitimate lower-probability calls (a simple raise, a jump to
+  game) below its cutoff.
 - **Stem sanity**: every committed stem call must itself carry policy
   mass ≥ 0.05 at the moment it was chosen (an auction Ben itself finds
   bizarre is discarded — no weird stems); auction length cap (12 calls
