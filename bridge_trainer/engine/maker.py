@@ -27,7 +27,8 @@ CONFIRM_SAMPLES = 512   # published evidence: 4x the screen count, CI halved.
                         # Changing that (e.g. perturbing the seed for confirm)
                         # is an owner-level evidence-policy decision.
 PRESCREEN_SAMPLES = 32  # decisive-rejection slice of the screen pool
-PRESCREEN_TOP_K = 2     # candidates evaluated at prescreen (by policy mass)
+                        # (all candidates are evaluated on it — see
+                        # forge_one — so its pairs match the full judge)
 
 def _round_trip_ok(spot) -> bool:
     """Rec 13d: the hand we publish is the hand Ben bid for that seat."""
@@ -148,11 +149,17 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
         sub_np = hands_np[idx]
         sub_pbn = [hands_pbn[i] for i in idx]
         try:
+            # evaluate the FULL candidate list (not just the top-2): the
+            # prescreen's best/second/ref then match the 128-sample judge's,
+            # so its decisive-rejection bounds stay valid now that a lower
+            # option threshold admits more low-policy candidates. The
+            # shared dd_memo means the screen reuses these DD solves.
             ev_pre = engine.rollout_eval(
-                hero_bot, padded, cand_bids[:PRESCREEN_TOP_K],
+                hero_bot, padded, cand_bids,
                 sub_np, sub_pbn, quality, dd_memo=dd_memo)
             pre_reason = prejudge(ev_pre, policy_top=policy_top,
-                                  hero_i=spot.hero_i)
+                                  hero_i=spot.hero_i,
+                                  policy_map=dict(spot.candidates))
         except Exception as e:
             return BoardOutcome(seed, "error", "evaluate_error", timings=t,
                                 detail=f"prescreen error "

@@ -26,7 +26,13 @@ four seats to a decision point, and a turn qualifies only when Ben's own
 policy distribution genuinely splits AND the paired rollout evaluation
 (shared samples, per-candidate expected IMPs, CI floors) confirms the
 choice is close, material and statistically honest. Options are the calls
-carrying real policy mass (2–5); every problem ships with computed
+carrying real policy mass — every call the bidder's raw softmax rates at
+≥ 3% (2–6 of them), so the natural alternatives a human weighs (a simple
+raise, a jump to game) are offered, not just the one or two above Ben's
+own 0.10 cutoff. The board's "interest" is judged against the
+highest-policy alternative (the tempting call), so surfacing extra
+low-policy options never changes which board qualifies. Every problem
+ships with computed
 explanations — empirical meaning bands per stem call ("1♥ (N): overcall —
 7–10 HCP, 5.0♥ avg, n=128, measured"), convention names from a mechanical
 2/1 table (Stayman, transfers, RKC, cue bids, double types), and

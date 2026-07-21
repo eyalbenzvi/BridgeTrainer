@@ -23,8 +23,8 @@ aspiration:
 | `engine/conventions.py` `systemic_meaning()` | 2/1 rulebook ranges (openings 11-21, 1NT 15-17, weak twos 5-10, role-aware NT ranges, overcall ranges...) | **[bridge]** |
 | `engine/conventions.py` `in_convention_sequence`, asking list | which turns are mid-convention | **[bridge]** |
 | `engine/scanner.py` content exclusions | bust artifact, Drury fork, negative-X fork, GF-pass artifact | **[bridge]** (patterns) |
-| `engine/scanner.py` thresholds | policy split (0.70/0.15), candidate floor 0.08, stem-mass 0.05, depth caps | **[policy]** over Ben's numbers |
-| `engine/verdict.py` gates + winner rules | gap/CI/stakes floors, q, interest weights, trap, 0.5-IMP / +10% / policy>=0.15 winner rules | **[policy]** over Ben+DD numbers |
+| `engine/scanner.py` thresholds | policy split (0.70/0.15), candidate floor 0.03 (raw softmax, not get_bid_candidates), stem-mass 0.05, depth caps | **[policy]** over Ben's numbers |
+| `engine/verdict.py` gates + winner rules | gap/CI/stakes floors, q, interest weights, trap, 0.5-IMP / +10% / policy>=0.15 winner rules; interest anchored to the highest-policy alternative (not the EV runner-up) so it is invariant to candidate-set size | **[policy]** over Ben+DD numbers |
 | `engine/verdict.py` `_contract_class` | what counts as game/slam | **[laws]** (scoring boundaries) |
 | `engine/maker.py` quotas | opening cap, theme dedup, trap cap | **[policy]** |
 | `scoring/tables.py` | IMP table, contract scores | **[laws]** |

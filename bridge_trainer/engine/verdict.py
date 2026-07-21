@@ -96,22 +96,44 @@ def _contract_class(contract: str) -> str:
     return "partscore"
 
 
-def _interest(diff, doubled, ev, best, second, hero_i, policy_top, gap):
-    """The 0-120 interest score (selectivity review, stage 2)."""
+def _interest_ref(bids, best, policy_map, fallback):
+    """The interest REFERENCE: the call the student is most likely to pick
+    instead of the EV-winner — the highest-policy alternative — rather than
+    the 2nd-best by EV.
+
+    Anchoring interest to policy (what a player would actually be tempted by)
+    instead of to EV rank decouples the score from the SIZE of the candidate
+    set: lowering the option threshold surfaces more low-policy calls, but
+    none of them can displace the reference, so a genuinely instructive
+    board keeps the same interest score whether it shows 2 options or 6.
+    Falls back to the EV runner-up when no policy is available (unit tests,
+    legacy callers)."""
+    if policy_map:
+        alts = [b for b in bids if b != best]
+        if alts:
+            return max(alts, key=lambda b: policy_map.get(b, 0.0))
+    return fallback
+
+
+def _interest(diff, doubled, ev, best, ref, hero_i, policy_top, gap):
+    """The 0-120 interest score (selectivity review, stage 2).
+
+    ``diff``/``doubled``/``gap``/``ref`` are all taken relative to the
+    interest reference (``_interest_ref``), not the EV runner-up."""
     from collections import Counter as _C
     q = float((diff != 0).mean())
     w4 = ((np.abs(diff) >= 4).astype(float) * np.where(doubled, 0.5, 1.0))
     p4 = float(w4.mean())
-    tv = _tv_distance(ev.contracts[best], ev.contracts[second])
+    tv = _tv_distance(ev.contracts[best], ev.contracts[ref])
     if hero_i is not None:
         flips = [
             (_contract_side(a, hero_i) != _contract_side(b, hero_i))
-            for a, b in zip(ev.contracts[best], ev.contracts[second])]
+            for a, b in zip(ev.contracts[best], ev.contracts[ref])]
         flip = float(np.mean(flips))
     else:
         flip = 0.0
     modal_b = _C(ev.contracts[best]).most_common(1)[0][0]
-    modal_s = _C(ev.contracts[second]).most_common(1)[0][0]
+    modal_s = _C(ev.contracts[ref]).most_common(1)[0][0]
     span = _contract_class(modal_b) != _contract_class(modal_s)
     trap = (policy_top is not None and policy_top != best
             and gap >= TRAP_GAP_MIN)
@@ -210,8 +232,22 @@ def judge(ev, policy_top: str | None = None,
         return reject("one_sided")
 
     # ---- selectivity layer (stage 1 + 2): consequence + interest -------
-    score, interest = _interest(diff, doubled, ev, best, second,
-                                hero_i, policy_top, gap)
+    # The interest layer is measured against the REFERENCE call — the
+    # highest-policy alternative to the winner (what the student is most
+    # tempted to bid) — not the EV runner-up. This makes the score
+    # invariant to the candidate-set size: extra low-policy options (from a
+    # lower option threshold) never become the reference and so never shift
+    # which board qualifies. The honesty/unique-winner gates above stay on
+    # the EV pair (best vs second), which is what they are about.
+    ref = _interest_ref(bids, best, policy_map, second)
+    idiff = _imp_diff(ev.ev[best], ev.ev[ref])
+    igap = float(idiff.mean())
+    idoubled = np.array([("X" in ca[1:-1]) or ("X" in cb[1:-1])
+                         for ca, cb in zip(ev.contracts[best],
+                                           ev.contracts[ref])])
+    measured["interest_vs"] = ref
+    score, interest = _interest(idiff, idoubled, ev, best, ref,
+                                hero_i, policy_top, igap)
     measured.update(interest)
     if interest["q"] < Q_MIN:
         return reject("inconsequential")
@@ -219,13 +255,13 @@ def judge(ev, policy_top: str | None = None,
         return reject("uninteresting")
     # split-half stability: an interest score that flips between sample
     # halves is harvesting DD variance, not bridge
-    half = len(diff) // 2
-    s1, _ = _interest(diff[:half], doubled[:half],
-                      _EvalView(ev, slice(0, half)), best, second,
-                      hero_i, policy_top, gap)
-    s2, _ = _interest(diff[half:], doubled[half:],
-                      _EvalView(ev, slice(half, None)), best, second,
-                      hero_i, policy_top, gap)
+    half = len(idiff) // 2
+    s1, _ = _interest(idiff[:half], idoubled[:half],
+                      _EvalView(ev, slice(0, half)), best, ref,
+                      hero_i, policy_top, igap)
+    s2, _ = _interest(idiff[half:], idoubled[half:],
+                      _EvalView(ev, slice(half, None)), best, ref,
+                      hero_i, policy_top, igap)
     if abs(s1 - s2) > UNSTABLE_DELTA and min(s1, s2) < THETA:
         return reject("unstable_interest")
 
@@ -277,8 +313,9 @@ def _wilson_upper(k: int, n: int, z: float = PRE_Z) -> float:
 
 
 def prejudge(ev, policy_top: str | None = None,
-             hero_i: int | None = None) -> str | None:
-    """Decisive-rejection prescreen on a small top-2-candidate slice.
+             hero_i: int | None = None,
+             policy_map: dict | None = None) -> str | None:
+    """Decisive-rejection prescreen on a small sample slice.
 
     Returns a rejection reason only when the full 128-sample judge's
     outcome is already statistically settled; returns None ("escalate")
@@ -293,9 +330,12 @@ def prejudge(ev, policy_top: str | None = None,
       evidence that q < 0.40 (a true-q>=0.40 board shows all-push with
       probability 0.6^32 ~ 1e-7).
 
-    Only the top-2 policy candidates are evaluated here, so a 3rd
-    candidate can in principle rescue a board we reject — a recall-only
-    loss, measured via the audit mode in maker.forge_one.
+    The caller evaluates the FULL candidate list here (not just the top
+    two), so ``best``/``second``/``ref`` match the 128-sample judge's own
+    pairs and every bound is a genuine upper bound on the same quantity —
+    the decisive-rejection guarantee holds under any option threshold.
+    The EV pair (best, second) drives one_sided/stakeless; the interest
+    bounds use the policy reference ``ref`` exactly as ``judge`` does.
     """
     n = ev.n_samples
     if n < PRE_MIN_N:
@@ -319,7 +359,12 @@ def prejudge(ev, policy_top: str | None = None,
         if stakes_hi < STAKES_MIN:
             return "stakeless"
 
-    q_hi = _wilson_upper(nonzero, n)
+    # interest reference (matches judge): winner vs highest-policy alt
+    ref = _interest_ref(bids, best, policy_map, second)
+    idiff = _imp_diff(ev.ev[best], ev.ev[ref])
+    inonzero = int((idiff != 0).sum())
+
+    q_hi = _wilson_upper(inonzero, n)
     if q_hi < Q_MIN:
         return "inconsequential"
 
@@ -330,14 +375,14 @@ def prejudge(ev, policy_top: str | None = None,
     # when the ordering is decisively settled in policy_top's favor.
     # p4's doubled-discount weights are <= 1, so the plain count bounds
     # the weighted mean from above
-    k4 = int((np.abs(diff) >= 4).sum())
+    k4 = int((np.abs(idiff) >= 4).sum())
     p4_hi = _wilson_upper(k4, n)
-    tv = _tv_distance(ev.contracts[best], ev.contracts[second])
+    tv = _tv_distance(ev.contracts[best], ev.contracts[ref])
     tv_hi = min(1.0, tv + PRE_TV_ALLOW)
     if hero_i is not None:
         flips = int(sum(
             _contract_side(a, hero_i) != _contract_side(b, hero_i)
-            for a, b in zip(ev.contracts[best], ev.contracts[second])))
+            for a, b in zip(ev.contracts[best], ev.contracts[ref])))
         flip_hi = _wilson_upper(flips, n)
     else:
         flip_hi = 0.0
