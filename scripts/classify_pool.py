@@ -22,7 +22,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from bridge_trainer.engine.classify import MODEL, classify_record
+from bridge_trainer.engine.classify import MODEL, classify_records
 from bridge_trainer.engine.difficulty import difficulty_classification
 from bridge_trainer.engine.lead_classify import classify_lead_record
 from bridge_trainer.pool.store import ProblemPool
@@ -32,41 +32,67 @@ ap.add_argument("pool_dir")
 ap.add_argument("--model", default=MODEL)
 ap.add_argument("--difficulty-only", action="store_true",
                 help="skip the LLM type classification")
+ap.add_argument("--chunk-size", type=int, default=0,
+                help="bidding problems per LLM call (0 = all in one call, so "
+                     "the claude CLI is loaded once; lower it only if a batch "
+                     "overflows the model context)")
 args = ap.parse_args()
 
 pool = ProblemPool(args.pool_dir)
-done = skipped = failed = 0
+
+# Pass 1: pure/deterministic work (difficulty for bidding, category for
+# leads) and collect the bidding records that still need an LLM type. The
+# type classification is then ONE batched claude call for the whole pool
+# (classify_records), not one CLI launch per problem.
+records = {}          # path -> record
+changed_paths = set()
+need_type = []        # bidding records missing classification.type
 for path in sorted(pool.problems_dir.glob("*.json")):
     rec = json.loads(path.read_text())
+    records[path] = rec
     cls = rec.setdefault("classification", {})
-    changed = False
     is_lead = rec.get("kind") == "lead"
     if "difficulty_level" not in cls and not is_lead:
         # leads set their own difficulty_level at generation; only bidding
         # records need the difficulty computation here.
         cls.update(difficulty_classification(rec))
-        changed = True
+        changed_paths.add(path)
     if "type" not in cls and not args.difficulty_only:
         if is_lead:
             # deterministic category from the contract — no LLM, never fails.
             cls["type"] = classify_lead_record(rec)
-            changed = True
+            changed_paths.add(path)
         else:
-            try:
-                cls.update(classify_record(rec, model=args.model))
-                changed = True
-            except Exception as e:
-                failed += 1
-                print(f"FAILED {rec['id']}: {e}", file=sys.stderr)
-    if changed:
-        path.write_text(json.dumps(rec, separators=(",", ":")))
-        done += 1
-        print(f"{rec['id']}: level {cls.get('difficulty_level')} "
-              f"(score {cls.get('difficulty_score')}) "
-              f"type {cls.get('type', '-')}")
-    else:
-        skipped += 1
+            need_type.append(rec)
+
+failed = 0
+if need_type:
+    print(f"classifying {len(need_type)} bidding problem(s) in "
+          f"{'one call' if not args.chunk_size else f'chunks of {args.chunk_size}'} "
+          f"...", file=sys.stderr)
+    by_id = {r["id"]: p for p, r in records.items()}
+    types = classify_records(need_type, model=args.model,
+                             chunk_size=args.chunk_size or None,
+                             log=lambda m: print(m, file=sys.stderr))
+    for rec in need_type:
+        got = types.get(rec["id"])
+        if got:
+            rec["classification"].update(got)
+            changed_paths.add(by_id[rec["id"]])
+        else:
+            failed += 1
+            print(f"FAILED {rec['id']}: no valid classification returned",
+                  file=sys.stderr)
+
+for path in sorted(changed_paths):
+    rec = records[path]
+    cls = rec["classification"]
+    path.write_text(json.dumps(rec, separators=(",", ":")))
+    print(f"{rec['id']}: level {cls.get('difficulty_level')} "
+          f"(score {cls.get('difficulty_score')}) "
+          f"type {cls.get('type', '-')}")
 
 pool.rebuild_index()
-print(f"{done} classified, {skipped} already done, {failed} failed")
+print(f"{len(changed_paths)} classified, "
+      f"{len(records) - len(changed_paths)} already done, {failed} failed")
 sys.exit(1 if failed else 0)
