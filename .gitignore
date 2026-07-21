@@ -17,6 +17,11 @@ pool_b2/
 pool_b3/
 pool_live/
 
+# The problem bank lives in Firestore (see `trainer pool push`); the local
+# JSON pool is a scratch staging area for generation and is not committed.
+data/problems/
+data/index.json
+
 # Firebase service-account keys — never commit these
 *service-account*.json
 *-sa-key.json

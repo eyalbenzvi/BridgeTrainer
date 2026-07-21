@@ -2,11 +2,12 @@
 
 Two pages, no build step, no framework:
   index.html  — "Deal me a hand" (random unseen problem) + progress stats
-  p.html?id=X — renders one problem document fetched from data/problems/X.json
+  p.html?id=X — renders one problem document fetched live from Firestore
+                (the ``problems`` collection; see web/bt-firebase.js)
 
 Answers live in localStorage under key "bt_pool" ({id: {answer, correct,
-ts}}). The pool itself is data/ next to these pages; the producer appends to
-it continuously, so the app sees new problems without any redeploy.
+ts}}). Problems come from Firestore, so the producer's `pool push` makes
+new problems appear without any redeploy.
 
 Look and feel follows Bridge Base Online (ux/bridge panel redesign):
 green-felt page with white content cards, a fixed W-N-E-S auction diagram

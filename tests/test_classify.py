@@ -7,7 +7,9 @@ from bridge_trainer.engine.classify import (
     TAXONOMY, TYPE_IDS, classification_prompt, classify_record,
     parse_response, pretty_hand)
 
-POOL = Path(__file__).parent.parent / "data" / "problems"
+# The problem bank lives in Firestore now (data/problems is no longer
+# committed); tests read a representative record from a checked-in fixture.
+SAMPLE = Path(__file__).parent / "fixtures" / "ben1_sample.json"
 
 
 def test_taxonomy_is_fixed_and_unique():
@@ -20,7 +22,7 @@ def test_pretty_hand_handles_void():
 
 
 def test_prompt_contains_the_decision_facts():
-    rec = json.loads(next(iter(sorted(POOL.glob("*.json")))).read_text())
+    rec = json.loads(SAMPLE.read_text())
     prompt = classification_prompt(rec)
     for tid in TYPE_IDS:
         assert tid in prompt
@@ -51,7 +53,7 @@ def test_classify_record_retries_then_succeeds():
             return "not json"
         return '{"type": "slam_try", "reason": "keycard decision"}'
 
-    rec = json.loads(next(iter(sorted(POOL.glob("*.json")))).read_text())
+    rec = json.loads(SAMPLE.read_text())
     out = classify_record(rec, run=flaky)
     assert out["type"] == "slam_try"
     assert len(calls) == 2
@@ -59,6 +61,6 @@ def test_classify_record_retries_then_succeeds():
 
 
 def test_classify_record_gives_up_after_retries():
-    rec = json.loads(next(iter(sorted(POOL.glob("*.json")))).read_text())
+    rec = json.loads(SAMPLE.read_text())
     with pytest.raises(ValueError):
         classify_record(rec, run=lambda p, model: "never json", retries=1)
