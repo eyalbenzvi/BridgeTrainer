@@ -106,6 +106,36 @@ def test_classify_records_one_call_for_whole_batch():
     assert out["ben1-bbbb"]["type"] == "invite_or_game"
 
 
+def test_classify_records_splits_chunk_on_hang():
+    # A chunk whose CLI call hangs (TimeoutExpired) is split in half and each
+    # half retried on its own, so one bad batch can't sink the rest.
+    import subprocess
+    a, b = _two_recs()
+    calls = []
+
+    def run(prompt, model):
+        calls.append(prompt)
+        if calls[-1].count("(id: ") == 2:               # the full 2-problem batch
+            raise subprocess.TimeoutExpired("claude", 300)
+        pid = "ben1-aaaa" if "ben1-aaaa" in prompt else "ben1-bbbb"
+        return f'[{{"id":"{pid}","type":"slam_try","reason":"r"}}]'
+
+    out = classify_records([a, b], run=run, chunk_size=2, retries=0)
+    assert set(out) == {"ben1-aaaa", "ben1-bbbb"}       # both recovered
+    assert len(calls) == 3                              # 1 failed batch + 2 singles
+
+
+def test_classify_records_omits_single_that_keeps_failing():
+    import subprocess
+    a, _ = _two_recs()
+
+    def run(prompt, model):
+        raise subprocess.TimeoutExpired("claude", 300)
+
+    out = classify_records([a], run=run, retries=0)
+    assert out == {}                                    # omitted, no crash
+
+
 def test_classify_records_retries_only_missing_ids():
     a, b = _two_recs()
     calls = []

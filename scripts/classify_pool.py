@@ -22,7 +22,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from bridge_trainer.engine.classify import MODEL, classify_records
+from bridge_trainer.engine.classify import (
+    DEFAULT_CHUNK_SIZE, MODEL, classify_records)
 from bridge_trainer.engine.difficulty import difficulty_classification
 from bridge_trainer.engine.lead_classify import classify_lead_record
 from bridge_trainer.pool.store import ProblemPool
@@ -32,18 +33,21 @@ ap.add_argument("pool_dir")
 ap.add_argument("--model", default=MODEL)
 ap.add_argument("--difficulty-only", action="store_true",
                 help="skip the LLM type classification")
-ap.add_argument("--chunk-size", type=int, default=0,
-                help="bidding problems per LLM call (0 = all in one call, so "
-                     "the claude CLI is loaded once; lower it only if a batch "
-                     "overflows the model context)")
+ap.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE,
+                help="bidding problems per LLM call (default "
+                     f"{DEFAULT_CHUNK_SIZE}; a chunk that hangs/fails is split "
+                     "and retried). Pass 0 to force the whole pool into one "
+                     "call — fastest to load but risks a timeout/truncation "
+                     "hang on a large pool.")
 args = ap.parse_args()
 
 pool = ProblemPool(args.pool_dir)
 
 # Pass 1: pure/deterministic work (difficulty for bidding, category for
 # leads) and collect the bidding records that still need an LLM type. The
-# type classification is then ONE batched claude call for the whole pool
-# (classify_records), not one CLI launch per problem.
+# type classification is then a handful of batched claude calls
+# (classify_records, chunked), not one CLI launch per problem; whatever
+# classifies successfully is returned even if some chunk hangs or fails.
 records = {}          # path -> record
 changed_paths = set()
 need_type = []        # bidding records missing classification.type
