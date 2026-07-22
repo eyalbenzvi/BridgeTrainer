@@ -311,11 +311,26 @@ class BenEngine:
             bot.rng.shuffle(order)
             accepted = accepted[order][:pool_n]
             navail = int(accepted.shape[0])
-        rows = bot.translate_hands(accepted, bot.hand_str, navail) \
-            if navail else []
+
+        # Build a concrete, legal 52-card deal per sample the way Ben's own
+        # double_dummy_estimates does: PBN position 0 is the leader's real hand,
+        # positions 1..3 are the sampled hidden hands (`accepted[i]` is exactly
+        # those three, leader-first order = leader, leader+1, leader+2,
+        # leader+3). deck52.convert_cards realizes the low-pip placeholders into
+        # concrete spots consistent with the leader's known cards. We pass
+        # opening_lead=0 (a top card, in-suit index 0) so NO card is removed —
+        # unlike Ben, we want the full 52 cards present so endplay can score
+        # every physical lead separately downstream.
+        from deck52 import convert_cards, handxxto52str
+        ncb = self.models.n_cards_bidding
+        leader_full = bot.hand_str
         layouts = []
-        for i, row in enumerate(rows):
-            hands_abs = hero_first_to_absolute(row.split(), bot.seat)
+        for i in range(navail):
+            sample_pbn = "N:" + leader_full + " " + " ".join(
+                handxxto52str(h, ncb) for h in accepted[i])
+            concrete = convert_cards(sample_pbn, 0, leader_full, bot.rng, ncb)
+            hands_leader_first = concrete[2:].strip().split(" ")
+            hands_abs = hero_first_to_absolute(hands_leader_first, bot.seat)
             layouts.append(Layout(hands=hands_abs, sample_index=i,
                                   sample_seed=sampler_seed,
                                   accept={"posterior": "ben_auction_replay"}))
