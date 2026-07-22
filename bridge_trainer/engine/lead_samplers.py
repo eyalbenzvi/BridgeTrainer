@@ -239,14 +239,32 @@ def _ben_sample_layouts(engine, problem: LeadProblem, requested: int):
     layouts = []
     nb = engine.models.n_cards_bidding
     for i in range(n):
-        others = [deck52.handxxto52str(accepted[i][j], nb) for j in range(3)]
-        # accepted rows are (LHO, partner, RHO) relative to the leader
-        seats = {}
-        seats[problem.leader] = problem.hand
+        # accepted rows are the 3 unseen hands (LHO, partner, RHO) relative to
+        # the leader, in Ben's 32-card space where low pips (2..7) are folded
+        # into an 'x' bucket. Rebuild concrete, card-conserving 52-card hands by
+        # expanding the placeholders with pips NOT held by the leader, exactly
+        # as Ben's DD path does (deck52.convert_cards).
+        others_xx = [deck52.handxxto52str(accepted[i][j], nb) for j in range(3)]
+        card_string = problem.hand + " " + " ".join(others_xx)
+        filled = deck52.convert_cards(
+            card_string, _card52(problem.hand), problem.hand,
+            bot.get_random_generator(), nb)
+        parts = filled.split(" ")
+        seats = {problem.leader: parts[0]}
         for k, seat_off in enumerate((1, 2, 3)):
-            seats[SEATS[(leader_i + seat_off) % 4]] = others[k]
+            seats[SEATS[(leader_i + seat_off) % 4]] = parts[1 + k]
         layouts.append(seats)
     return layouts, list(np.asarray(scores, float)[:n]), int(proposals)
+
+
+def _card52(hand_pbn: str) -> int:
+    """52-index of the leader's first listed card (suit*13 + rank position,
+    S,H,D,C / A..2). Any leader card is a safe `opening_lead` for convert_cards
+    since its pip is already excluded via the leader hand string."""
+    for suit_i, holding in enumerate(hand_pbn.split(".")):
+        if holding:
+            return suit_i * 13 + "AKQJT98765432".index(holding[0])
+    return 0
 
 
 def _pad(dealer_i: int, auction):

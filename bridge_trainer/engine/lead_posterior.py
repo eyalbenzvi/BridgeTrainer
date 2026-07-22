@@ -341,6 +341,90 @@ def evaluate_layouts(ls: LayoutSet, dd_fn=None) -> LeadEval:
                     weight=ls.weight.copy(), bidding_score=ls.bidding_score.copy())
 
 
+def legacy_folded_eval(ev: LeadEval, seed: int = 0) -> LeadEval:
+    """Emulate the PRODUCTION Ben low-card handling on the SAME layouts.
+
+    Ben grades leads in a 32-card space: ranks 7,6,5,4,3,2 in a suit fold into
+    one 'low card' code (`lead_code32`), and when DD-solving that folded code it
+    leads a RANDOMLY chosen held low pip (`double_dummy_estimates`). This
+    re-uses the physical per-card endplay values already in `ev` but, per
+    layout, assigns EVERY held low card in a suit the value of one randomly
+    chosen held low card in that suit — reproducing the fold + random-pip
+    behaviour exactly, with the DDS engine held identical so the ONLY difference
+    from `ev` is the low-card handling. Honors and the 8/9 spots keep their own
+    physical value (they are distinct codes). This is the 'before' side of a
+    before/after low-card audit; it is never used for production ranking.
+    """
+    rng = np.random.default_rng(seed)
+    n = ev.weight.shape[0]
+    new = {c: ev.def_tricks[c].copy() for c in ev.cards}
+    for suit in SUITS:
+        lows = [c for c in ev.cards if c[0] == suit and c[1] in "765432"]
+        if len(lows) <= 1:
+            continue
+        picks = rng.integers(0, len(lows), size=n)
+        for i in range(n):
+            v = ev.def_tricks[lows[picks[i]]][i]
+            for c in lows:
+                new[c][i] = v
+    return LeadEval(problem=ev.problem, cards=list(ev.cards), def_tricks=new,
+                    weight=ev.weight.copy(), bidding_score=ev.bidding_score.copy())
+
+
+def compare_pipelines(problem: LeadProblem, ls: LayoutSet, fixed: LeadEval,
+                      legacy: LeadEval, n_boot: int = 2000,
+                      seed: int = 0) -> dict:
+    """Before(legacy folded)/after(fixed physical) comparison on shared layouts.
+
+    Reports winner/runner/gap/ranking for each, per-card rank shifts, and the
+    ace-suit low-card mapping (each physical low card's before vs after mean).
+    Isolates exactly the low-card handling because both sides share layouts,
+    weights, and endplay DDS.
+    """
+    def summ(ev):
+        m = ev.weighted_mean()
+        order = ev.ranking()
+        best, runner = order[0], order[1]
+        dr = delta_report(ev.def_tricks[best], ev.def_tricks[runner],
+                          weight=ev.weight, n_boot=n_boot, seed=seed)
+        return {
+            "winner": best, "runner_up": runner,
+            "gap": round(m[best] - m[runner], 4),
+            "gap_ci95": dr["boot_ci95"],
+            "means": {c: round(m[c], 4) for c in order},
+            "ranking": order,
+        }
+    f, l = summ(fixed), summ(legacy)
+    mf, ml = fixed.weighted_mean(), legacy.weighted_mean()
+    rank_shifts = []
+    for c in fixed.cards:
+        rf = f["ranking"].index(c) + 1
+        rl = l["ranking"].index(c) + 1
+        if rf != rl or abs(mf[c] - ml[c]) > 1e-9:
+            rank_shifts.append({"card": c, "legacy_rank": rl, "fixed_rank": rf,
+                                "legacy_mean": round(ml[c], 4),
+                                "fixed_mean": round(mf[c], 4)})
+    # ace-suit low-card mapping (the suit whose ace the leader holds)
+    ace_suits = [s for s in SUITS if (s + "A") in fixed.cards]
+    ace_map = {}
+    for s in ace_suits:
+        lows = [c for c in fixed.cards if c[0] == s and c[1] in "765432"]
+        ace_map[s + "A"] = {
+            "ace_mean_fixed": round(mf[s + "A"], 4),
+            "ace_mean_legacy": round(ml[s + "A"], 4),
+            "low_cards": [{"card": c, "fixed_mean": round(mf[c], 4),
+                           "legacy_mean": round(ml[c], 4)} for c in lows],
+        }
+    return {
+        "legacy": l, "fixed": f,
+        "winner_changed": l["winner"] != f["winner"],
+        "runner_changed": l["runner_up"] != f["runner_up"],
+        "gap_legacy": l["gap"], "gap_fixed": f["gap"],
+        "rank_shifts": rank_shifts,
+        "ace_suit_low_card_mapping": ace_map,
+    }
+
+
 def card_level_audit(ls: LayoutSet, ev: LeadEval,
                      focus: list | None = None) -> dict:
     """End-to-end card-correctness audit over the whole shared LayoutSet

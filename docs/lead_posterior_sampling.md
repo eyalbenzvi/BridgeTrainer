@@ -247,12 +247,14 @@ counts.
 | `uniform` (offline baseline) | **Ships, Ben-free** | `UniformSampler`: unconstrained card-conserving completions. Honest `not_a_posterior` label. Runs the whole audit on real DDS without Ben and acts as a deliberate sampler-sensitivity counterpoint. |
 | `fixture` / `synthetic` | Ships | Load/inject layouts (capture-once fixtures; test scenarios). |
 
-**Environment note:** in the container that produced this document Ben was not
-installed (`/home/user/ben` absent, no trained models), so the `current` /
-`ben-replay` / `ben-likelihood` runs are marked `unavailable` in audit output
-and their **live numbers must be produced under the Ben venv**
-(`scripts/setup_ben.sh`). The acceptance/weighting math for all three is
-implemented and unit-tested here, and the DDS + all diagnostics run live.
+**Environment note:** Ben (pinned commit, trained models) was installed via
+`scripts/setup_ben.sh` and the `current` sampler was **run live** — see §9 for
+real reference-board numbers. `ben-replay` / `ben-likelihood` expose their
+acceptance/weighting **math** (unit-tested: `replay_exact_mask`,
+`likelihood_log_weights`), but their Ben-backed *proposal scorer* (per-seat,
+per-turn call probabilities extracted from Ben's bidder) is not yet wired, so
+those two modes report `unavailable` until that adapter lands. The `current` and
+`uniform` samplers, DDS, and every diagnostic run live.
 
 ---
 
@@ -353,38 +355,128 @@ Mapping (leader N, declarer W, strain NT) and the North hand match the brief
 The actual deal's DD is 3NT+2 (defence 2 tricks); this is the *hidden truth*
 and is deliberately **not** used in ranking (source-deal independence).
 
-**HA vs H4 tail/threshold result:** the owner's observation — HA−H4 falling
-from **+0.371 @ τ=.70** to **+0.124 @ τ=.90** with occasional **+7** per-deal
-deltas — has the signature of a **tail-dominated, threshold-sensitive** gap
-under the neural-consistency filter `Q_τ`, *not* a DDS error. The audit's tail
-diagnostics (`is_tail_dominated`, trimmed/winsorized means, top-k contribution)
-and the score-bin / bridge strata (§ below) are built to quantify precisely
-this, and the `--compare HA,H4` path reports it. **Producing the live per-layout
-HA/H4 deltas requires the `current` sampler under the Ben venv**; in this
-container that run is marked `unavailable`, so the numbers above are the owner's
-reported values, and the reproduction command is:
+**HA vs H4 — measured live** under the production `current` sampler (Ben
+installed at the pinned commit; `--samples 300 --seed 1`,
+`output/lead1-0284459a.json`):
+
+| τ | accepted n / ESS | HA mean | H4 mean | HA−H4 delta | boot 95% CI | tail-dominated? | top-1% contrib |
+|---|---|---|---|---|---|---|---|
+| .70 | 206 | 2.175 | 1.723 | **+0.452** | [0.32, 0.60] | no | 0.18 |
+| .75 | 172 | 2.116 | 1.657 | +0.459 | [0.31, 0.62] | no | 0.15 |
+| .80 | 128 | 2.172 | 1.781 | +0.391 | [0.24, 0.54] | no | 0.22 |
+| .85 |  53 | 2.189 | 1.849 | +0.340 | [0.09, 0.64] | no | 0.28 |
+| .90 |  34 | 2.412 | 2.235 | **+0.176** | [−0.09, 0.47] | no | 0.50 |
+
+This **reproduces the owner's decay** (+0.371 → +0.124 reported; +0.452 → +0.176
+measured, same direction and rough magnitude at a different seed/N) and lets us
+answer the actual question:
+
+* **Is HA−H4 tail-dominated?** **No, not at the production threshold.** At τ=.70
+  the split is win 43% / loss 9% / tie 48% (median delta 0), conditional
+  win/loss ±1.2 tricks, trimmed-5% mean +0.321, winsorised(cap 2) +0.388, and
+  the top 1% of layouts supply only ~18% of the mass. HA's edge is a **broad,
+  real double-dummy plurality**, not one freak layout. The **+7 deltas the owner
+  saw are located**: the `HK@declarer(len1)` stratum (a stiff heart king) —
+  mean delta **+6.0** but only **2 layouts** (13% of the gap); plus
+  `HK@dummy(len1)` (+2.5, 6 layouts). Real but not dominant.
+* **Why does the gap decay .70 → .90?** The **score-bin strata** show HA's edge
+  is present in every bin (+0.41 / +0.66 / +0.43 / +0.63) **except the `.90+`
+  bin, where it collapses to +0.176**. Raising τ preferentially keeps exactly
+  those highest-consistency deals where the ace barely wins, while N/ESS
+  collapse 206 → 34 and the CI crosses 0. This is the **thresholded-neural-
+  consistency bias made concrete** — `Q_τ` reweighting toward low-edge layouts,
+  not DDS error and not tail-trimming.
+
+Reproduce with:
 
 ```
-trainer lead-posterior-audit --id lead1-0284459a \
+BEN_HOME=/path/to/ben  trainer lead-posterior-audit --id lead1-0284459a \
   --auction "1S P 2C P 3D P 3NT P P P" --contract 3NTW \
-  --samplers current --thresholds .70,.75,.80,.85,.90 \
-  --compare HA,H4 --samples 512 --seed 1 --out output/lead1-0284459a.json
+  --samplers current,uniform --thresholds .70,.75,.80,.85,.90 \
+  --compare HA,H4 --samples 300 --seed 1 --card-trace-layouts 2 \
+  --out /abs/path/output/lead1-0284459a.json
 ```
 
-**Strata (requirement 5)** reported per sampler run (`strata_report`): score
-bins .70–.75/.75–.80/.80–.85/.85–.90/.90+; partner/declarer/dummy length in the
-led suit; location+length of the missing key honor; declarer HCP bins;
-declarer balanced/semi/unbalanced shape. Each stratum reports count, weight
-share, mean score, mean delta, total contribution, and win/loss/tie; then each
-stratum is removed in turn (leave-one-out) and the new best / top gap /
-best-minus-runner is reported. Diagnostic only — the headline ranking stays the
-full-set mean DD.
+**Low-card correctness on the real Ben layouts** (`card_level_audit`): all 13
+candidates distinct; HA/HQ/H9/H4 occupy separate aggregation slots (indices
+3/4/5/6); HA and H4 return **different** DD values on 107 of 206 layouts and
+equal on 99 — i.e. they are genuinely solved separately (traces: `HA→HA`,
+`H4→H4`, matched). **No dedup / index / rank defect.**
 
-**Board status:** because the live `current` run is unavailable here and the
-reported gap is threshold-sensitive with a heavy tail, the board is currently
-**`insufficient_evidence` / likely `tail_dominated`** pending a Ben-venv run; a
-single "correct" lead should **not** be published for it until a robust
-cross-threshold, adequately-sized run says so.
+**Strata (requirement 5)** reported per run (`strata_report`): score bins;
+partner/declarer/dummy length in the led (heart) suit; location+length of the
+missing key honor (**HK** here); declarer HCP bins; declarer shape class. Each
+stratum reports count, share, mean score, mean delta, contribution, win/loss/
+tie; then leave-one-stratum-out reports the new best / top gap / best-minus-
+runner. Diagnostic only.
+
+**Cross-sampler:** `current` → **HA**; the unconstrained `uniform` baseline →
+a passive low club (a *not-a-posterior* baseline, expected to differ). Winners
+disagree and best-vs-runner turns tail-dominated at τ=.85, so the audit's
+overall `quality_flag = tail_dominated` / `sampler_sensitive`.
+
+**Board status — measured:** HA is clearly best under the **production τ=0.70**
+(delta +0.45, CI [0.32, 0.60] clear of 0, not tail-dominated, broad win
+plurality), and stays best in mean through τ=.85. But the **margin is
+threshold-sensitive** — it decays to +0.176 with a CI crossing 0 and ESS 34 at
+τ=.90, and the best-vs-runner gap is tail-dominated at τ=.85. So the board is
+**not robust across the full sweep**: publish HA only with the caveat that the
+*size* of its edge is threshold-dependent; do **not** advertise a robust single
+"correct" lead. The ace here is a **genuine DD winner under `Q_0.70`, not a
+sampling phantom** — the audit found no mechanism inflating it — but its margin
+is an artefact of where the threshold sits.
+
+---
+
+## 9a. Before/after low-card audit — suspect boards
+
+`scripts/lead_before_after.py` reconstructs a board with Ben (bid-out), then on
+the SAME sampled layouts grades every lead two ways: **legacy** = Ben's 32-code
+folding (ranks 7..2 share one code, DD of a random low pip;
+`legacy_folded_eval`) and **fixed** = physical per-card endplay. Both share
+layouts, weights, and DDS, so the only variable is the low-card handling. It
+sweeps τ, checks determinism + source independence, cross-checks Ben's own
+`lead_evaluate`, and computes ace-vs-best-non-ace tail/strata. JSON:
+`output/lead1-*.before_after.json` (`--samples 300 --seed 1`).
+
+| Board | Before winner | After winner | Changed? | gap b/a @.70 | Ace mapping bug? | Source leak? | Tail-dominated? | Threshold/sampler-sensitive? | Quality |
+|---|---|---|---|---|---|---|---|---|---|
+| `lead1-02faf4ff` 4HE, S leads (SA) | SA | SA | no | +0.26 / +0.26 | no | no | no | **yes** (SA→DT→SA over τ; gap 0.0 @.80; CI crosses 0 @.90) | insufficient_evidence |
+| `lead1-03473cc7` 4HN, E leads (CA) | CA | CA | no | +0.39 / +0.39 | no | no | no | no (CA at every τ) | **robust** |
+
+Per board:
+
+**`lead1-02faf4ff`** (S holds `A542.Q7.T85.Q643`, leads vs 4HE)
+1. **No bug found.** Legacy and fixed give the identical winner and gap at every
+   threshold (0 rank shifts here); Ben's own `lead_evaluate` also returns SA
+   (1.71) over DT (1.45). The audit maps all 13 physical cards distinctly; the
+   ace suit's low spots (S5/S4/S2) each have their own slot.
+2. **Does a bug explain the SA recommendation?** No — there is no bug. SA is a
+   genuine DD winner at τ=.70 (delta +0.26 vs DT, CI [0.14, 0.36], win/loss/tie
+   30/9/61, not tail-dominated).
+3. **Robust?** **No.** The fixed winner flips to DT at τ=.80 (gap 0.0) and the
+   ace edge's CI crosses 0 at τ=.90 (n=35). Threshold-sensitive / insufficient.
+4. **Verdict: FLAG.** Do not publish SA as the settled single answer; re-audit
+   with more samples at fixed τ, and keep only if it becomes `robust`.
+
+**`lead1-03473cc7`** (E holds `T83..J87542.AQ74`, leads vs 4HN)
+1. **No bug found.** Legacy folding reshuffles 6 low cards' apparent ranks but
+   never the winner; the ace (CA, an honor) is folding-invariant. All 13 cards
+   map distinctly; no source leak; deterministic repeat.
+2. **Does a bug explain CA?** No — CA is robustly best: fixed, legacy, AND Ben's
+   own `lead_evaluate` (CA 2.26 over S8) all agree.
+3. **Robust?** **Yes.** CA wins at every threshold .70–.90; delta +0.27 to
+   +0.39, CI clear of 0, not tail-dominated, broad 42/16 win plurality.
+4. **Verdict: KEEP.**
+
+**Cross-board conclusion:** on neither board is the ace recommendation a
+low-card / mapping / source-leak artefact — the low-card fix leaves the winner
+unchanged because both answers are aces (honors, never folded). The real
+discriminator is *threshold robustness*: CA (`03473cc7`) is robust and stays;
+SA (`02faf4ff`) is threshold-sensitive and is flagged. Note the general risk the
+legacy folding *does* carry — it can misrank a suit's **low cards** among
+themselves (6 shifts on `03473cc7`), so any board whose answer is a spot card
+must be graded with the physical-card engine, not the 32-code path.
 
 ---
 

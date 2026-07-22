@@ -355,6 +355,48 @@ def REF_FULL_forhand(p):
 
 
 # --------------------------------------------------------------------------
+# legacy-folding emulation + before/after comparison (board audit follow-up)
+# --------------------------------------------------------------------------
+def test_legacy_folding_shares_low_cards_keeps_honors():
+    from bridge_trainer.engine.lead_posterior import (
+        legacy_folded_eval, compare_pipelines)
+    # leader holds SA + low spades 5,4,2 (all fold) plus distinct hearts
+    p = build_problem("A542.AKQJ.T3.432", REF_AUCTION, "E", "Both", "3NTW")
+    ls = SyntheticSampler([REF_FULL_forhand(p), REF_FULL_forhand(p)]).sample(p, 2, 0)
+    # give every low spade a DIFFERENT physical value so folding is observable
+    vals = {c: 2 for c in p.legal_leads()}
+    vals.update({"SA": 5, "S5": 1, "S4": 3, "S2": 4, "HA": 2})
+    ev = evaluate_layouts(ls, dd_fn=_mock_dd(vals))
+    legacy = legacy_folded_eval(ev, seed=0)
+    ml = legacy.weighted_mean()
+    # honor SA is NEVER folded -> unchanged
+    assert ml["SA"] == 5
+    # the three low spades now share ONE (randomly picked) value on each layout
+    for i in range(ls.n):
+        vlow = {legacy.def_tricks[c][i] for c in ("S5", "S4", "S2")}
+        assert len(vlow) == 1
+    # and that shared value is one of the real physical low values {1,3,4}
+    assert set(np.unique(np.concatenate(
+        [legacy.def_tricks[c] for c in ("S5", "S4", "S2")]))) <= {1, 3, 4}
+
+
+def test_compare_pipelines_winner_unchanged_when_ace_wins():
+    from bridge_trainer.engine.lead_posterior import (
+        legacy_folded_eval, compare_pipelines)
+    p = build_problem("A542.AKQJ.T3.432", REF_AUCTION, "E", "Both", "3NTW")
+    ls = SyntheticSampler([REF_FULL_forhand(p)]).sample(p, 1, 0)
+    vals = {c: 1 for c in p.legal_leads()}
+    vals["SA"] = 5           # ace clearly best; folding can't touch an honor
+    ev = evaluate_layouts(ls, dd_fn=_mock_dd(vals))
+    legacy = legacy_folded_eval(ev, seed=0)
+    cmp = compare_pipelines(p, ls, ev, legacy, n_boot=100, seed=0)
+    assert cmp["fixed"]["winner"] == "SA"
+    assert cmp["legacy"]["winner"] == "SA"
+    assert cmp["winner_changed"] is False
+    assert "SA" in cmp["ace_suit_low_card_mapping"]
+
+
+# --------------------------------------------------------------------------
 # end-to-end audit on real DDS (uniform baseline; honest labels)
 # --------------------------------------------------------------------------
 def test_end_to_end_uniform_audit_real_dds():
