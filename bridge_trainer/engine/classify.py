@@ -19,6 +19,13 @@ import subprocess
 
 MODEL = "claude-sonnet-5"
 TIMEOUT_S = 300
+# Bidding problems per claude CLI call. Batching amortizes the CLI cold start
+# (Node runtime, agent harness, MCP handshake) over many problems, but one
+# giant call must GENERATE one JSON object per problem — a huge output that
+# grows linearly and, past a point, times out or gets truncated mid-array
+# (the whole-pool "hang"). A moderate chunk keeps each output bounded, pays
+# the cold start only ~once per chunk, and lets progress be saved per chunk.
+DEFAULT_CHUNK_SIZE = 10
 
 TAXONOMY = [
     ("open_or_pass", "Opening Decision", "החלטת פתיחה",
@@ -138,9 +145,10 @@ Respond with ONLY a JSON object, no other text:
 
 
 def batch_classification_prompt(recs: list[dict]) -> str:
-    """One prompt covering MANY problems, so the whole pool is classified in
-    a single ``claude`` CLI invocation (the CLI's cold start — Node runtime,
-    agent harness, MCP handshake — is paid once, not once per problem).
+    """One prompt covering MANY problems, so a chunk is classified in a
+    single ``claude`` CLI invocation (the CLI's cold start — Node runtime,
+    agent harness, MCP handshake — is paid once per chunk, not once per
+    problem).
 
     Each problem is tagged with its record id; the model must answer with a
     JSON array of one ``{"id", "type", "reason"}`` object per problem."""
@@ -167,10 +175,15 @@ problem's given id, no other text:
 "reason": "<one short sentence>"}}, ...]"""
 
 
-def run_claude_cli(prompt: str, model: str = MODEL) -> str:
+def run_claude_cli(prompt: str, model: str = MODEL,
+                   timeout: int = TIMEOUT_S) -> str:
+    # The prompt goes in on stdin, not argv: a whole-pool prompt can approach
+    # ARG_MAX (~2 MB) and blow up as a single argument. Feeding it on stdin
+    # (which is then closed) also guarantees the headless CLI never blocks
+    # waiting on a TTY — a stuck read would otherwise hang until the timeout.
     out = subprocess.run(
-        ["claude", "-p", prompt, "--model", model],
-        capture_output=True, text=True, timeout=TIMEOUT_S)
+        ["claude", "-p", "--model", model],
+        input=prompt, capture_output=True, text=True, timeout=timeout)
     if out.returncode != 0:
         raise RuntimeError(f"claude CLI failed: {out.stderr.strip()[:500]}")
     return out.stdout
@@ -225,23 +238,32 @@ def parse_batch_response(text: str, valid_ids: set[str] | None = None) -> dict:
 
 
 def classify_records(recs: list[dict], run=run_claude_cli, model: str = MODEL,
-                     chunk_size: int | None = None, retries: int = 1,
-                     log=lambda _m: None) -> dict:
+                     chunk_size: int | None = DEFAULT_CHUNK_SIZE,
+                     retries: int = 1, log=lambda _m: None) -> dict:
     """Classify many records with as few CLI invocations as possible.
 
-    Sends the whole batch (or ``chunk_size``-sized chunks) in one prompt, so
-    the ``claude`` CLI is loaded once per chunk rather than once per problem.
-    Returns {id: {"type", "type_reason"}}; ids that never came back valid
-    after ``retries`` passes are omitted, so the caller leaves them
-    unclassified (and a later run can pick them up).
+    Sends ``chunk_size``-sized chunks in one prompt each, so the ``claude``
+    CLI cold start is paid once per chunk rather than once per problem. Pass
+    ``chunk_size=None`` (or 0) to force the whole pool into a single call —
+    fastest to load, but a large pool then generates one huge JSON array that
+    can time out or truncate mid-array (the "hang" this default guards
+    against).
+
+    Resilience: a chunk whose CLI call hangs (timeout), errors, or comes back
+    unparseable is SPLIT in half and each half retried on its own, so one bad
+    stretch can't take down the rest. A single problem that still fails is
+    simply omitted. Returns {id: {"type", "type_reason"}}; omitted ids are
+    left unclassified for a later run to pick up.
     """
     if not recs:
         return {}
-    chunks = ([recs] if not chunk_size else
-              [recs[i:i + chunk_size] for i in range(0, len(recs), chunk_size)])
+    size = chunk_size or len(recs)
+    queue = [recs[i:i + size] for i in range(0, len(recs), size)]
     results: dict = {}
-    for ci, chunk in enumerate(chunks):
+    while queue:
+        chunk = queue.pop(0)
         pending = list(chunk)
+        split = False
         for attempt in range(retries + 1):
             if not pending:
                 break
@@ -253,12 +275,23 @@ def classify_records(recs: list[dict], run=run_claude_cli, model: str = MODEL,
                            "array, one object per problem shown above.")
             try:
                 got = parse_batch_response(run(prompt, model=model), ids)
-            except (ValueError, json.JSONDecodeError) as e:
-                log(f"  chunk {ci + 1}: batch parse failed ({e}); retrying")
+            except (subprocess.TimeoutExpired, RuntimeError,
+                    ValueError, json.JSONDecodeError) as e:
+                # A hung/failed CLI or an unparseable (often truncated) batch:
+                # retrying the SAME size rarely helps, so halve it and requeue
+                # the halves. Down to a single problem we give up and omit it.
+                if len(pending) > 1:
+                    mid = len(pending) // 2
+                    queue[:0] = [pending[:mid], pending[mid:]]
+                    log(f"  batch of {len(pending)} failed "
+                        f"({str(e)[:80]}); split into {mid}+{len(pending) - mid}")
+                    split = True
+                    break
+                log(f"  {pending[0]['id']}: failed ({str(e)[:80]})")
                 got = {}
             results.update(got)
             pending = [r for r in pending if r["id"] not in results]
-        if pending:
-            log(f"  chunk {ci + 1}: {len(pending)} unclassified after "
-                f"{retries + 1} tries: {[r['id'] for r in pending]}")
+        if not split and pending:
+            log(f"  {len(pending)} unclassified after {retries + 1} tries: "
+                f"{[r['id'] for r in pending]}")
     return results
