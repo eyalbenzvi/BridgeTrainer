@@ -528,16 +528,19 @@ def _score_bin(s: float) -> str:
     return "<.70"
 
 
-def _missing_honor_stratum(problem: LeadProblem, hd: dict) -> str:
-    """Location+length of the KEY missing honor in the led suit.
+def _missing_honor_stratum(problem: LeadProblem, hd: dict,
+                           led_suit: str | None = None) -> str:
+    """Location+length of the KEY missing honor in the reference (led) suit.
 
-    The 'led suit' is the suit of the current best lead's suit is board
-    dependent; we use the leader's longest suit as the reference suit and the
-    highest honor the leader does NOT hold in it. Reports which hidden hand
-    holds it and that hand's length in the suit.
+    `led_suit` is the suit whose lead is under scrutiny (the decision's suit);
+    when omitted we fall back to the leader's longest suit. The key honor is
+    the highest one the leader does NOT hold in that suit. Reports which hidden
+    hand holds it and that hand's length in the suit.
     """
-    lengths = {s: _suit_len(problem.hand, s) for s in SUITS}
-    suit = max(SUITS, key=lambda s: lengths[s])
+    if led_suit is None:
+        lengths = {s: _suit_len(problem.hand, s) for s in SUITS}
+        led_suit = max(SUITS, key=lambda s: lengths[s])
+    suit = led_suit
     held = set(problem.hand.split(".")[SUITS.index(suit)])
     honor = next((h for h in "AKQJ" if h not in held), None)
     if honor is None:
@@ -561,13 +564,18 @@ def _role(problem: LeadProblem, seat: str) -> str:
     return roles[seat]
 
 
-def _strata_keys(problem: LeadProblem, ls: LayoutSet) -> dict:
-    """Return {stratifier_name: array of per-layout string keys}."""
+def _strata_keys(problem: LeadProblem, ls: LayoutSet,
+                 led_suit: str | None = None) -> dict:
+    """Return {stratifier_name: array of per-layout string keys}.
+
+    `led_suit` is the suit of the decision under scrutiny (the compared/best
+    lead's suit); it drives the partner/declarer/dummy length and missing-honor
+    strata. Falls back to the leader's longest suit."""
     di = SEATS.index(problem.declarer)
     dummy = SEATS[(di + 2) % 4]
     partner = SEATS[(di + 3) % 4]
     declarer = problem.declarer
-    led = max(SUITS, key=lambda s: _suit_len(problem.hand, s))
+    led = led_suit or max(SUITS, key=lambda s: _suit_len(problem.hand, s))
 
     keys = {"score_bin": [], "partner_led_len": [], "declarer_led_len": [],
             "dummy_led_len": [], "missing_key_honor": [],
@@ -577,7 +585,8 @@ def _strata_keys(problem: LeadProblem, ls: LayoutSet) -> dict:
         keys["partner_led_len"].append(f"{led}={_suit_len(hd[partner], led)}")
         keys["declarer_led_len"].append(f"{led}={_suit_len(hd[declarer], led)}")
         keys["dummy_led_len"].append(f"{led}={_suit_len(hd[dummy], led)}")
-        keys["missing_key_honor"].append(_missing_honor_stratum(problem, hd))
+        keys["missing_key_honor"].append(
+            _missing_honor_stratum(problem, hd, led))
         keys["declarer_hcp_bin"].append(_hcp_bin(_hcp(hd[declarer])))
         keys["declarer_shape"].append(_shape_class(hd[declarer]))
     return {k: np.array(v) for k, v in keys.items()}
@@ -591,16 +600,19 @@ def _hcp_bin(h: int) -> str:
 
 
 def strata_report(problem: LeadProblem, ls: LayoutSet, ev: LeadEval,
-                  best: str, runner: str) -> dict:
+                  best: str, runner: str, led_suit: str | None = None) -> dict:
     """Per-stratum count/%/mean-score/mean-delta/total-contribution/W-L-T, for
     each stratifier, plus leave-one-stratum-out ranking/gap shifts.
 
-    Diagnostic only — the headline ranking is always the full-set mean DD.
+    `led_suit` defaults to the suit of `best` — the length/missing-honor strata
+    are then about the suit actually under scrutiny. Diagnostic only — the
+    headline ranking is always the full-set mean DD.
     """
     w = ls.weight
+    led_suit = led_suit or best[0]
     delta = ev.def_tricks[best] - ev.def_tricks[runner]
     total_mass = float((w * delta).sum())
-    keys = _strata_keys(problem, ls)
+    keys = _strata_keys(problem, ls, led_suit)
     full_mean = float(np.average(delta, weights=w))
 
     out = {"best": best, "runner_up": runner,

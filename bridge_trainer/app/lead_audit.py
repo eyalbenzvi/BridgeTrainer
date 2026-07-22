@@ -75,7 +75,15 @@ def run_one_sampler(problem: LeadProblem, sampler, requested: int, seed: int,
                                   weight=ls.weight, n_boot=n_boot, seed=seed),
         }
 
-    strata = strata_report(problem, ls, ev, best, runner)
+    # Stratify the decision of interest: the explicit --compare pair when
+    # given (e.g. HA vs H4), else best vs runner-up. When best/runner are
+    # touching cards their delta is trivially 0, so the compare pair is the
+    # informative contrast for tail/stratum analysis.
+    if compare and len(compare) == 2 and all(c in ev.def_tricks for c in compare):
+        strat_a, strat_b = compare
+    else:
+        strat_a, strat_b = best, runner
+    strata = strata_report(problem, ls, ev, strat_a, strat_b)
     focus = list(compare) if compare else [best, runner]
     card_audit = card_level_audit(ls, ev, focus=focus)
 
