@@ -71,6 +71,11 @@ def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
             "table": verdict.table,
             "flags": verdict.flags,
         },
+        # Provenance of the sampling distribution Q(layout | public info) the DD
+        # means were averaged over. This is a truncated, uniformly-weighted
+        # neural bidding-consistency distribution, NOT a proven bridge posterior;
+        # `posterior_calibration_status` records that biddingScore is uncalibrated.
+        "sampling": dict(le.sampling),
         "difficulty": verdict.difficulty,
         "quality": verdict.measured,
         "explanations": {

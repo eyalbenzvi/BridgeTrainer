@@ -187,24 +187,68 @@ public state at call time.
 
 ---
 
-## 6. Auction-consistent sampling
+## 6. The sampling distribution Q(layout | info) — NOT a proven posterior
 
-**Method (documented).** The posterior is **replay-consistency (A)** produced by
-Ben itself: `engine/ben.py::sample_lead_layouts` calls Ben's
-`sampler.generate_samples_iterative(...)` for the opening-lead auction, i.e. the
-same neural system (`BEN-21GF`, BBA/EPBot forced off — see `BenEngine.__init__`)
-that bid the board out. There is no separate semantic-constraint engine, so
-there is no silent mixing of incompatible assumptions.
+The DD means are averaged over a distribution **Q(layout | public info)**, which
+is **not** proven equal to the bridge posterior **P(layout | public info)**. Do
+not call it a posterior. Traced mechanism (`engine/ben.py::sample_lead_layouts`
+→ Ben `sample.py`):
 
-Each accepted `Layout` stores `accept = {"posterior": "ben_auction_replay"}`.
-The generator (`bid_out`) and the sampler use the **same Ben configuration**, so
-the generator/sampler models match by construction.
+1. **Prior.** A neural `binfo_model` predicts each hidden seat's HCP + shape from
+   the auction *as seen from the leader's seat* (`Sample.get_bidding_info`).
+   Candidate deals are drawn from that prior with the leader's hand fixed
+   (`sample_cards_vec`).
+2. **Acceptance = neural bidding-consistency, thresholded.** For each hidden seat,
+   Ben's bidder model (partner) / opponent model (LHO, RHO) gives, at each of that
+   seat's turns, the softmax probability of the **observed** bid given the
+   candidate hand. `process_bidding` takes the **min over that seat's turns**
+   (`min_scores_X`). `sample_cards_auction` combines them into
+   `biddingScore = (Σ_X w_X·min_score_X) / (Σ_X w_X)`, `w_X = bid_count_X`
+   (partner ×2). A hand is accepted iff `biddingScore ≥ bidding_threshold_sampling`
+   (0.70; floor 0.40 only if starved). A hard per-seat floor `exclude_samples`
+   (0.01) is applied first.
+3. **Weighting.** `engine/ben.py` shuffles the accepted set and truncates —
+   i.e. **uniform weights over accepted layouts**. The scores are recorded but
+   not used as weights.
 
-**Audit hook.** `trainer lead-debug` (§7) records, per sampled layout, the four
-hands and the acceptance tag, so the exact posterior membership is inspectable.
-A future enhancement (noted, not built) is an `--audit-replay` mode that re-runs
-Ben on each accepted sample and reports the exact-auction reproduction rate;
-the hook (`Layout.accept`) is already in place.
+So Q is a **truncated, uniformly-weighted neural-consistency distribution**. It is
+**not** exact-auction replay, **not** GIB semantic constraints, and **not** a
+calibrated posterior.
+
+**`biddingScore` is uncalibrated.** It is a weighted mean of per-seat *minimum
+per-bid softmax probabilities* — a heuristic consistency score in [0,1], not a
+likelihood (a likelihood would be a product over turns, not a min) and not a
+calibrated probability. A score of 0.90 has **no defined probabilistic relation**
+to 0.70; there is no isotonic/Platt/temperature calibration step in the code.
+Code: `Sample.process_bidding`, `Sample.sample_cards_auction` (the
+`use_distance=True` branch), `Sample.get_bidding_info` (prior).
+
+**Ben-argmax caveat.** The auction was produced by Ben's argmax bid-out, but the
+sampler does **not** require argmax-reproduction of the exact auction; it uses the
+soft per-seat consistency score above. So Q estimates *"deals whose observed bids
+Ben's neural models rate ≥0.70 consistent, from the leader's seat"* — explicitly a
+**Ben-model distribution**, not automatically a human-auction posterior.
+
+**No model mixing / no leakage.** Auction and sampling both use the same Ben
+config (`BEN-21GF`, BBA/EPBot off). GIB is used only for auction-meaning *text* in
+explanations, never in sampling. The source full deal is not used in sampler
+setup, constraints, cache, seed, or weights (the bot is built from leader hand +
+auction + dealer + vul only; `sampler_seed` is a hash of public state).
+
+**Provenance is now recorded** on every problem (`build_lead_record` → `sampling`)
+and in the debug artifact: `requested_samples`, `accepted_samples`,
+`proposal_count`, `acceptance_rate`, `sampling_model`, `weighting_method`,
+`score_threshold`, `effective_sample_size` (= n under uniform weights),
+`posterior_calibration_status` (`"uncalibrated_neural_consistency"`), and
+`complete` (whether `accepted_samples ≥ requested_samples`).
+
+**Empirical audit (board `lead1-0284459a`).** At threshold 0.70 the sampler found
+only **246** accepted deals from ~10 000 proposals (~2.5% acceptance) — it could
+**not** reach the 512 requested, so that board's grade is an incomplete sample,
+not a 512-sample confirmation. A multi-threshold report
+(`output/lead_threshold_diag_*.json`) records n, ESS, all-13-card ranking, heart
+distributions, honor locations, and bootstrap CIs at thresholds 0.70–0.90. See §9
+for the finding.
 
 **Known quality flag.** Doubled contracts (`lead_doubled`) keep the least
 realistic double-dummy defence (a Lightner/lead-directing double asks for a

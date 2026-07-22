@@ -209,4 +209,4 @@ def evaluate_leads_from_public_state(
         cards=candidates, def_tricks=def_tricks, softmax=softmax,
         n_samples=len(result.layouts), quality=float(result.quality),
         contract=str(contract), doubled=bool(contract.doubled),
-        sample_deals=sample_deals)
+        sample_deals=sample_deals, sampling=dict(result.meta))

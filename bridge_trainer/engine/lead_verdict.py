@@ -47,6 +47,13 @@ class LeadEvaluation:
     contract: str                          # e.g. "4HE"
     doubled: bool = False
     sample_deals: list[str] = field(default_factory=list)
+    # Provenance of the sampling distribution the DD means are averaged over.
+    # This is Q(layout | public info) — a truncated, uniformly-weighted neural
+    # bidding-consistency distribution — NOT a proven bridge posterior. Keys:
+    # requested_samples, accepted_samples, proposal_count, sampling_model,
+    # weighting_method, score_threshold, effective_sample_size,
+    # posterior_calibration_status. See docs/lead_evaluator_audit.md §4.
+    sampling: dict = field(default_factory=dict)
 
 
 @dataclass

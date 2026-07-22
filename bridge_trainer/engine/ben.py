@@ -296,7 +296,7 @@ class BenEngine:
         saved = self.sampler.sample_hands_opening_lead
         self.sampler.sample_hands_opening_lead = pool_n
         try:
-            accepted, _sc, _ph, _psh, quality, _n = \
+            accepted, _sc, _ph, _psh, quality, proposal_count = \
                 self.sampler.generate_samples_iterative(
                     padded, leader_i,
                     self.sampler.sample_boards_for_auction_opening_lead,
@@ -305,12 +305,32 @@ class BenEngine:
         finally:
             self.sampler.sample_hands_opening_lead = saved
 
-        navail = int(accepted.shape[0]) if hasattr(accepted, "shape") else 0
+        n_over_threshold = int(accepted.shape[0]) if hasattr(accepted, "shape") \
+            else 0
+        navail = n_over_threshold
         if navail:
             order = np.arange(navail)
             bot.rng.shuffle(order)
             accepted = accepted[order][:pool_n]
             navail = int(accepted.shape[0])
+
+        # Provenance of Q(layout | public info): a truncated, uniformly-weighted
+        # neural bidding-consistency distribution. NOT a proven bridge posterior;
+        # biddingScore is an uncalibrated NN-softmax consistency score.
+        provenance = {
+            "requested_samples": int(pool_n),
+            "accepted_samples": int(navail),
+            "n_over_threshold": int(n_over_threshold),
+            "proposal_count": int(proposal_count),
+            "acceptance_rate": (round(n_over_threshold / proposal_count, 4)
+                                if proposal_count else 0.0),
+            "sampling_model": f"{self.model_id} neural bidding-consistency",
+            "weighting_method": "uniform_over_accepted",
+            "score_threshold": float(self.sampler.bidding_threshold_sampling),
+            "effective_sample_size": int(navail),   # ESS == n under uniform wts
+            "posterior_calibration_status": "uncalibrated_neural_consistency",
+            "complete": bool(navail >= pool_n),
+        }
 
         # Build a concrete, legal 52-card deal per sample the way Ben's own
         # double_dummy_estimates does: PBN position 0 is the leader's real hand,
@@ -333,8 +353,9 @@ class BenEngine:
             hands_abs = hero_first_to_absolute(hands_leader_first, bot.seat)
             layouts.append(Layout(hands=hands_abs, sample_index=i,
                                   sample_seed=sampler_seed,
-                                  accept={"posterior": "ben_auction_replay"}))
-        return layouts, float(quality) if navail else 0.0
+                                  accept={"distribution": "Q_neural_consistency",
+                                          "score_threshold": provenance["score_threshold"]}))
+        return layouts, (float(quality) if navail else 0.0), provenance
 
     def lead_evaluate(self, hand_pbn: str, seat_i: int, dealer_i: int,
                       vuln: tuple[bool, bool], auction: list[str],
@@ -366,11 +387,11 @@ class BenEngine:
             bot = engine.lead_bot(public.leader_hand, public.contract.leader_i,
                                   public.dealer_i, public.vul)
             padded = pad(public.dealer_i, list(public.auction))
-            layouts, quality = engine.sample_lead_layouts(
+            layouts, quality, provenance = engine.sample_lead_layouts(
                 bot, padded, public.contract.leader_i, config.n_samples,
                 sampler_seed=sampler_seed)
             return SampleResult(layouts=layouts, quality=quality,
-                                meta={"engine": engine.model_id})
+                                meta=provenance)
 
         def policy(public: PublicState):
             bot = engine.lead_bot(public.leader_hand, public.contract.leader_i,
@@ -430,7 +451,7 @@ class BenEngine:
                                 declarer_i=(leader_i + 3) % 4,
                                 doubled="xx" if doubled else "")
 
-        layouts, quality = self.sample_lead_layouts(
+        layouts, quality, provenance = self.sample_lead_layouts(
             bot, padded, leader_i, pool_n)
         navail = len(layouts)
         check = checks_enabled()
@@ -449,10 +470,13 @@ class BenEngine:
             m = state["solved"]
             def_tricks = {c: (np.concatenate(state["by_card"][c])
                               if m else np.zeros(0)) for c in held}
+            prov = dict(provenance)
+            prov["accepted_samples"] = m
+            prov["effective_sample_size"] = m
             return LeadEvaluation(
                 cards=held, def_tricks=def_tricks, softmax=softmax,
                 n_samples=m, quality=float(quality) if navail else 0.0,
-                contract=contract, doubled=doubled)
+                contract=contract, doubled=doubled, sampling=prov)
 
         return grade, navail, top_soft
 

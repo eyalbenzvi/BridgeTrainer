@@ -100,6 +100,28 @@ def test_sampler_never_receives_source_deal():
                                  "dealer_i", "vul"}
 
 
+def test_sampling_provenance_propagates_to_evaluation():
+    prov = {"requested_samples": 16, "accepted_samples": 16,
+            "proposal_count": 640, "sampling_model": "test neural",
+            "weighting_method": "uniform_over_accepted", "score_threshold": 0.70,
+            "effective_sample_size": 16,
+            "posterior_calibration_status": "uncalibrated_neural_consistency"}
+
+    def sampler(public, sampler_seed, config):
+        base = make_fake_sampler()(public, sampler_seed, config)
+        base.meta = prov
+        return base
+
+    cfg = EvalConfig(n_samples=16, check_invariants=True)
+    le = evaluate_leads_from_public_state(
+        LEADER_HAND, AUCTION, CONTRACT, dealer_i=1, vul=(False, False),
+        sampler_seed=1, config=cfg, sampler=sampler, problem_id="prov")
+    assert le.sampling == prov
+    assert le.sampling["posterior_calibration_status"] == \
+        "uncalibrated_neural_consistency"
+    assert le.sampling["weighting_method"] == "uniform_over_accepted"
+
+
 def test_leader_hand_is_fixed_across_all_samples():
     le = _evaluate(source_deal=None, n=32)
     # every sampled layout kept the displayed leader hand (checked already by

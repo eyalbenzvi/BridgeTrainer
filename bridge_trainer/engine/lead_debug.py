@@ -43,7 +43,7 @@ def build_lead_debug_artifact(
         displayed_leader_hand: str, candidates, def_tricks: dict,
         softmax: dict, layouts, quality: float,
         verdict=None, source_deal: dict | None = None,
-        max_layouts: int = 200) -> dict:
+        sampling: dict | None = None, max_layouts: int = 200) -> dict:
     """Assemble the full diagnostic dict. ``source_deal`` (seat->hand) is
     stored under ``audit_only`` and never influences any number here."""
     leader_i = opening_leader_for_contract(contract)
@@ -104,8 +104,13 @@ def build_lead_debug_artifact(
         "sampled_layouts": sample_rows,
         "n_samples": len(layouts),
         "quality": round(float(quality), 4),
+        "sampling": dict(sampling or {}),
         "note": ("physical_card == display_card == dds_card for every "
-                 "candidate; policy_action folds 7..2 for Ben policy ONLY."),
+                 "candidate; policy_action folds 7..2 for Ben policy ONLY. "
+                 "DD means are averaged over Q(layout|info), a truncated, "
+                 "uniformly-weighted neural bidding-consistency distribution "
+                 "(see sampling.posterior_calibration_status), NOT a proven "
+                 "bridge posterior."),
     }
     if verdict is not None:
         art["summary_ranking"] = {
@@ -180,6 +185,6 @@ def run_lead_debug(engine, *, seed: int | None = None,
         contract=contract, auction=auction, dealer_i=dealer_i,
         vul=list(vul), displayed_leader_hand=hand, candidates=candidates,
         def_tricks=def_tricks, softmax=softmax, layouts=layouts,
-        quality=quality, verdict=verdict,
+        quality=quality, verdict=verdict, sampling=le.sampling,
         source_deal=({SEATS[i]: h for i, h in enumerate(hands)}
                      if include_source else None))
