@@ -246,56 +246,134 @@ class BenEngine:
         return BotLead(list(vuln), hand_pbn, self.models, self.sampler,
                        seat_i, dealer_i, self.dds, self.verbose)
 
+    # -- opening-lead policy + sampling (Ben) ------------------------------
+    def lead_softmax(self, bot, padded, held) -> dict:
+        """Ben's opening-lead policy mass per PHYSICAL card, read from its
+        32-card lead space. The 32-code fold (spots 7..2 -> one 'low' slot) is
+        a POLICY-only abstraction: every low spot of a suit shares that suit's
+        low-slot mass. This value is used for the C1 'obvious' gate ONLY; it
+        never chooses or renames the physical card DDS scores.
+        """
+        try:
+            _cand, sm = bot.get_opening_lead_candidates(padded)
+            smx = np.asarray(sm, dtype=float).reshape(-1)
+        except Exception:
+            smx = np.zeros(32)
+        return {t: (float(smx[lead_code32(t)])
+                    if lead_code32(t) < smx.shape[0] else 0.0)
+                for t in held}
+
+    def sample_lead_layouts(self, bot, padded, leader_i: int, pool_n: int,
+                            sampler_seed: int | None = None):
+        """Sample opening-lead layouts consistent with the public auction and
+        return them as engine.lead_evaluate.Layout objects in ABSOLUTE seat
+        order (N,E,S,W) — the single place Ben's hero-first sample rows are
+        rotated back to absolute seats (engine.lead_cards.hero_first_to_absolute).
+
+        No double-dummy here: layouts are the only product, so the same pool
+        feeds the screening cascade and the confirm pass, and the per-physical
+        -card DDS (endplay) runs downstream in lead_evaluate.score_layouts.
+        """
+        from bidding import bidding as bb
+
+        from .lead_cards import hero_first_to_absolute
+        from .lead_evaluate import Layout
+
+        # cross-check the ben contract's declarer against our leader seat, so a
+        # seat-rotation bug fails loudly instead of scoring the wrong hand.
+        ben_contract = bb.get_contract(padded)
+        decl_i = bb.get_decl_i(ben_contract)
+        if (decl_i + 1) % 4 != leader_i:
+            raise AssertionError(
+                f"ben contract {ben_contract!r} declarer {SEATS[decl_i]} "
+                f"=> leader {SEATS[(decl_i + 1) % 4]}, not {SEATS[leader_i]}")
+
+        # deterministic per sampler_seed where possible (best effort: Ben's
+        # sampler draws from bot.rng, which we seed here).
+        bot.rng = (np.random.default_rng(np.asarray([sampler_seed, 0xB1DDE],
+                                                     dtype=np.uint64))
+                   if sampler_seed is not None else bot.get_random_generator())
+        saved = self.sampler.sample_hands_opening_lead
+        self.sampler.sample_hands_opening_lead = pool_n
+        try:
+            accepted, _sc, _ph, _psh, quality, _n = \
+                self.sampler.generate_samples_iterative(
+                    padded, leader_i,
+                    self.sampler.sample_boards_for_auction_opening_lead,
+                    self.sampler.sample_hands_opening_lead,
+                    bot.rng, bot.hand_str, bot.vuln, self.models, [], {})
+        finally:
+            self.sampler.sample_hands_opening_lead = saved
+
+        navail = int(accepted.shape[0]) if hasattr(accepted, "shape") else 0
+        if navail:
+            order = np.arange(navail)
+            bot.rng.shuffle(order)
+            accepted = accepted[order][:pool_n]
+            navail = int(accepted.shape[0])
+        rows = bot.translate_hands(accepted, bot.hand_str, navail) \
+            if navail else []
+        layouts = []
+        for i, row in enumerate(rows):
+            hands_abs = hero_first_to_absolute(row.split(), bot.seat)
+            layouts.append(Layout(hands=hands_abs, sample_index=i,
+                                  sample_seed=sampler_seed,
+                                  accept={"posterior": "ben_auction_replay"}))
+        return layouts, float(quality) if navail else 0.0
+
     def lead_evaluate(self, hand_pbn: str, seat_i: int, dealer_i: int,
                       vuln: tuple[bool, bool], auction: list[str],
                       denom: str, contract: str, doubled: bool,
                       n_samples: int | None = None):
-        """Grade every opening lead by average double-dummy defensive tricks.
+        """Grade every PHYSICAL opening lead by average double-dummy defensive
+        tricks over auction-consistent layouts.
 
-        Uses ben's own BotLead.simulate_outcomes_opening_lead, which samples
-        layouts consistent with the auction and double-dummies each candidate
-        lead. Its `tricks[:, j, 0]` is DECLARER tricks, so the defence takes
-        13 - that. Ben works in a 32-card lead space (spot cards fold into one
-        'low' lead per suit), so all low cards in a suit share a grade, which
-        is exactly the equivalence we want. Returns a LeadEvaluation.
+        Ben supplies the auction-consistent layout sampler and the (folded)
+        lead policy; every one of the 13 physical cards is then double-dummied
+        SEPARATELY with endplay (engine.lead_evaluate.score_layouts) — no spot
+        folding before or during DDS. Runs through the public-state boundary
+        (evaluate_leads_from_public_state), so it can only condition on public
+        information. Returns a LeadEvaluation.
         """
-        from .lead_verdict import LeadEvaluation
+        from .lead_evaluate import (Contract, EvalConfig, PublicState,
+                                    evaluate_leads_from_public_state)
+        from .lead_invariants import checks_enabled
 
-        held = cards_of(hand_pbn)
-        padded = pad(dealer_i, auction)
-        bot = self.lead_bot(hand_pbn, seat_i, dealer_i, vuln)
+        leader_i = seat_i
+        contract_obj = Contract(int(contract[0]), denom,
+                                declarer_i=(leader_i + 3) % 4,
+                                doubled="xx" if doubled else "")
 
-        # criterion-1 policy: ben's lead softmax over the 32-card space
-        try:
-            _cand, lead_softmax = bot.get_opening_lead_candidates(padded)
-            smx = np.asarray(lead_softmax, dtype=float).reshape(-1)
-        except Exception:
-            smx = np.zeros(32)
-        softmax = {t: (float(smx[lead_code32(t)])
-                       if lead_code32(t) < smx.shape[0] else 0.0)
-                   for t in held}
+        engine = self
 
-        # grade every distinct lead option present in the hand
-        codes = sorted({lead_code32(t) for t in held})
-        saved = self.sampler.sample_hands_opening_lead
-        if n_samples:
-            self.sampler.sample_hands_opening_lead = n_samples
-        try:
-            _acc, _ss, tricks, _ph, _psh, quality = \
-                bot.simulate_outcomes_opening_lead(padded, codes, {})
-        finally:
-            self.sampler.sample_hands_opening_lead = saved
+        def sampler(public: PublicState, sampler_seed, config):
+            from .lead_evaluate import SampleResult
+            bot = engine.lead_bot(public.leader_hand, public.contract.leader_i,
+                                  public.dealer_i, public.vul)
+            padded = pad(public.dealer_i, list(public.auction))
+            layouts, quality = engine.sample_lead_layouts(
+                bot, padded, public.contract.leader_i, config.n_samples,
+                sampler_seed=sampler_seed)
+            return SampleResult(layouts=layouts, quality=quality,
+                                meta={"engine": engine.model_id})
 
-        n = int(tricks.shape[0]) if hasattr(tricks, "shape") else 0
-        by_code = {}
-        for j, code in enumerate(codes):
-            by_code[code] = (13.0 - np.asarray(tricks[:, j, 0], dtype=float)) \
-                if n > 0 else np.zeros(0)
-        def_tricks = {t: by_code[lead_code32(t)] for t in held}
-        return LeadEvaluation(
-            cards=held, def_tricks=def_tricks, softmax=softmax,
-            n_samples=n, quality=float(quality) if n else 0.0,
-            contract=contract, doubled=doubled)
+        def policy(public: PublicState):
+            bot = engine.lead_bot(public.leader_hand, public.contract.leader_i,
+                                  public.dealer_i, public.vul)
+            padded = pad(public.dealer_i, list(public.auction))
+            return engine.lead_softmax(bot, padded, cards_of(public.leader_hand))
+
+        cfg = EvalConfig(n_samples=n_samples or 128,
+                         check_invariants=checks_enabled())
+        # sampler_seed derives from the public auction+hand via a STABLE digest
+        # (Python's hash() is per-process salted) so repeated calls on the same
+        # board reproduce; the source deal is never involved.
+        import hashlib
+        key = "|".join([hand_pbn, " ".join(auction), str(contract_obj)])
+        seed = int(hashlib.sha256(key.encode()).hexdigest()[:8], 16)
+        return evaluate_leads_from_public_state(
+            hand_pbn, auction, contract_obj, dealer_i, vuln,
+            sampler_seed=seed, config=cfg, sampler=sampler, policy=policy)
 
     def lead_open(self, hand_pbn: str, seat_i: int, dealer_i: int,
                   vuln: tuple[bool, bool], auction: list[str],
@@ -311,79 +389,51 @@ class BenEngine:
                       only the newly-needed ones);
           top_softmax lets the caller reject 'obvious' boards before any DD.
 
-        `obvious_p`: when set, apply the C1 'obvious' gate on ben's lead
-        policy (a cheap NN pass) BEFORE the expensive layout sampling. If the
-        top policy mass already exceeds `obvious_p` the board is a certain
-        pre_obvious reject, so we skip sampling entirely and return
-        (None, 0, top_softmax) — the caller sees the same top_softmax and
-        rejects without paying for 128 sampled layouts.
+        Each physical card is DD-solved separately (endplay); the 32-code fold
+        is used only for the policy/obvious gate. `obvious_p`: when set, apply
+        the C1 gate on ben's lead policy (a cheap NN pass) BEFORE sampling; a
+        board it already calls obvious returns (None, 0, top_softmax).
         """
-        from bidding import bidding as bb
-
+        from .lead_classify import parse_contract
+        from .lead_evaluate import Contract, score_layouts
+        from .lead_invariants import checks_enabled
         from .lead_verdict import LeadEvaluation
 
         held = cards_of(hand_pbn)
         padded = pad(dealer_i, auction)
-        bot = self.lead_bot(hand_pbn, seat_i, dealer_i, vuln)
+        leader_i = seat_i
+        bot = self.lead_bot(hand_pbn, leader_i, dealer_i, vuln)
 
         # criterion-1 policy (cheap NN, no double-dummy)
-        try:
-            _c, lead_softmax = bot.get_opening_lead_candidates(padded)
-            smx = np.asarray(lead_softmax, dtype=float).reshape(-1)
-        except Exception:
-            smx = np.zeros(32)
-        softmax = {t: (float(smx[lead_code32(t)])
-                       if lead_code32(t) < smx.shape[0] else 0.0)
-                   for t in held}
+        softmax = self.lead_softmax(bot, padded, held)
         top_soft = max(softmax.values()) if softmax else 0.0
-
-        # C1 'obvious' gate BEFORE the expensive sampling: ben's policy above
-        # is a cheap NN pass and does not depend on the sampled layouts, so a
-        # board it already calls obvious never needs the 128-layout sample.
         if obvious_p is not None and top_soft > obvious_p:
             return None, 0, top_soft
 
-        codes = sorted({lead_code32(t) for t in held})
+        _level, _denom, _dbl = parse_contract(contract)
+        contract_obj = Contract(_level, _denom,
+                                declarer_i=(leader_i + 3) % 4,
+                                doubled="xx" if doubled else "")
 
-        # sample once, WITHOUT double-dummy (mirror BotLead.simulate's sampler
-        # call), then shuffle so every prefix slice is an unbiased subsample
-        ben_contract = bb.get_contract(padded)
-        decl_i = bb.get_decl_i(ben_contract)
-        lead_index = (decl_i + 1) % 4
-        bot.rng = bot.get_random_generator()
-        saved = self.sampler.sample_hands_opening_lead
-        self.sampler.sample_hands_opening_lead = pool_n
-        try:
-            accepted, _sc, _ph, _psh, quality, _n = \
-                self.sampler.generate_samples_iterative(
-                    padded, lead_index,
-                    self.sampler.sample_boards_for_auction_opening_lead,
-                    self.sampler.sample_hands_opening_lead,
-                    bot.rng, bot.hand_str, bot.vuln, self.models, [], {})
-        finally:
-            self.sampler.sample_hands_opening_lead = saved
+        layouts, quality = self.sample_lead_layouts(
+            bot, padded, leader_i, pool_n)
+        navail = len(layouts)
+        check = checks_enabled()
 
-        navail = int(accepted.shape[0]) if hasattr(accepted, "shape") else 0
-        if navail:
-            order = np.arange(navail)
-            bot.rng.shuffle(order)
-            accepted = accepted[order][:pool_n]
-            navail = int(accepted.shape[0])
-
-        state = {"solved": 0, "by_code": {c: [] for c in codes}}
+        state = {"solved": 0, "by_card": {c: [] for c in held}}
 
         def grade(n: int):
             n = min(n, navail)
             if navail and n > state["solved"]:
-                sl = accepted[state["solved"]:n]
-                tricks = bot.double_dummy_estimates(codes, ben_contract, sl)
-                for j, c in enumerate(codes):
-                    state["by_code"][c].append(
-                        13.0 - np.asarray(tricks[:, j, 0], dtype=float))
+                sl = layouts[state["solved"]:n]
+                dt = score_layouts(sl, contract_obj, held, check=check,
+                                   displayed_leader_hand=hand_pbn)
+                for c in held:
+                    state["by_card"][c].append(dt[c])
                 state["solved"] = n
             m = state["solved"]
-            def_tricks = {t: (np.concatenate(state["by_code"][lead_code32(t)])
-                              if m else np.zeros(0)) for t in held}
+            def_tricks = {c: (np.concatenate(state["by_card"][c])
+                              if m else np.zeros(0)) for c in held}
             return LeadEvaluation(
                 cards=held, def_tricks=def_tricks, softmax=softmax,
                 n_samples=m, quality=float(quality) if navail else 0.0,

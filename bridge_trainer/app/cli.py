@@ -140,6 +140,37 @@ def cmd_lead_forge(args: argparse.Namespace) -> int:
     return 0 if summary["count"] == args.count else 1
 
 
+def cmd_lead_debug(args: argparse.Namespace) -> int:
+    """Write an inspectable JSON diagnostic for one opening-lead problem.
+
+    Answers, from public state only: which exact physical card did DDS
+    evaluate, from which exact hand, at which seat, and why was each hidden
+    layout included. Needs the Ben env for sampling/policy (scripts/setup_ben.sh);
+    the per-card DDS is endplay.
+    """
+    import json as _json
+    import os as _os
+
+    from ..engine.ben import get_engine
+    from ..engine.lead_debug import run_lead_debug
+
+    if args.id is None and args.seed is None:
+        print("error: give --id lead1-XXXXXXXX or --seed S", file=sys.stderr)
+        return 2
+    engine = get_engine()
+    art = run_lead_debug(engine, seed=args.seed, problem_id=args.id,
+                         n_samples=args.n, include_source=not args.no_source)
+    out = args.out
+    _os.makedirs(_os.path.dirname(_os.path.abspath(out)), exist_ok=True)
+    with open(out, "w") as f:
+        _json.dump(art, f, indent=2, ensure_ascii=False)
+    best = art.get("summary_ranking", {}).get("accepted_best", [])
+    print(f"wrote {out}: {art['problem_id']} lead {art['leader']} vs "
+          f"{art['contract']} best={'/'.join(best)} "
+          f"({art['n_samples']} samples)")
+    return 0
+
+
 def cmd_pool(args: argparse.Namespace) -> int:
     from ..pool.store import ProblemPool
     # Firestore-only subcommands (push/backfill-leads) don't take --pool.
@@ -273,6 +304,20 @@ def main(argv: list[str] | None = None) -> int:
                       help="parallel forge workers; 0 = auto "
                            "(each holds a ~1.2 GB engine)")
     lf_p.set_defaults(func=cmd_lead_forge)
+
+    ld_p = sub.add_parser(
+        "lead-debug",
+        help="write a JSON diagnostic for one opening-lead problem/seed")
+    ld_p.add_argument("--id", default=None,
+                      help="problem id, e.g. lead1-0000002a")
+    ld_p.add_argument("--seed", type=int, default=None,
+                      help="source seed (alternative to --id)")
+    ld_p.add_argument("--n", type=int, default=512,
+                      help="sampled layouts to double-dummy")
+    ld_p.add_argument("--out", default="output/lead_debug.json")
+    ld_p.add_argument("--no-source", action="store_true",
+                      help="omit the audit-only full source deal")
+    ld_p.set_defaults(func=cmd_lead_debug)
 
     pool_p = sub.add_parser("pool", help="add/remove/list pool problems")
     pool_sub = pool_p.add_subparsers(dest="pool_cmd", required=True)
