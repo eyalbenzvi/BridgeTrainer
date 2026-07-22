@@ -27,3 +27,8 @@ data/index.json
 *-sa-key.json
 serviceAccountKey*.json
 firebase-adminsdk*.json
+
+# Transient generation/setup scratch (not committed)
+setup_ben.log
+output/
+lead_debug*.json
