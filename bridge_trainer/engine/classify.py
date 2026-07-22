@@ -23,9 +23,11 @@ TIMEOUT_S = 300
 # (Node runtime, agent harness, MCP handshake) over many problems, but one
 # giant call must GENERATE one JSON object per problem — a huge output that
 # grows linearly and, past a point, times out or gets truncated mid-array
-# (the whole-pool "hang"). A moderate chunk keeps each output bounded, pays
-# the cold start only ~once per chunk, and lets progress be saved per chunk.
-DEFAULT_CHUNK_SIZE = 10
+# (the whole-pool "hang"). Kept small (2): in practice larger chunks (10)
+# regularly hung or truncated, whereas chunks of 2 classify reliably; the
+# extra cold starts are cheap next to a stalled batch, and classify_pool.py
+# saves each record as its chunk returns so an interrupted run resumes.
+DEFAULT_CHUNK_SIZE = 2
 
 TAXONOMY = [
     ("open_or_pass", "Opening Decision", "החלטת פתיחה",
