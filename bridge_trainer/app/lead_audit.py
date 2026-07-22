@@ -39,7 +39,7 @@ def _rank_table(ev, ls) -> list:
     return rows
 
 
-def _make_sampler(name: str, threshold, engine, fixture):
+def _make_sampler(name: str, threshold, engine, fixture, problem=None):
     if name == "uniform":
         return UniformSampler()
     if name == "fixture":
@@ -52,12 +52,27 @@ def _make_sampler(name: str, threshold, engine, fixture):
     if name == "ben-likelihood":
         from ..engine.lead_samplers import BenLikelihoodSampler
         return BenLikelihoodSampler(engine=engine)
+    if name == "constraint":
+        # Ben-free: constraints accumulated from the PUBLIC auction by the rule
+        # engine (requirement 3, first bullet). Unrecognised calls degrade
+        # gracefully and are reported in the run's constraint diagnostics.
+        from ..engine.lead_samplers import ConstraintSampler
+        return ConstraintSampler.from_auction(problem)
     raise ValueError(f"unknown sampler {name}")
 
 
 def run_one_sampler(problem: LeadProblem, sampler, requested: int, seed: int,
                     compare, n_boot: int) -> dict:
     ls = sampler.sample(problem, requested, seed)
+    if ls.n == 0:
+        # No deal satisfied the constraints (e.g. over-tight explicit bands).
+        # This is an evidence gap, not a crash — record it and let the caller
+        # exclude it from voting/gating rather than dividing by zero downstream.
+        out = {"empty_accepted_set": True, "provenance": ls.provenance()}
+        diag = getattr(ls, "constraint_diagnostics", None)
+        if diag is not None:
+            out["constraint_diagnostics"] = diag
+        return out
     ev = evaluate_layouts(ls)
     m = ev.weighted_mean()
     order = ev.ranking()
@@ -88,7 +103,7 @@ def run_one_sampler(problem: LeadProblem, sampler, requested: int, seed: int,
     focus = list(compare) if compare else [best, runner]
     card_audit = card_level_audit(ls, ev, focus=focus)
 
-    return {
+    out = {
         "provenance": ls.provenance(),
         "winner": best, "runner_up": runner,
         "lead_evs": _rank_table(ev, ls),
@@ -100,6 +115,12 @@ def run_one_sampler(problem: LeadProblem, sampler, requested: int, seed: int,
         "result_signature": result_signature(ev, ls),
         "_ev": ev, "_ls": ls,   # kept for cross-sampler assembly; stripped later
     }
+    # explicit-constraint samplers attach their generation diagnostics
+    # (which seats the auction constrained, unrecognised calls, acceptance).
+    diag = getattr(ls, "constraint_diagnostics", None)
+    if diag is not None:
+        out["constraint_diagnostics"] = diag
+    return out
 
 
 def run_audit(hand, auction, dealer, vul, contract, *, samplers, thresholds,
@@ -115,21 +136,33 @@ def run_audit(hand, auction, dealer, vul, contract, *, samplers, thresholds,
             label = f"{sname}" + (f"@{thr:.2f}" if thr is not None else "")
             ben_family = sname in ("current", "ben-replay", "ben-likelihood")
             try:
-                sampler = _make_sampler(sname, thr, engine, fixture)
+                sampler = _make_sampler(sname, thr, engine, fixture, problem)
                 r = run_one_sampler(problem, sampler, requested, seed,
                                     compare, n_boot)
             except Exception as e:  # noqa: BLE001
                 # Ben-backed samplers may be unavailable (no BEN_HOME); record
-                # that and continue. Offline samplers (uniform/fixture) failing
-                # is a real bug — let it surface.
+                # that and continue. Offline samplers (uniform/fixture/
+                # constraint) failing is a real bug — let it surface.
                 if ben_family:
                     runs[label] = {"unavailable": f"{type(e).__name__}: {e}"}
                     continue
                 raise
-            # Only AUCTION-AWARE posterior samplers vote on the verdict
-            # (requirement 4: "valid samplers"). The uniform/fixture baselines
-            # are deliberate not-a-posterior contrasts, not votes.
+            # No deal satisfied the constraints: record the gap, don't vote,
+            # don't gate on it (it produced no gradable layouts).
+            if r.get("empty_accepted_set"):
+                runs[label] = r
+                continue
+            # AUCTION-AWARE samplers vote on the verdict (requirement 4: "valid
+            # samplers" / "independent sampler where available"). The uniform/
+            # fixture baselines are deliberate not-a-posterior contrasts, not
+            # votes. The constraint sampler is an independent auction-aware
+            # signal, so it votes — but only when the auction actually
+            # constrained a concealed seat (an all-unrecognised auction leaves
+            # it equivalent to uniform, so it must not masquerade as a vote).
             is_valid = sname in ("current", "ben-replay", "ben-likelihood")
+            if sname == "constraint":
+                cd = r.get("constraint_diagnostics", {})
+                is_valid = bool(cd.get("any_constraint_applied"))
             if is_valid:
                 reports_for_flag[label] = {
                     "winner": r["winner"],
