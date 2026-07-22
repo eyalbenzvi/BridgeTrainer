@@ -30,5 +30,6 @@ firebase-adminsdk*.json
 
 # Transient generation/setup scratch (not committed)
 setup_ben.log
+forge_leads.log
 output/
 lead_debug*.json
