@@ -288,6 +288,15 @@ class _LeadBatchState:
         if rec["id"] in self.existing:
             self.rejections["duplicate"] += 1
             return
+        # Guard: never store a problem whose bids went unexplained (GIB/BBO
+        # was unreachable). Such records reached Firestore before; keep them
+        # out of the pool entirely so they can never be pushed.
+        from .explain import bid_notes_missing
+        if bid_notes_missing(rec):
+            self.rejections["no_bid_explanations"] += 1
+            self.log(f"  {tag}seed {out.seed}: DROPPED {rec['id']} — no bid "
+                     f"explanations (GIB/BBO unreachable?)")
+            return
         self.pool.add(rec)
         self.pool.rebuild_index()
         self.existing.add(rec["id"])
@@ -320,6 +329,18 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
                      doubled_min_gap: float = 0.0,
                      doubled_apply_obvious: bool = False) -> dict:
     pool_dir = os.path.abspath(pool_dir)   # before engine chdir's into ben
+
+    # Preflight: auction meanings come from GIB (BBO gibrest) over the network.
+    # If it is unreachable the whole run would silently produce problems with
+    # empty explanations, so abort now with a clear message instead.
+    from . import gib_explain
+    if not gib_explain.reachable():
+        raise RuntimeError(
+            "GIB (BBO gibrest) is unreachable or blocked — bid explanations "
+            "would be empty. Either the network policy denies egress to "
+            f"{gib_explain.ENDPOINT}, or BBO is blocking/rate-limiting the "
+            "API. Run from a network that can reach it (or wait out the "
+            "block), then retry.")
 
     if workers == 0:
         # auto: each worker holds a ~1.2 GB engine — stay conservative

@@ -137,6 +137,30 @@ def parse_meaning(m: str) -> dict:
     return card
 
 
+def reachable() -> bool:
+    """Live check that GIB (BBO ``gibrest``) is reachable and answering.
+
+    When it is NOT — the network policy denies egress to BBO, OR BBO itself
+    blocks/rate-limits the API — every ``_fetch`` returns "" and problems are
+    written with EMPTY bid explanations (the exact silent failure that stranded
+    a batch of note-less problems). Both causes look identical here: this
+    returns False on a network exception AND on an HTTP 200 that carries no
+    meaning (a block/rate-limit body). The batch makers call it before starting
+    so they fail fast with a clear message instead of publishing unexplained
+    problems. Bypasses the cache so it always hits the network; a 1NT opening
+    always has a canonical GIB meaning, so a non-empty answer means it is up."""
+    try:
+        url = ENDPOINT + "?" + urllib.parse.urlencode(
+            {"t": "g", "s": auction_str(["1NT"])})
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "BridgeTrainer"})
+        with urllib.request.urlopen(req, timeout=30, context=_SSL) as resp:
+            body = resp.read().decode("utf-8", "replace")
+        return bool(re.findall(r'<r\b[^>]*\bm="([^"]*)"', body))
+    except Exception:
+        return False
+
+
 def card_for_auction(tokens: list[str]) -> dict:
     """Card for the LAST call in ``tokens`` (our tokens, from the dealer).
     Total by design — any failure yields an empty card so a single odd

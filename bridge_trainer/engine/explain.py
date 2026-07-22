@@ -132,6 +132,29 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
     return ", ".join(frags)
 
 
+def bid_notes_missing(rec: dict) -> bool:
+    """True when a finished record's auction carries real calls but NONE of
+    them got a bid-meaning note.
+
+    This is the signature of a generation run made with GIB (BBO ``gibrest``)
+    unreachable: ``card_for_auction`` returns empty cards, ``terse_meaning``
+    yields "", and every note's ``text`` ends up blank. When BBO is up even a
+    pass is annotated ("Pass (E): No suitable call, 0-11"), so a non-empty
+    auction with zero note text can only mean the explainer was offline.
+
+    An empty auction (the hero opens) has nothing to explain and is fine. Works
+    for both kinds: bidding notes live in ``explanations.stem``, lead notes in
+    ``explanations.auction``."""
+    auction = rec.get("auction") or []
+    if not auction:
+        return False
+    expl = rec.get("explanations") or {}
+    notes = expl.get("stem") if rec.get("kind") == "bidding" \
+        else expl.get("auction")
+    return not any(str((e or {}).get("text", "")).strip()
+                   for e in (notes or []))
+
+
 def stem_explanations(spot) -> list[dict]:
     """One entry per stem call; the meaning of each call comes from GIB
     (BBO gibrest), which interprets the auction prefix through that call.

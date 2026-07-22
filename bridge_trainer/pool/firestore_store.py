@@ -240,8 +240,11 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
     the freshly uploaded rows, so a producer that holds only a subset of the
     pool locally never drops other producers' entries.
 
-    Returns {uploaded, skipped, total}.
+    Returns {uploaded, skipped, skipped_no_explanations, total}. Records whose
+    bids went unexplained (generated with GIB/BBO unreachable) are never
+    uploaded — counted under skipped_no_explanations.
     """
+    from ..engine.explain import bid_notes_missing
     from .store import ProblemPool, index_entry, index_from_entries
 
     local = ProblemPool(local_dir)
@@ -250,13 +253,19 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
     by_id = {e["id"]: e for e in idx.get("problems", [])}
 
     writer = remote._db.bulk_writer()   # batches + retries writes internally
-    uploaded = skipped = 0
+    uploaded = skipped = no_expl = 0
     try:
         for pid in local.ids():
             if pid in by_id and not overwrite:
                 skipped += 1
                 continue
             rec = local.get(pid)
+            # Never upload a problem whose bids went unexplained (generated
+            # with GIB/BBO unreachable) — this is what stranded a batch of
+            # note-less problems in Firestore before.
+            if bid_notes_missing(rec):
+                no_expl += 1
+                continue
             writer.set(remote._col.document(pid), _firestore_safe(rec))
             by_id[pid] = index_entry(rec)
             uploaded += 1
@@ -265,7 +274,8 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
 
     if uploaded:
         remote.write_index(index_from_entries(by_id.values()))
-    return {"uploaded": uploaded, "skipped": skipped, "total": len(local.ids())}
+    return {"uploaded": uploaded, "skipped": skipped,
+            "skipped_no_explanations": no_expl, "total": len(local.ids())}
 
 
 def backfill_lead_types(key_path: str | None = None,
