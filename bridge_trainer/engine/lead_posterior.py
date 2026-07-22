@@ -851,32 +851,183 @@ def result_signature(ev: LeadEval, ls: LayoutSet) -> str:
 # quality flag (owner requirement 7)
 # ---------------------------------------------------------------------------
 def quality_flag(reports: dict, min_ess: float = 100.0) -> str:
-    """Cross-sampler / cross-threshold verdict.
+    """Cross-sampler / cross-threshold verdict — one of THREE canonical states
+    (owner requirement 4): `robust`, `sampler_sensitive`, `insufficient_evidence`.
 
     `reports` maps a label ("current@.70", "ben-replay", ...) to that run's
-    {winner, delta_report}. Returns one of:
-      robust               same winner everywhere, adequate ESS, positive CI,
-                           not tail-dominated;
-      sampler_sensitive    winner changes or the gap materially collapses;
-      insufficient_evidence inadequate N/ESS or CI straddles 0;
-      tail_dominated       an extreme-observation-driven mean dominates.
+    {winner, delta_report}. Precedence:
+      * `sampler_sensitive` — the winner changes across preconfigured thresholds
+        or valid samplers (genuine instability);
+      * `insufficient_evidence` — inadequate N/ESS, a CI straddling 0, or a
+        tail-dominated mean (the evidence itself is untrustworthy);
+      * `robust` — otherwise.
+
+    NB (requirement 5): a shrinking margin as the threshold rises is NOT, by
+    itself, cause to reject. This function deliberately does NOT flag on gap
+    decay alone — only on an actual winner change, weak CI, low ESS, or tail
+    domination. Use `margin_decay_ratio` to report the decay as a warning.
     """
     if not reports:
         return "insufficient_evidence"
     winners = {r["winner"] for r in reports.values()}
     esss = [r["delta_report"]["ess"] for r in reports.values()]
     cis = [r["delta_report"]["boot_ci95"] for r in reports.values()]
-    means = [r["delta_report"]["mean"] for r in reports.values()]
     tails = [is_tail_dominated(r["delta_report"]) for r in reports.values()]
 
-    if any(tails):
-        return "tail_dominated"
-    if min(esss) < min_ess or any(lo <= 0 <= hi for lo, hi in cis):
-        return "insufficient_evidence"
     if len(winners) > 1:
         return "sampler_sensitive"
-    # gap collapse: any run's mean below a quarter of the largest
-    mx = max(abs(m) for m in means)
-    if mx > 0 and min(abs(m) for m in means) < 0.25 * mx:
-        return "sampler_sensitive"
+    if min(esss) < min_ess or any(lo <= 0 <= hi for lo, hi in cis) or any(tails):
+        return "insufficient_evidence"
     return "robust"
+
+
+def _threshold_of(label: str) -> float | None:
+    if "@" in label:
+        try:
+            return float(label.split("@")[-1])
+        except ValueError:
+            return None
+    return None
+
+
+def margin_decay_ratio(reports: dict) -> dict:
+    """Requirement 5: measure, do not over-react to, threshold decay.
+
+    Among `current@τ` runs, ratio = (gap at the STRICTEST τ) / (gap at the
+    PRIMARY/lowest τ). A ratio well below 1 means the margin shrinks under a
+    stricter audit — a WARNING, not a rejection. The verdict only downgrades if
+    that decay coincides with real instability (winner change, CI including 0,
+    low ESS, tail domination); those are reported alongside so the caller can
+    require them before rejecting.
+    """
+    thr_runs = {(_threshold_of(k)): r for k, r in reports.items()
+                if _threshold_of(k) is not None}
+    if len(thr_runs) < 2:
+        return {"available": False}
+    lo_t = min(thr_runs)
+    hi_t = max(thr_runs)
+    primary = thr_runs[lo_t]["delta_report"]["mean"]
+    strict = thr_runs[hi_t]["delta_report"]["mean"]
+    ratio = (strict / primary) if abs(primary) > 1e-9 else None
+    strict_ci = thr_runs[hi_t]["delta_report"]["boot_ci95"]
+    instability = {
+        "winner_changes": len({r["winner"] for r in thr_runs.values()}) > 1,
+        "strict_ci_includes_zero": strict_ci[0] <= 0 <= strict_ci[1],
+        "strict_tail_dominated": is_tail_dominated(
+            thr_runs[hi_t]["delta_report"]),
+        "strict_low_ess": thr_runs[hi_t]["delta_report"]["ess"] < 100,
+    }
+    return {
+        "available": True,
+        "primary_threshold": lo_t, "strict_threshold": hi_t,
+        "primary_gap": round(primary, 4), "strict_gap": round(strict, 4),
+        "margin_decay_ratio": round(ratio, 4) if ratio is not None else None,
+        "decay_is_warning_only": not any(instability.values()),
+        "instability_signals": instability,
+    }
+
+
+# ---------------------------------------------------------------------------
+# adaptive sample size (owner requirement 3)
+# ---------------------------------------------------------------------------
+def adaptive_sample(sampler, problem: LeadProblem, seed: int,
+                    sizes=(256, 512, 1024), min_ess: float = 100.0,
+                    n_boot: int = 1000, compare=None, dd_fn=None):
+    """Start small, grow only when the evidence is inadequate (requirement 3).
+
+    Samples at the first size, grades all leads, and inspects the winner-vs-
+    runner (or `compare` pair) delta: if the CI excludes 0, ESS is adequate, and
+    the mean is not tail-dominated, stop; otherwise escalate to the next size.
+    Returns (layout_set, lead_eval, escalation) where `escalation` records each
+    tried size and why it stopped/continued — so runtime is spent only where CI/
+    ESS/robustness demand it.
+    """
+    escalation = []
+    ls = ev = None
+    for size in sizes:
+        ls = sampler.sample(problem, size, seed)
+        ev = evaluate_layouts(ls, dd_fn=dd_fn)
+        order = ev.ranking()
+        a, b = (compare if (compare and len(compare) == 2
+                            and all(c in ev.def_tricks for c in compare))
+                else (order[0], order[1]))
+        dr = delta_report(ev.def_tricks[a], ev.def_tricks[b],
+                          weight=ls.weight, n_boot=n_boot, seed=seed)
+        ci_excludes_zero = not (dr["boot_ci95"][0] <= 0 <= dr["boot_ci95"][1])
+        adequate = (dr["ess"] >= min_ess and ci_excludes_zero
+                    and not is_tail_dominated(dr))
+        escalation.append({
+            "size": size, "accepted": ls.accepted_samples, "ess": dr["ess"],
+            "pair": [a, b], "gap": dr["mean"], "ci": dr["boot_ci95"],
+            "tail_dominated": is_tail_dominated(dr), "adequate": adequate})
+        if adequate:
+            break
+    return ls, ev, escalation
+
+
+# ---------------------------------------------------------------------------
+# hard correctness publication gate (owner requirements 1 & 4)
+# ---------------------------------------------------------------------------
+def correctness_gate(problem: LeadProblem, ls: LayoutSet, ev: LeadEval,
+                     ls_repeat: LayoutSet | None = None,
+                     ev_repeat: LeadEval | None = None) -> dict:
+    """Run every HARD correctness check and return a blocking pass/fail.
+
+    Publication MUST be blocked on any failure (requirement 1). Checks:
+      * exactly the 13 physical leads, each once, all distinct;
+      * every lead graded on the SAME layouts (shared sample set);
+      * card conservation + correct leader-hand fixity (re-validates the set);
+      * correct declarer/dummy/leader mapping vs the contract;
+      * fixed-seed reproducibility (identical result signature on a repeat);
+      * source-deal independence declared and structurally held.
+    """
+    checks = {}
+    cards = problem.legal_leads()
+    checks["thirteen_distinct_physical_leads"] = (
+        len(ev.cards) == 13 and len(set(ev.cards)) == 13
+        and set(ev.cards) == set(cards))
+    n = ls.n
+    checks["all_leads_share_same_layouts"] = all(
+        ev.def_tricks[c].shape == (n,) for c in ev.cards)
+    try:
+        _assert_card_conserving(ls)
+        checks["card_conserving_layouts"] = True
+    except ValueError:
+        checks["card_conserving_layouts"] = False
+    di = SEATS.index(problem.declarer)
+    checks["declarer_dummy_leader_mapping"] = (
+        problem.leader == SEATS[(di + 1) % 4]
+        and problem.leader_i() == (di + 1) % 4)
+    checks["source_deal_independent_declared"] = bool(ls.source_deal_independent)
+    if ls_repeat is not None and ev_repeat is not None:
+        checks["fixed_seed_reproducible"] = (
+            result_signature(ev, ls) == result_signature(ev_repeat, ls_repeat))
+    else:
+        checks["fixed_seed_reproducible"] = None   # not exercised this run
+    hard = [v for v in checks.values() if v is not None]
+    passed = all(hard)
+    return {"passed": bool(passed), "checks": checks,
+            "blocks_publication": not passed}
+
+
+def publication_verdict(reports: dict, correctness: dict,
+                        margin: dict | None = None,
+                        min_ess: float = 100.0) -> dict:
+    """Single publication decision combining the correctness gate (hard block)
+    and the robustness state (soft states). Publishable ONLY when correctness
+    passes AND the state is `robust`. Threshold decay never rejects on its own
+    (requirement 5)."""
+    state = quality_flag(reports, min_ess=min_ess)
+    reasons = []
+    if not correctness["passed"]:
+        reasons.append("correctness_gate_failed")
+    if state != "robust":
+        reasons.append(state)
+    if margin and margin.get("available") and margin.get("decay_is_warning_only") \
+            and margin.get("margin_decay_ratio") is not None \
+            and margin["margin_decay_ratio"] < 0.5:
+        reasons.append("margin_decay_warning_only")   # not a rejection reason
+    publishable = correctness["passed"] and state == "robust"
+    return {"state": state, "publishable_single_lead": publishable,
+            "blocked_by_correctness": not correctness["passed"],
+            "reasons": reasons}

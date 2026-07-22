@@ -280,7 +280,132 @@ def _vuln_tuple(vul: str, leader_i: int):
     return (ns, ew)
 
 
+def _ben_auction_scores(engine, problem: LeadProblem, layouts: list):
+    """Per-layout (log-likelihood, exact-replay) of the OBSERVED auction under
+    Ben's neural bidder run on each seat's sampled hand.
+
+    For every call in the auction, the seat to act is scored with Ben's FULL
+    per-legal-call softmax (`policy_full`, straight from the bidder's
+    next_bid_np — a genuine per-legal-call probability). We accumulate
+    log P(actual call) and track whether the bidder's argmax reproduces the
+    actual call at every turn (exact replay). This is the independent audit
+    signal for the replay and likelihood samplers.
+    """
+    dealer_i = SEATS.index(problem.dealer)
+    auction = list(problem.auction)
+    vuln = _vuln_tuple(problem.vul, 0)
+    eps = 1e-6
+    out = []
+    for hd in layouts:
+        bots = {}
+        logL = 0.0
+        exact = True
+        for t, actual in enumerate(auction):
+            seat_i = (dealer_i + t) % 4
+            if seat_i not in bots:
+                bots[seat_i] = engine.bot(hd[SEATS[seat_i]], seat_i, dealer_i,
+                                          vuln)
+            pol = engine.policy_full(bots[seat_i], dealer_i, auction[:t])
+            if not pol:
+                exact = False
+                logL += np.log(eps)
+                continue
+            pmap = {it.bid: it.p for it in pol}
+            p = pmap.get(actual, 0.0)
+            logL += float(np.log(max(p, eps)))
+            if pol[0].bid != actual:
+                exact = False
+        out.append((logL, exact))
+    return out
+
+
+class BenReplaySampler:
+    """Exact Ben auction-replay audit sampler (owner requirement 2/6).
+
+    Proposal: Ben's binfo-guided pool at a permissive threshold (broad but
+    auction-plausible). Acceptance: keep a complete deal ONLY if Ben's bidder,
+    run on those hands, reproduces EVERY observed call as its argmax
+    (`replay_exact_mask`). Independent of the production consistency score, so
+    it is a genuine cross-check. Weighting uniform over the exact-replay set.
+    """
+    sampling_model = "ben_exact_auction_replay"
+    posterior_calibration_status = "exact_replay_filter"
+
+    def __init__(self, engine=None, pool_threshold: float = 0.30,
+                 pool_multiplier: int = 3):
+        self.engine = engine
+        self.pool_threshold = pool_threshold
+        self.pool_multiplier = pool_multiplier
+
+    def sample(self, problem, requested, seed):
+        from .lead_posterior import replay_exact_mask
+        engine = self.engine or _default_engine()
+        pool = BenCurrentSampler(engine=engine, threshold=self.pool_threshold)
+        ls = pool.sample(problem, requested * self.pool_multiplier, seed)
+        scores = _ben_auction_scores(engine, problem, ls.hands)
+        reproduced = np.array([[[ex]] for (_lg, ex) in scores])  # (n,1,1) bool
+        mask = replay_exact_mask(reproduced)
+        hands = [ls.hands[i] for i in range(len(ls.hands)) if mask[i]]
+        n = len(hands)
+        return LayoutSet(
+            problem=problem, hands=hands,
+            bidding_score=np.ones(n), weight=np.ones(n),
+            sampling_model=self.sampling_model, sampler_version=SAMPLER_VERSION,
+            posterior_calibration_status=self.posterior_calibration_status,
+            weighting_method="uniform_over_exact_replay", score_threshold=None,
+            proposal_count=ls.n, requested_samples=requested,
+            accepted_samples=n, seed=seed,
+            auction_replay_mode="exact", semantic_constraint_mode="none",
+            source_deal_independent=True)
+
+
+class BenLikelihoodSampler:
+    """Auction-likelihood-weighted audit sampler (owner requirement 2).
+
+    Proposal: Ben's binfo-guided pool. Weight: self-normalized via stable
+    log-sum-exp of the observed auction's log-likelihood under Ben's per-call
+    softmax (`likelihood_log_weights`), with ESS reported. Honestly labelled:
+    the proposal is binfo-guided (not uniform), so the weights are auction-
+    likelihood importance weights, not a calibrated posterior; ESS states how
+    usable they are.
+    """
+    sampling_model = "ben_auction_likelihood_weighted"
+    posterior_calibration_status = "importance_weighted_uncalibrated"
+
+    def __init__(self, engine=None, pool_threshold: float = 0.30,
+                 pool_multiplier: int = 2):
+        self.engine = engine
+        self.pool_threshold = pool_threshold
+        self.pool_multiplier = pool_multiplier
+
+    def sample(self, problem, requested, seed):
+        from .lead_posterior import likelihood_log_weights
+        engine = self.engine or _default_engine()
+        pool = BenCurrentSampler(engine=engine, threshold=self.pool_threshold)
+        ls = pool.sample(problem, requested * self.pool_multiplier, seed)
+        scores = _ben_auction_scores(engine, problem, ls.hands)
+        logL = np.array([lg for (lg, _ex) in scores])
+        weights, _ess = likelihood_log_weights(logL)
+        return LayoutSet(
+            problem=problem, hands=list(ls.hands),
+            bidding_score=logL, weight=weights,
+            sampling_model=self.sampling_model, sampler_version=SAMPLER_VERSION,
+            posterior_calibration_status=self.posterior_calibration_status,
+            weighting_method="auction_likelihood_logsumexp",
+            score_threshold=None, proposal_count=ls.n,
+            requested_samples=requested, accepted_samples=len(ls.hands),
+            seed=seed, auction_replay_mode="none",
+            semantic_constraint_mode="none", source_deal_independent=True)
+
+
+def _default_engine():
+    from .ben import get_engine
+    return get_engine()
+
+
 SAMPLERS = {
     "uniform": UniformSampler,
     "current": BenCurrentSampler,
+    "ben-replay": BenReplaySampler,
+    "ben-likelihood": BenLikelihoodSampler,
 }

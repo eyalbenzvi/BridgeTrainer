@@ -145,6 +145,27 @@ def cmd_lead_posterior_audit(args: argparse.Namespace) -> int:
     return _run(args)
 
 
+def cmd_lead_corpus(args: argparse.Namespace) -> int:
+    """Run the blind-labelled validation corpus and print the report."""
+    import json as _json
+    from ..engine.lead_corpus import run_corpus
+    r = run_corpus(seed=args.seed, n_boot=args.n_boot)
+    if args.out:
+        with open(args.out, "w") as f:
+            _json.dump(r, f, indent=2)
+    print(f"label_agreement_rate={r['label_agreement_rate']} "
+          f"robustness_rate={r['robustness_rate']} "
+          f"ace_win_rate={r['ace_win_rate']} "
+          f"mapping_failures={r['mapping_failures']} "
+          f"source_leak_failures={r['source_leak_failures']}")
+    for c in r["cases"]:
+        print(f"  {c['id']:24s} {c['category']:20s} agree={c['agree']} "
+              f"state={c['observed']['state']} winner={c['observed']['winner']}")
+    return 0 if (r["label_agreement_rate"] == 1.0
+                 and r["mapping_failures"] == 0
+                 and r["source_leak_failures"] == 0) else 1
+
+
 def cmd_pool(args: argparse.Namespace) -> int:
     from ..pool.store import ProblemPool
     # Firestore-only subcommands (push/backfill-leads) don't take --pool.
@@ -316,6 +337,15 @@ def main(argv: list[str] | None = None) -> int:
                           "(audit/debug only)")
     lpa.add_argument("--out", default=None, help="write JSON here")
     lpa.set_defaults(func=cmd_lead_posterior_audit)
+
+    lc = sub.add_parser(
+        "lead-corpus",
+        help="run the blind-labelled opening-lead validation corpus "
+             "(synthetic ground-truth cases; Ben-free)")
+    lc.add_argument("--seed", type=int, default=1)
+    lc.add_argument("--n-boot", type=int, default=500)
+    lc.add_argument("--out", default=None, help="write JSON report here")
+    lc.set_defaults(func=cmd_lead_corpus)
 
     pool_p = sub.add_parser("pool", help="add/remove/list pool problems")
     pool_sub = pool_p.add_subparsers(dest="pool_cmd", required=True)

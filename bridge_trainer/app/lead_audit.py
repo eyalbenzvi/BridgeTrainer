@@ -20,7 +20,8 @@ import numpy as np
 from ..engine.lead_posterior import (
     LeadProblem, build_problem, evaluate_layouts, delta_report, is_tail_dominated,
     strata_report, quality_flag, card_level_audit, card_level_trace,
-    result_signature, problem_fingerprint)
+    result_signature, problem_fingerprint, correctness_gate, margin_decay_ratio,
+    publication_verdict)
 from ..engine.lead_samplers import UniformSampler, BenCurrentSampler, FixtureSampler
 
 
@@ -45,12 +46,12 @@ def _make_sampler(name: str, threshold, engine, fixture):
         return FixtureSampler.from_json(fixture)
     if name == "current":
         return BenCurrentSampler(engine=engine, threshold=threshold or 0.70)
-    if name in ("ben-replay", "ben-likelihood"):
-        raise NotImplementedError(
-            f"sampler '{name}' requires the Ben venv and per-legal-call "
-            f"probabilities; run under BEN_HOME. The acceptance/weighting math "
-            f"is implemented and unit-tested in engine.lead_posterior "
-            f"(replay_exact_mask / likelihood_log_weights).")
+    if name == "ben-replay":
+        from ..engine.lead_samplers import BenReplaySampler
+        return BenReplaySampler(engine=engine)
+    if name == "ben-likelihood":
+        from ..engine.lead_samplers import BenLikelihoodSampler
+        return BenLikelihoodSampler(engine=engine)
     raise ValueError(f"unknown sampler {name}")
 
 
@@ -107,6 +108,7 @@ def run_audit(hand, auction, dealer, vul, contract, *, samplers, thresholds,
     problem = build_problem(hand, auction, dealer, vul, contract)
     runs = {}
     reports_for_flag = {}
+    gate = None
     for sname in samplers:
         thr_list = thresholds if sname == "current" else [None]
         for thr in thr_list:
@@ -124,13 +126,23 @@ def run_audit(hand, auction, dealer, vul, contract, *, samplers, thresholds,
                     runs[label] = {"unavailable": f"{type(e).__name__}: {e}"}
                     continue
                 raise
-            reports_for_flag[label] = {
-                "winner": r["winner"],
-                "delta_report": r["best_vs_runner_delta"],
-            }
+            # Only AUCTION-AWARE posterior samplers vote on the verdict
+            # (requirement 4: "valid samplers"). The uniform/fixture baselines
+            # are deliberate not-a-posterior contrasts, not votes.
+            is_valid = sname in ("current", "ben-replay", "ben-likelihood")
+            if is_valid:
+                reports_for_flag[label] = {
+                    "winner": r["winner"],
+                    "delta_report": r["best_vs_runner_delta"],
+                }
+            ls, ev = r["_ls"], r["_ev"]
+            # hard correctness gate on the FIRST run (with a reproducibility
+            # repeat) — publication is blocked on any failure (requirement 1).
+            if gate is None:
+                ls2 = sampler.sample(problem, requested, seed)
+                gate = correctness_gate(problem, ls, ev, ls2, evaluate_layouts(ls2))
             # card-level per-layout trace (audit/debug only)
             if card_trace_layouts:
-                ls = r["_ls"]
                 r["card_level_traces"] = [
                     card_level_trace(problem, ls.hands[i])
                     for i in range(min(card_trace_layouts, ls.n))]
@@ -138,9 +150,15 @@ def run_audit(hand, auction, dealer, vul, contract, *, samplers, thresholds,
             r.pop("_ls", None)
             runs[label] = r
 
+    if gate is None:   # nothing ran (e.g. only unavailable Ben samplers)
+        gate = {"passed": False, "checks": {}, "blocks_publication": True}
     flag = quality_flag(reports_for_flag)
-    winners = {r["winner"] for r in runs.values() if "winner" in r}
-    publishable = flag == "robust" and len(winners) == 1
+    decay = margin_decay_ratio(reports_for_flag)
+    verdict = publication_verdict(reports_for_flag, gate, decay)
+    valid_winners = {r["winner"] for r in reports_for_flag.values()}
+    all_winners = {r["winner"] for r in runs.values() if "winner" in r}
+    baseline_winners = sorted(all_winners - valid_winners)
+    publishable = verdict["publishable_single_lead"]
 
     return {
         "schema": "lead-posterior-audit/1",
@@ -159,15 +177,25 @@ def run_audit(hand, auction, dealer, vul, contract, *, samplers, thresholds,
         },
         "runs": runs,
         "cross_sampler": {
-            "distinct_winners": sorted(winners),
-            "agree_on_winner": len(winners) == 1,
+            "valid_sampler_winners": sorted(valid_winners),
+            "agree_on_winner": len(valid_winners) == 1,
+            "distinct_winners": sorted(all_winners),
+            "baseline_only_winners": baseline_winners,
+            "note": "Only auction-aware posterior samplers (current, ben-replay, "
+                    "ben-likelihood) vote; uniform/fixture are not-a-posterior "
+                    "contrasts.",
         },
+        "correctness_gate": gate,
+        "margin_decay": decay,
         "quality_flag": flag,
+        "publication_verdict": verdict,
         "publishable_single_lead": publishable,
         "notes": (
             "Ranking is mean double-dummy defensive tricks over the shared "
-            "sampled layouts; all other metrics are diagnostics. A single "
-            "'correct' lead is withheld unless quality_flag=='robust'."),
+            "sampled layouts; all other metrics are diagnostics. Publication is "
+            "BLOCKED on any correctness_gate failure and withheld unless "
+            "quality_flag=='robust'. Threshold decay (margin_decay) is a "
+            "warning, never by itself a rejection."),
     }
 
 

@@ -320,21 +320,67 @@ reproducing the bidding needs the engine.
 
 ---
 
-## 8. Quality flags (requirement 7) — never tuned to outcome
+## 8. Quality flags + publication gate — never tuned to outcome
 
 Thresholds are preconfigured and swept; the winner is **never** chosen after
-seeing which lead wins. `quality_flag` (`engine/lead_posterior.py`) returns:
+seeing which lead wins.
 
-* `robust` — same winner across valid samplers/thresholds, adequate N/ESS,
-  CI clear of 0, not tail-dominated;
-* `sampler_sensitive` — winner changes or the gap collapses (min mean < ¼ max);
-* `insufficient_evidence` — inadequate ESS or CI straddles 0 (fix by **more
-  samples at the same threshold**, never by moving the threshold);
-* `tail_dominated` — a tiny fraction of layouts drives the signed delta mass
-  and the trimmed mean disagrees with / flips the raw mean.
+**Hard correctness gate (blocks publication).** `correctness_gate` runs every
+hard check — exactly 13 distinct physical leads, all on the same layouts, card
+conservation, correct declarer/dummy/leader mapping, fixed-seed reproducibility
+(identical `result_signature` on a repeat), and source-deal independence — and
+`publication_verdict` blocks publication on ANY failure, independent of the
+robustness state (requirement 1).
 
-A single "correct" lead is published only when `quality_flag == "robust"`
-(`publishable_single_lead`).
+**Robustness state — three canonical values** (`quality_flag`, requirement 4):
+* `sampler_sensitive` — the winner changes across preconfigured thresholds or
+  **valid** samplers. Only auction-aware posterior samplers vote (`current`,
+  `ben-replay`, `ben-likelihood`); the `uniform`/`fixture` baselines are
+  not-a-posterior contrasts and do **not** vote.
+* `insufficient_evidence` — inadequate ESS, a CI straddling 0, or a
+  tail-dominated mean. Fix by **more samples at the same threshold**, never by
+  moving the threshold.
+* `robust` — otherwise.
+
+**Threshold decay is a warning, not a rejection (requirement 5).**
+`margin_decay_ratio = strict-τ gap / primary-τ gap`. A ratio below 1 is
+reported but does **not** by itself downgrade the verdict — `quality_flag`
+deliberately does not flag on gap decay alone. It downgrades only on real
+instability (winner change, CI including 0, low ESS, tail domination, or
+independent-sampler disagreement), which `margin_decay` surfaces as explicit
+`instability_signals`.
+
+A single "correct" lead is published only when the correctness gate passes AND
+the state is `robust` (`publishable_single_lead`).
+
+## 8a. Independent audit samplers (requirement 2) — implemented & live
+
+Both are wired to Ben's public API (`engine/lead_samplers.py`) and run live:
+* **`ben-replay`** (`ben_exact_auction_replay`): proposes Ben's binfo pool, then
+  keeps a deal ONLY if Ben's bidder reproduces **every observed call as its
+  argmax** (`_ben_auction_scores` → `replay_exact_mask`). Uniform over the
+  exact-replay set. An independent cross-check of the production consistency
+  score.
+* **`ben-likelihood`** (`ben_auction_likelihood_weighted`): weights each
+  proposal by the observed auction's log-likelihood under Ben's per-legal-call
+  softmax (`policy_full` → `likelihood_log_weights`, stable log-sum-exp), with
+  **ESS reported**. Honestly labelled `importance_weighted_uncalibrated` — the
+  proposal is binfo-guided, so the weights are auction-likelihood importance
+  weights, not a calibrated posterior; ESS states usability.
+
+## 8b. Adaptive sample size + validation corpus (requirements 3 & 6)
+
+* `adaptive_sample` starts at 256 accepted deals and escalates to 512/1024 only
+  when the CI includes 0, ESS is inadequate, or the mean is tail-dominated —
+  spending runtime only where robustness demands it.
+* `engine/lead_corpus.py` + `trainer lead-corpus`: a blind-labelled validation
+  corpus (stable control, ace-overpreference control, low-card mapping,
+  source-leak probe, tail-dominated, sampler-sensitive) with a runner reporting
+  label agreement, ace-win rate, robustness rate, and mapping/leak failures.
+  Current synthetic result: **100% label agreement, 0 mapping failures, 0
+  source-leak failures**; the ace-overpreference control correctly picks a
+  passive club, confirming neither a pro- nor anti-ace pull. Expert-suspect real
+  boards are registered with recorded labels and run when Ben is present.
 
 ---
 
@@ -410,21 +456,24 @@ stratum reports count, share, mean score, mean delta, contribution, win/loss/
 tie; then leave-one-stratum-out reports the new best / top gap / best-minus-
 runner. Diagnostic only.
 
-**Cross-sampler:** `current` → **HA**; the unconstrained `uniform` baseline →
-a passive low club (a *not-a-posterior* baseline, expected to differ). Winners
-disagree and best-vs-runner turns tail-dominated at τ=.85, so the audit's
-overall `quality_flag = tail_dominated` / `sampler_sensitive`.
+**Cross-sampler — all four samplers, live** (`output/lead1-0284459a.allsamplers.json`,
+`--samples 200`): every **valid auction-aware** sampler agrees on **HA** —
+`current` at τ=.70/.80/.90, `ben-replay` (57 exact-replay deals), and
+`ben-likelihood` (ESS 94). Only the `uniform` *not-a-posterior* baseline picks a
+passive club (C7), reported as a contrast, not a vote. So HA is **not** a
+production-sampler artefact — it survives an independent exact auction replay
+and auction-likelihood weighting.
 
-**Board status — measured:** HA is clearly best under the **production τ=0.70**
-(delta +0.45, CI [0.32, 0.60] clear of 0, not tail-dominated, broad win
-plurality), and stays best in mean through τ=.85. But the **margin is
-threshold-sensitive** — it decays to +0.176 with a CI crossing 0 and ESS 34 at
-τ=.90, and the best-vs-runner gap is tail-dominated at τ=.85. So the board is
-**not robust across the full sweep**: publish HA only with the caveat that the
-*size* of its edge is threshold-dependent; do **not** advertise a robust single
-"correct" lead. The ace here is a **genuine DD winner under `Q_0.70`, not a
-sampling phantom** — the audit found no mechanism inflating it — but its margin
-is an artefact of where the threshold sits.
+**Board status — measured:** correctness gate **passes** (all six checks). HA is
+best under the **production τ=0.70** (delta +0.45, CI [0.32, 0.60], not
+tail-dominated, broad win plurality) and under both independent samplers. But
+the verdict is **`insufficient_evidence`, not robust**: the margin decays sharply
+(`margin_decay_ratio = 0.21`) and at the strict τ=0.90 the CI includes 0 with
+ESS 34 — real instability (not decay alone), so `decay_is_warning_only = False`.
+`publishable_single_lead = False`. The ace here is a **genuine DD winner that all
+valid posterior samplers favour** — the audit found no mechanism inflating it —
+but the evidence is not strong enough across a stricter audit to publish it as
+THE single answer. Increase samples at τ=.70 (not by moving τ) to firm it up.
 
 ---
 
