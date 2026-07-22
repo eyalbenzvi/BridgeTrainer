@@ -140,6 +140,32 @@ def cmd_lead_forge(args: argparse.Namespace) -> int:
     return 0 if summary["count"] == args.count else 1
 
 
+def cmd_lead_posterior_audit(args: argparse.Namespace) -> int:
+    from .lead_audit import cmd_lead_posterior_audit as _run
+    return _run(args)
+
+
+def cmd_lead_corpus(args: argparse.Namespace) -> int:
+    """Run the blind-labelled validation corpus and print the report."""
+    import json as _json
+    from ..engine.lead_corpus import run_corpus
+    r = run_corpus(seed=args.seed, n_boot=args.n_boot)
+    if args.out:
+        with open(args.out, "w") as f:
+            _json.dump(r, f, indent=2)
+    print(f"label_agreement_rate={r['label_agreement_rate']} "
+          f"robustness_rate={r['robustness_rate']} "
+          f"ace_win_rate={r['ace_win_rate']} "
+          f"mapping_failures={r['mapping_failures']} "
+          f"source_leak_failures={r['source_leak_failures']}")
+    for c in r["cases"]:
+        print(f"  {c['id']:24s} {c['category']:20s} agree={c['agree']} "
+              f"state={c['observed']['state']} winner={c['observed']['winner']}")
+    return 0 if (r["label_agreement_rate"] == 1.0
+                 and r["mapping_failures"] == 0
+                 and r["source_leak_failures"] == 0) else 1
+
+
 def cmd_pool(args: argparse.Namespace) -> int:
     from ..pool.store import ProblemPool
     # Firestore-only subcommands (push/backfill-leads) don't take --pool.
@@ -273,6 +299,53 @@ def main(argv: list[str] | None = None) -> int:
                       help="parallel forge workers; 0 = auto "
                            "(each holds a ~1.2 GB engine)")
     lf_p.set_defaults(func=cmd_lead_forge)
+
+    lpa = sub.add_parser(
+        "lead-posterior-audit",
+        help="audit one opening-lead board: samplers x thresholds, all lead "
+             "EVs, delta/tail/strata diagnostics, card-level correctness, "
+             "quality flag (Ben-free for uniform/fixture; 'current' needs Ben)")
+    lpa.add_argument("--id", default=None,
+                     help="board id like lead1-0284459a; regenerates the deal "
+                          "from its seed (also pass --auction and --contract)")
+    lpa.add_argument("--hand", default=None,
+                     help="leader hand PBN 'S.H.D.C', e.g. 874.AQ94.T.97642")
+    lpa.add_argument("--auction", default=None,
+                     help="space-separated tokens from dealer, e.g. "
+                          "'1S P 2C P 3D P 3NT P P P'")
+    lpa.add_argument("--dealer", default="N")
+    lpa.add_argument("--vul", default="None")
+    lpa.add_argument("--contract", default=None,
+                     help="e.g. 3NTW, 4HEx")
+    lpa.add_argument("--samplers", default="uniform",
+                     help="comma list: uniform,current,fixture,ben-replay,"
+                          "ben-likelihood")
+    lpa.add_argument("--thresholds", default="0.70",
+                     help="comma list of 'current' acceptance thresholds")
+    lpa.add_argument("--samples", type=int, default=512,
+                     help="requested accepted samples per run")
+    lpa.add_argument("--proposals", type=int, default=0,
+                     help="proposal budget hint (recorded; Ben caps its own)")
+    lpa.add_argument("--compare", default=None,
+                     help="explicit pair, e.g. HA,H4")
+    lpa.add_argument("--seed", type=int, default=1)
+    lpa.add_argument("--n-boot", type=int, default=2000)
+    lpa.add_argument("--fixture", default=None,
+                     help="JSON layout fixture for the 'fixture' sampler")
+    lpa.add_argument("--card-trace-layouts", type=int, default=0,
+                     help="emit per-card DDS traces for the first N layouts "
+                          "(audit/debug only)")
+    lpa.add_argument("--out", default=None, help="write JSON here")
+    lpa.set_defaults(func=cmd_lead_posterior_audit)
+
+    lc = sub.add_parser(
+        "lead-corpus",
+        help="run the blind-labelled opening-lead validation corpus "
+             "(synthetic ground-truth cases; Ben-free)")
+    lc.add_argument("--seed", type=int, default=1)
+    lc.add_argument("--n-boot", type=int, default=500)
+    lc.add_argument("--out", default=None, help="write JSON report here")
+    lc.set_defaults(func=cmd_lead_corpus)
 
     pool_p = sub.add_parser("pool", help="add/remove/list pool problems")
     pool_sub = pool_p.add_subparsers(dest="pool_cmd", required=True)

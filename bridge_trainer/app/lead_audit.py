@@ -1,0 +1,268 @@
+"""`trainer lead-posterior-audit` — a reproducible opening-lead audit.
+
+Runs one or more samplers (and thresholds) on ONE opening-lead problem, grades
+every physical lead by average double-dummy defensive tricks on a shared
+layout set, and emits a single JSON record with: sampler provenance,
+proposal/acceptance/ESS, all lead EVs, the best-vs-runner-up delta/tail
+metrics, strata + leave-one-stratum-out diagnostics, the card-level
+correctness trace, cross-sampler agreement, and a quality flag.
+
+The headline ranking is ALWAYS the mean-DD ranking; every extra metric is a
+diagnostic. Sampled full deals live only in this audit output, never in normal
+UI. Nothing here consults the hidden source deal.
+"""
+from __future__ import annotations
+
+import json
+
+import numpy as np
+
+from ..engine.lead_posterior import (
+    LeadProblem, build_problem, evaluate_layouts, delta_report, is_tail_dominated,
+    strata_report, quality_flag, card_level_audit, card_level_trace,
+    result_signature, problem_fingerprint, correctness_gate, margin_decay_ratio,
+    publication_verdict)
+from ..engine.lead_samplers import UniformSampler, BenCurrentSampler, FixtureSampler
+
+
+def _rank_table(ev, ls) -> list:
+    m = ev.weighted_mean()
+    order = ev.ranking()
+    rows = []
+    for c in order:
+        arr = ev.def_tricks[c]
+        rows.append({
+            "card": c,
+            "avg_def_tricks": round(m[c], 4),
+            "min": float(arr.min()), "max": float(arr.max()),
+        })
+    return rows
+
+
+def _make_sampler(name: str, threshold, engine, fixture):
+    if name == "uniform":
+        return UniformSampler()
+    if name == "fixture":
+        return FixtureSampler.from_json(fixture)
+    if name == "current":
+        return BenCurrentSampler(engine=engine, threshold=threshold or 0.70)
+    if name == "ben-replay":
+        from ..engine.lead_samplers import BenReplaySampler
+        return BenReplaySampler(engine=engine)
+    if name == "ben-likelihood":
+        from ..engine.lead_samplers import BenLikelihoodSampler
+        return BenLikelihoodSampler(engine=engine)
+    raise ValueError(f"unknown sampler {name}")
+
+
+def run_one_sampler(problem: LeadProblem, sampler, requested: int, seed: int,
+                    compare, n_boot: int) -> dict:
+    ls = sampler.sample(problem, requested, seed)
+    ev = evaluate_layouts(ls)
+    m = ev.weighted_mean()
+    order = ev.ranking()
+    best, runner = order[0], order[1]
+
+    dr = delta_report(ev.def_tricks[best], ev.def_tricks[runner],
+                      weight=ls.weight, n_boot=n_boot, seed=seed)
+    # optional explicit pair (e.g. HA vs H4)
+    compare_report = None
+    if compare and len(compare) == 2 and all(c in ev.def_tricks for c in compare):
+        a, b = compare
+        compare_report = {
+            "pair": [a, b],
+            "mean_a": round(m[a], 4), "mean_b": round(m[b], 4),
+            "delta": delta_report(ev.def_tricks[a], ev.def_tricks[b],
+                                  weight=ls.weight, n_boot=n_boot, seed=seed),
+        }
+
+    # Stratify the decision of interest: the explicit --compare pair when
+    # given (e.g. HA vs H4), else best vs runner-up. When best/runner are
+    # touching cards their delta is trivially 0, so the compare pair is the
+    # informative contrast for tail/stratum analysis.
+    if compare and len(compare) == 2 and all(c in ev.def_tricks for c in compare):
+        strat_a, strat_b = compare
+    else:
+        strat_a, strat_b = best, runner
+    strata = strata_report(problem, ls, ev, strat_a, strat_b)
+    focus = list(compare) if compare else [best, runner]
+    card_audit = card_level_audit(ls, ev, focus=focus)
+
+    return {
+        "provenance": ls.provenance(),
+        "winner": best, "runner_up": runner,
+        "lead_evs": _rank_table(ev, ls),
+        "best_vs_runner_delta": dr,
+        "tail_dominated": is_tail_dominated(dr),
+        "compare": compare_report,
+        "strata": strata,
+        "card_level_audit": card_audit,
+        "result_signature": result_signature(ev, ls),
+        "_ev": ev, "_ls": ls,   # kept for cross-sampler assembly; stripped later
+    }
+
+
+def run_audit(hand, auction, dealer, vul, contract, *, samplers, thresholds,
+              requested, proposals, compare, seed, n_boot=2000,
+              engine=None, fixture=None, card_trace_layouts=0) -> dict:
+    problem = build_problem(hand, auction, dealer, vul, contract)
+    runs = {}
+    reports_for_flag = {}
+    gate = None
+    for sname in samplers:
+        thr_list = thresholds if sname == "current" else [None]
+        for thr in thr_list:
+            label = f"{sname}" + (f"@{thr:.2f}" if thr is not None else "")
+            ben_family = sname in ("current", "ben-replay", "ben-likelihood")
+            try:
+                sampler = _make_sampler(sname, thr, engine, fixture)
+                r = run_one_sampler(problem, sampler, requested, seed,
+                                    compare, n_boot)
+            except Exception as e:  # noqa: BLE001
+                # Ben-backed samplers may be unavailable (no BEN_HOME); record
+                # that and continue. Offline samplers (uniform/fixture) failing
+                # is a real bug — let it surface.
+                if ben_family:
+                    runs[label] = {"unavailable": f"{type(e).__name__}: {e}"}
+                    continue
+                raise
+            # Only AUCTION-AWARE posterior samplers vote on the verdict
+            # (requirement 4: "valid samplers"). The uniform/fixture baselines
+            # are deliberate not-a-posterior contrasts, not votes.
+            is_valid = sname in ("current", "ben-replay", "ben-likelihood")
+            if is_valid:
+                reports_for_flag[label] = {
+                    "winner": r["winner"],
+                    "delta_report": r["best_vs_runner_delta"],
+                }
+            ls, ev = r["_ls"], r["_ev"]
+            # hard correctness gate on the FIRST run (with a reproducibility
+            # repeat) — publication is blocked on any failure (requirement 1).
+            if gate is None:
+                ls2 = sampler.sample(problem, requested, seed)
+                gate = correctness_gate(problem, ls, ev, ls2, evaluate_layouts(ls2))
+            # card-level per-layout trace (audit/debug only)
+            if card_trace_layouts:
+                r["card_level_traces"] = [
+                    card_level_trace(problem, ls.hands[i])
+                    for i in range(min(card_trace_layouts, ls.n))]
+            r.pop("_ev", None)
+            r.pop("_ls", None)
+            runs[label] = r
+
+    if gate is None:   # nothing ran (e.g. only unavailable Ben samplers)
+        gate = {"passed": False, "checks": {}, "blocks_publication": True}
+    flag = quality_flag(reports_for_flag)
+    decay = margin_decay_ratio(reports_for_flag)
+    verdict = publication_verdict(reports_for_flag, gate, decay)
+    valid_winners = {r["winner"] for r in reports_for_flag.values()}
+    all_winners = {r["winner"] for r in runs.values() if "winner" in r}
+    baseline_winners = sorted(all_winners - valid_winners)
+    publishable = verdict["publishable_single_lead"]
+
+    return {
+        "schema": "lead-posterior-audit/1",
+        "problem": {
+            "hand": problem.hand, "auction": list(problem.auction),
+            "dealer": problem.dealer, "vul": problem.vul,
+            "contract": problem.contract, "strain": problem.strain,
+            "declarer": problem.declarer, "leader": problem.leader,
+            "legal_leads": problem.legal_leads(),
+            "fingerprint": problem_fingerprint(problem, seed),
+        },
+        "settings": {
+            "samplers": samplers, "thresholds": thresholds,
+            "requested_samples": requested, "proposals": proposals,
+            "compare": compare, "seed": seed, "n_boot": n_boot,
+        },
+        "runs": runs,
+        "cross_sampler": {
+            "valid_sampler_winners": sorted(valid_winners),
+            "agree_on_winner": len(valid_winners) == 1,
+            "distinct_winners": sorted(all_winners),
+            "baseline_only_winners": baseline_winners,
+            "note": "Only auction-aware posterior samplers (current, ben-replay, "
+                    "ben-likelihood) vote; uniform/fixture are not-a-posterior "
+                    "contrasts.",
+        },
+        "correctness_gate": gate,
+        "margin_decay": decay,
+        "quality_flag": flag,
+        "publication_verdict": verdict,
+        "publishable_single_lead": publishable,
+        "notes": (
+            "Ranking is mean double-dummy defensive tricks over the shared "
+            "sampled layouts; all other metrics are diagnostics. Publication is "
+            "BLOCKED on any correctness_gate failure and withheld unless "
+            "quality_flag=='robust'. Threshold decay (margin_decay) is a "
+            "warning, never by itself a rejection."),
+    }
+
+
+def cmd_lead_posterior_audit(args) -> int:
+    from ..engine.scanner import deal_board, VUL_NAMES
+    from ..engine.conventions import SEATS as _S
+
+    hand, auction, dealer, vul, contract = (
+        args.hand, args.auction, args.dealer, args.vul, args.contract)
+
+    # If an id is given and no explicit hand/auction, regenerate the board's
+    # PUBLIC state from its seed (Ben-free for the deal; the auction must be
+    # supplied or captured, since bidding needs the engine).
+    if args.id and not hand:
+        seed = int(args.id.split("-")[-1], 16)
+        hands, dealer_i, vul_t = deal_board(seed)
+        leader_hint = None
+        # We can only fill the leader hand once we know the contract/declarer,
+        # which requires the auction. Require --auction + --contract with --id.
+        if not (args.auction and args.contract):
+            print("ERROR: --id needs --auction and --contract (bidding needs "
+                  "the Ben engine to reproduce; pass the known auction).")
+            return 2
+        contract = args.contract
+        fc = build_problem(hands[0], args.auction.split(), _S[dealer_i],
+                           VUL_NAMES[vul_t], contract)
+        hand = hands[_S.index(fc.leader)]
+        dealer, vul, auction = _S[dealer_i], VUL_NAMES[vul_t], args.auction
+
+    auction_list = auction.split() if isinstance(auction, str) else auction
+    thresholds = [float(x) for x in args.thresholds.split(",")] if args.thresholds else [0.70]
+    samplers = args.samplers.split(",") if args.samplers else ["uniform"]
+    compare = args.compare.split(",") if args.compare else None
+
+    engine = None
+    if "current" in samplers:
+        try:
+            from ..engine.ben import get_engine
+            engine = get_engine()
+        except Exception as e:  # noqa: BLE001
+            print(f"WARNING: Ben engine unavailable ({type(e).__name__}: {e}); "
+                  f"'current' sampler runs will be marked unavailable.")
+
+    result = run_audit(
+        hand, auction_list, dealer, vul, contract,
+        samplers=samplers, thresholds=thresholds,
+        requested=args.samples, proposals=args.proposals,
+        compare=compare, seed=args.seed, n_boot=args.n_boot,
+        engine=engine, fixture=args.fixture,
+        card_trace_layouts=args.card_trace_layouts)
+
+    text = json.dumps(result, indent=2, default=_json_default)
+    if args.out:
+        with open(args.out, "w") as f:
+            f.write(text)
+        print(f"wrote {args.out}  (quality_flag={result['quality_flag']}, "
+              f"winners={result['cross_sampler']['distinct_winners']})")
+    else:
+        print(text)
+    return 0
+
+
+def _json_default(o):
+    if isinstance(o, (np.floating,)):
+        return float(o)
+    if isinstance(o, (np.integer,)):
+        return int(o)
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    return str(o)
