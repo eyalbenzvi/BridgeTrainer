@@ -14,6 +14,14 @@
 //   * per-user attempts are synced INCREMENTALLY (only docs newer than the
 //     last-seen timestamp), cached in localStorage, and attempts are stored
 //     one-doc-per-problem so the collection can't grow without bound.
+//
+// Incremental sync only ADDS docs, so it never notices a doc that was DELETED
+// on the server (e.g. an admin/data reset) — the cached copy would linger. To
+// stay eventually-consistent with deletions without paying a full read on every
+// page navigation, we also run a FULL reconcile (read the whole attempts
+// collection and REPLACE the cache) at most once per FULL_SYNC_INTERVAL_MS, and
+// always once when no full sync has ever been recorded. That bounds full reads
+// to a few per day per user while guaranteeing deletions eventually propagate.
 import { initializeApp }
   from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import {
@@ -49,6 +57,11 @@ const provider = new GoogleAuthProvider();
 let USER = null;
 let ATTEMPTS = {};   // {problemId: record}, preloaded at sign-in
 let LAST_TS = 0;     // max attempt timestamp (ms) synced so far
+let LAST_FULL_SYNC = 0;   // ms wall-clock of the last full reconcile
+
+// How stale the cache may get before we do a full authoritative reconcile
+// (which is the only thing that removes server-deleted docs from the cache).
+const FULL_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6 hours
 
 function tsMillis(a) {
   if (!a || !a.ts) return 0;
@@ -64,12 +77,13 @@ function loadCache(uid) {
     const c = JSON.parse(localStorage.getItem(cacheKey(uid)));
     if (c && c.byId) return c;
   } catch (e) { /* ignore */ }
-  return { byId: {}, lastTs: 0 };
+  return { byId: {}, lastTs: 0, lastFullSync: 0 };
 }
 function saveCache(uid) {
   try {
     localStorage.setItem(cacheKey(uid),
-      JSON.stringify({ byId: ATTEMPTS, lastTs: LAST_TS }));
+      JSON.stringify({ byId: ATTEMPTS, lastTs: LAST_TS,
+                       lastFullSync: LAST_FULL_SYNC }));
   } catch (e) { /* quota/private-mode: cache is best-effort */ }
 }
 
@@ -114,7 +128,32 @@ async function preloadAttempts(uid) {
   const cache = loadCache(uid);
   ATTEMPTS = cache.byId || {};
   LAST_TS = cache.lastTs || 0;
+  LAST_FULL_SYNC = cache.lastFullSync || 0;
   const coll = collection(db, "users", uid, "attempts");
+
+  // Full reconcile: read the WHOLE collection and REPLACE the cache, so docs
+  // deleted on the server drop out locally too. Runs when the cache has never
+  // been fully synced (e.g. first load after this logic shipped) or has gone
+  // stale past FULL_SYNC_INTERVAL_MS.
+  if (!LAST_FULL_SYNC || Date.now() - LAST_FULL_SYNC > FULL_SYNC_INTERVAL_MS) {
+    const snap = await getDocs(coll);
+    const next = {};
+    let maxTs = 0;
+    for (const d of snap.docs) {
+      const a = d.data();
+      const ms = tsMillis(a);
+      if (ms > maxTs) maxTs = ms;
+      next[a.problemId || d.id] = a;   // one doc per problem
+    }
+    ATTEMPTS = next;
+    LAST_TS = maxTs;
+    LAST_FULL_SYNC = Date.now();
+    saveCache(uid);
+    return;
+  }
+
+  // Incremental sync: cheap add-only pass for the common case (recent full
+  // reconcile), fetching just docs newer than the last-seen timestamp.
   let snap;
   try {
     snap = await getDocs(LAST_TS
