@@ -109,7 +109,7 @@ jobs:
             echo "## Lead forge — mode $MODE, requested $COUNT"
             echo
             echo '```'
-            grep -E "^>> |^Done:|^lead-forge:|progress: |ACCEPTED |uploaded " \
+            grep -E "^>> |^Done:|^lead-forge:|progress: |uploaded " \
               forge.log | tail -60 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

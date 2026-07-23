@@ -324,7 +324,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
                        detail=detail)
 
 
-PROGRESS_EVERY = 5      # boards between heartbeat lines (CI log tracing)
+PROGRESS_EVERY = 5      # ACCEPTED boards between status lines (CI tracing)
 
 
 class _LeadBatchState:
@@ -344,25 +344,22 @@ class _LeadBatchState:
         self.t0 = time.perf_counter()
 
     def _progress(self) -> None:
-        """One-line heartbeat so a long batch is traceable from a CI log:
-        most boards are silent rejects (pre_obvious and friends carry no
-        detail line), which otherwise reads as a hang."""
+        """The batch's ONLY per-board output: one status line each
+        PROGRESS_EVERY accepted problems. Per-board detail lines (reject
+        reasons, per-acceptance lines) are deliberately not written — the
+        full tallies still land in the end-of-run summary."""
         mins = (time.perf_counter() - self.t0) / 60
         top = ", ".join(f"{r} x{n}" for r, n in self.rejections.most_common(3))
-        self.log(f"progress: {self.boards} boards scanned, "
-                 f"{len(self.made)}/{self.count} accepted [{mins:.1f} min]"
+        self.log(f"progress: {len(self.made)}/{self.count} accepted, "
+                 f"{self.boards} boards scanned [{mins:.1f} min]"
                  + (f"; top rejections: {top}" if top else ""))
 
     def absorb(self, out: LeadOutcome, tag: str = "") -> None:
         self.boards += 1
-        if self.boards % PROGRESS_EVERY == 0:
-            self._progress()
         for k, x in out.timings.items():
             self.stage_totals[k] += x
         if out.status in ("rejected", "error"):
             self.rejections[out.reason] += 1
-            if out.detail:
-                self.log(f"  {tag}seed {out.seed}: {out.detail}")
             return
         rec = out.rec
         if rec["id"] in self.existing:
@@ -374,11 +371,8 @@ class _LeadBatchState:
         self.made.append(rec["id"])
         self.quotas["vuls"][rec["vul"]] += 1
         self.quotas["difficulty"][rec["difficulty"]] += 1
-        self.log(f"  {tag}seed {out.seed}: "
-                 + out.detail.replace(
-                     "ACCEPTED " + rec["id"],
-                     f"ACCEPTED {rec['id']} [{len(self.made)}/{self.count}]",
-                     1))
+        if len(self.made) % PROGRESS_EVERY == 0:
+            self._progress()
 
     def summary(self, wall: float) -> dict:
         return {
