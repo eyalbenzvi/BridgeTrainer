@@ -263,6 +263,16 @@ def cmd_pool(args: argparse.Namespace) -> int:
         print(f"uploaded {summary['uploaded']}, skipped {summary['skipped']} "
               f"(pool has {summary['total']}); meta/index refreshed")
         return 0
+    if args.pool_cmd == "backfill-training":
+        from ..pool.firestore_store import backfill_lead_training
+        summary = backfill_lead_training(key_path=args.key,
+                                         dry_run=args.dry_run)
+        verb = "would stamp" if args.dry_run else "stamped"
+        print(f"{verb} legacy training metadata on {summary['updated']} of "
+              f"{summary['lead_total']} lead problems in Firestore "
+              f"({summary['total']} total); meta/index "
+              f"{'unchanged (dry run)' if args.dry_run else 'refreshed with mode flags'}")
+        return 0
     if args.pool_cmd == "backfill-leads":
         from ..pool.firestore_store import backfill_lead_types
         summary = backfill_lead_types(key_path=args.key, dry_run=args.dry_run)
@@ -449,6 +459,17 @@ def main(argv: list[str] | None = None) -> int:
     pp.add_argument("--overwrite", action="store_true",
                     help="replace documents that already exist")
     pp.set_defaults(func=cmd_pool)
+
+    pt = pool_sub.add_parser(
+        "backfill-training",
+        help="migration: stamp legacy lead problems in Firestore as MP-only "
+             "(tricks-only evidence) and rebuild the index with mode flags")
+    pt.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pt.add_argument("--dry-run", action="store_true",
+                    help="report counts without writing")
+    pt.set_defaults(func=cmd_pool)
 
     pb = pool_sub.add_parser(
         "backfill-leads",

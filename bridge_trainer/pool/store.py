@@ -16,6 +16,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA_VERSION = 1
+# schema 2 = mode-aware lead records (MP + IMP metrics; engine/lead_maker).
+# Version-1 records (bidding, and legacy tricks-only leads) stay readable.
+SUPPORTED_SCHEMAS = (1, 2)
 
 
 def index_entry(rec: dict) -> dict:
@@ -23,7 +26,7 @@ def index_entry(rec: dict) -> dict:
     filters (kind / type / difficulty). Shared by the local and Firestore
     index builders so both stay in lock-step."""
     cls = rec.get("classification", {})
-    return {
+    entry = {
         "id": rec["id"],
         # scenario router; legacy records predate it and are bidding
         "kind": rec.get("kind", "bidding"),
@@ -32,6 +35,13 @@ def index_entry(rec: dict) -> dict:
         "difficulty_level": cls.get("difficulty_level"),
         "created_at": rec.get("created_at"),
     }
+    if entry["kind"] == "lead":
+        # training modes this problem can serve: legacy tricks-only records
+        # are MP-only; schema-2 records carry IMP metrics too. The web app
+        # filters the IMP tab on this flag.
+        from ..scoring.lead_metrics import supported_modes
+        entry["modes"] = supported_modes(rec)
+    return entry
 
 
 def index_from_entries(entries) -> dict:
@@ -60,8 +70,9 @@ class ProblemPool:
 
     def add(self, record: dict) -> str:
         """Store one finished problem document. Returns its id."""
-        if record.get("schema") != SCHEMA_VERSION:
-            raise ValueError(f"record schema must be {SCHEMA_VERSION}")
+        if record.get("schema") not in SUPPORTED_SCHEMAS:
+            raise ValueError(f"record schema must be one of "
+                             f"{SUPPORTED_SCHEMAS}")
         pid = record["id"]
         self.problems_dir.mkdir(parents=True, exist_ok=True)
         path = self.problems_dir / f"{pid}.json"

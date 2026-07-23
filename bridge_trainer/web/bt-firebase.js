@@ -204,15 +204,38 @@ function gradeBidding(P, action) {
            outcomeClass, gradedCost, acceptedSet: accepted };
 }
 
-function gradeLead(P, card) {
+function gradeLead(P, card, mode) {
+  // mode-aware grading: MP grades against the expected-defensive-tricks
+  // ranking, IMP against the expected-IMP ranking (verdict.by_mode). Legacy
+  // records carry no per-mode data and are always graded as MP.
   const v = P.verdict;
-  const accepted = v.accepted || [];
+  const trainingMode = mode === "IMP" ? "IMP" : "MP";
+  const bm = (v.by_mode && v.by_mode[trainingMode]) || null;
+  const accepted = (bm && bm.accepted && bm.accepted.length)
+    ? bm.accepted : (v.accepted || []);
   const correct = accepted.includes(card);
   const row = (v.table || []).find((r) => r.card === card);
+  const rankKey = trainingMode === "IMP" ? "rank_imp" : "rank_mp";
   let gradedCost = 0;
-  if (row && !correct && row.vs_best !== undefined)
-    gradedCost = Math.max(0, -(+row.vs_best));   // defensive tricks below best
+  if (row && !correct) {
+    if (trainingMode === "IMP" && row.exp_imps !== undefined) {
+      // IMPs below the mode's best lead
+      const best = (v.table || []).find((r) => accepted.includes(r.card));
+      if (best && best.exp_imps !== undefined)
+        gradedCost = Math.max(0, +best.exp_imps - +row.exp_imps);
+    } else if (row.vs_best !== undefined) {
+      gradedCost = Math.max(0, -(+row.vs_best)); // def. tricks below best
+    }
+  }
+  const primaryValue = row
+    ? (trainingMode === "IMP" ? row.exp_imps : row.avg_def_tricks) : null;
   return { ...meta(P), answer: card, chosenCall: card, correct,
+           trainingMode,
+           rankingMetric: trainingMode === "IMP" ? "exp_imps"
+                                                 : "exp_def_tricks",
+           chosenRank: row && row[rankKey] !== undefined ? row[rankKey] : null,
+           recommendedLead: (bm && bm.recommended) || accepted[0] || null,
+           primaryValue: primaryValue === undefined ? null : primaryValue,
            outcomeClass: correct ? "winner" : "suboptimal",
            gradedCost, acceptedSet: accepted };
 }

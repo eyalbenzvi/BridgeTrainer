@@ -225,7 +225,8 @@ class FirestorePool:
         recover after drift/corruption."""
         from .store import build_index
         index = build_index(self.stream_records(
-            fields=["kind", "classification", "difficulty", "created_at"]))
+            fields=["kind", "classification", "difficulty", "created_at",
+                    "training"]))
         self.write_index(index)
         return index
 
@@ -268,6 +269,47 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
     return {"uploaded": uploaded, "skipped": skipped, "total": len(local.ids())}
 
 
+def backfill_lead_training(key_path: str | None = None,
+                           dry_run: bool = False) -> dict:
+    """Migration: mark every lead problem *in Firestore* with its training
+    metadata and rebuild the index with per-problem mode flags.
+
+    Legacy (algorithm-version-1) lead documents carry tricks-only evidence —
+    no per-sample scores — so they can serve only the MP (Matchpoints) mode;
+    this stamps them with ``scoring.lead_metrics.legacy_training_block`` so
+    they stay readable and self-describing. Schema-2 documents (which already
+    carry a ``training`` block with MP + IMP metrics) are left untouched.
+    The rebuilt index gives every lead entry a ``modes`` list, which the web
+    app's IMP tab filters on. Bidding docs are read but never written.
+
+    Returns {lead_total, updated, total}. ``dry_run`` reports without writing.
+    """
+    from ..scoring.lead_metrics import legacy_training_block
+    from .store import build_index
+
+    remote = FirestorePool(key_path)
+    records = remote.stream_records(
+        fields=["kind", "contract", "classification", "difficulty",
+                "created_at", "training"])
+    updated = lead_total = 0
+    block = legacy_training_block()
+    for rec in records:
+        if rec.get("kind") != "lead":
+            continue
+        lead_total += 1
+        if rec.get("training"):
+            continue
+        rec["training"] = block
+        updated += 1
+        if not dry_run:
+            _retry_transient(lambda rid=rec["id"]: remote._col.document(
+                rid).set({"training": block}, merge=True))
+    if not dry_run:
+        remote.write_index(build_index(records))     # rebuild from memory
+    return {"lead_total": lead_total, "updated": updated,
+            "total": len(records)}
+
+
 def backfill_lead_types(key_path: str | None = None,
                         dry_run: bool = False) -> dict:
     """Assign the opening-lead category to every lead problem *in Firestore*.
@@ -286,7 +328,7 @@ def backfill_lead_types(key_path: str | None = None,
     remote = FirestorePool(key_path)
     records = remote.stream_records(
         fields=["kind", "contract", "classification", "difficulty",
-                "created_at"])
+                "created_at", "training"])
     updated = lead_total = 0
     for rec in records:
         if rec.get("kind") != "lead":

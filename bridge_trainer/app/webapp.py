@@ -454,6 +454,31 @@ table.plain th, table.plain td { text-align: start; }
 /* designed empty/error state */
 .state { text-align: center; padding: 8px 4px; }
 .state .em { font-size: 15px; color: var(--fg); font-weight: 700; margin-bottom: 4px; }
+
+/* ===== opening-lead training modes: MP / IMP selection + banner ===== */
+.modegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+button.modecard { font: inherit; text-align: start; background: var(--card);
+  color: var(--fg); border: 2px solid var(--line); border-radius: 12px;
+  padding: 12px; cursor: pointer; display: flex; flex-direction: column;
+  gap: 4px; min-height: 64px; }
+button.modecard b { font-size: 17px; }
+button.modecard small { color: var(--muted); font-size: 12px;
+  line-height: 1.35; }
+button.modecard[aria-pressed="true"] { border-color: var(--accent);
+  background: var(--accent-tint); }
+button.modecard[aria-pressed="true"] b { color: var(--accent); }
+.modebanner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.modechip { display: inline-block; font-size: 12px; font-weight: 800;
+  letter-spacing: .08em; color: #fff; background: var(--accent);
+  border-radius: 999px; padding: 3px 10px; }
+.modegoal { font-size: 13px; color: var(--muted); direction: ltr;
+  unicode-bidi: isolate; }
+.ctline { font-size: 14px; margin-top: 6px; }
+/* the active mode's primary metric is visually emphasized */
+table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
+  font-weight: 700; }
+.resultline { font-size: 14px; margin: 3px 0; }
+.resultline b { font-variant-numeric: tabular-nums; }
 """
 
 _SHARED_JS = """
@@ -481,8 +506,37 @@ function saveFilters(f) { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); 
 /* the site splits into two scenarios; kind routes each problem + page */
 function kindOf(p) { return p.kind || "bidding"; }
 function routeFor(kind, id) {
-  return (kind === "lead" ? "lead.html" : "p.html") + "?id=" +
-         encodeURIComponent(id);
+  const base = (kind === "lead" ? "lead.html" : "p.html") + "?id=" +
+               encodeURIComponent(id);
+  return kind === "lead" ? base + "&mode=" + leadMode() : base;
+}
+/* Opening-lead training modes: exactly two — MP (Matchpoints) and IMPs.
+   Both modes show every metric; ONLY the ranking objective differs. */
+const LEAD_MODES = ["MP", "IMP"];
+const MODE_INFO = {
+  MP:  {title: "Matchpoints", banner: "MATCHPOINTS",
+        subtitle: "Prioritize maximum defensive tricks",
+        goal: "Goal: maximize expected defensive tricks."},
+  IMP: {title: "IMPs", banner: "IMPs",
+        subtitle: "Prioritize score swings",
+        goal: "Goal: maximize expected IMP value from the final score."},
+};
+const LEAD_MODE_KEY = "bt_lead_mode";
+function leadMode() {
+  return localStorage.getItem(LEAD_MODE_KEY) === "IMP" ? "IMP" : "MP";
+}
+function setLeadMode(m) {
+  localStorage.setItem(LEAD_MODE_KEY, m === "IMP" ? "IMP" : "MP");
+}
+/* which training modes an index row / problem doc supports; legacy
+   tricks-only records are MP-only */
+function problemModes(p) {
+  if (Array.isArray(p.modes) && p.modes.length) return p.modes;
+  if (p.training && p.training.modes) {
+    const m = LEAD_MODES.filter(k => p.training.modes[k]);
+    if (m.length) return m;
+  }
+  return ["MP"];
 }
 /* which levels/types exist for a scenario right now, and how many each holds.
    Bidding facets on difficulty x type; leads on difficulty only. */
@@ -508,12 +562,17 @@ function resolveFilters(index, raw, kind) {
   const base = raw || {};
   return {
     kind,
+    mode: kind === "lead" ? leadMode() : null,
     levels: Array.isArray(base.levels) ? base.levels : f.levels.slice(),
     types: Array.isArray(base.types) ? base.types : f.types.slice(),
   };
 }
 function matchesFilters(p, f) {
   if (kindOf(p) !== (f.kind || "bidding")) return false;
+  // IMP mode serves only problems that carry IMP metrics; legacy
+  // tricks-only records must never be ranked by IMPs.
+  if (f.kind === "lead" && (f.mode || leadMode()) === "IMP" &&
+      !problemModes(p).includes("IMP")) return false;
   if (!f.levels.includes(p.difficulty_level)) return false;
   return f.types.includes(p.type);            // both scenarios: difficulty + type
 }
@@ -933,6 +992,16 @@ def _index_html() -> str:
 <button type="button" data-kind="lead" aria-pressed="false">הובלה
 <small>איזה קלף להוביל</small></button>
 </div>
+<div class="card" id="modes" hidden>
+<div class="grow"><span class="glabel">שיטת חישוב</span></div>
+<div class="modegrid" role="group" aria-label="בחירת שיטת חישוב">
+<button type="button" class="modecard" data-mode="MP" aria-pressed="true">
+<b>Matchpoints</b><small>Prioritize maximum defensive tricks</small></button>
+<button type="button" class="modecard" data-mode="IMP" aria-pressed="false">
+<b>IMPs</b><small>Prioritize score swings</small></button>
+</div>
+<div class="modegoal" id="modegoal" style="margin-top:8px"></div>
+</div>
 <div class="card" id="filters">
 <button type="button" class="fbar" id="fbar" aria-expanded="false"
         aria-controls="fbody">
@@ -973,9 +1042,24 @@ function setScenario(kind) {{
   document.body.dataset.scenario = kind;
   document.querySelectorAll("#scenario button").forEach(b =>
     b.setAttribute("aria-pressed", b.dataset.kind === kind ? "true" : "false"));
+  document.getElementById("modes").hidden = kind !== "lead";
+  syncModeUi();
   FILTERS = resolveFilters(INDEX, loadCur(), kind);
   buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
 }}
+/* MP / IMP selection cards (lead scenario only) */
+function syncModeUi() {{
+  const m = leadMode();
+  document.querySelectorAll("#modes .modecard").forEach(b =>
+    b.setAttribute("aria-pressed", b.dataset.mode === m ? "true" : "false"));
+  document.getElementById("modegoal").textContent = MODE_INFO[m].goal;
+}}
+document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = () => {{
+  setLeadMode(b.dataset.mode);
+  syncModeUi();
+  FILTERS.mode = leadMode();
+  updateFacetCounts(); renderStats();
+}});
 function toggleFilter(list, value) {{
   const i = list.indexOf(value);
   if (i === -1) list.push(value); else list.splice(i, 1);
@@ -1008,6 +1092,8 @@ function facetCounts(index, flt) {{
   const levelCount = {{}}, typeCount = {{}};
   for (const p of index.problems) {{
     if (kindOf(p) !== flt.kind) continue;
+    if (flt.kind === "lead" && (flt.mode || leadMode()) === "IMP" &&
+        !problemModes(p).includes("IMP")) continue;
     if (p.difficulty_level && flt.types.includes(p.type))
       levelCount[p.difficulty_level] =
         (levelCount[p.difficulty_level] || 0) + 1;
@@ -1134,6 +1220,8 @@ async function init() {{
   const q = new URLSearchParams(location.search);
   const qk = q.get("kind");
   if (qk === "lead" || qk === "bidding") SCEN = qk;
+  const qm = q.get("mode");
+  if (qm === "IMP" || qm === "MP") setLeadMode(qm);
   setScenario(SCEN);
   const lv = q.get("lv"), ty = q.get("type");
   if (lv || ty) {{
@@ -1165,6 +1253,7 @@ document.getElementById("deal").onclick = () => {{
   }}
   localStorage.setItem("bt_session", JSON.stringify({{
     kind: FILTERS.kind, size: 10, count: 0, right: 0,
+    mode: FILTERS.kind === "lead" ? leadMode() : null,
     levels: FILTERS.levels.slice(), types: FILTERS.types.slice()}}));
   location.href = routeFor(FILTERS.kind, id);
   return false;
@@ -1573,8 +1662,45 @@ else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 
 
 _LEAD_JS = r"""
-let P = null, INDEX = null;
+let P = null, INDEX = null, MODE = "MP", MODE_FALLBACK = false;
 const RANKS = "23456789TJQKA";
+/* ---- training-mode helpers: MP ranks by expected defensive tricks, IMP by
+   expected IMP value. Every metric stays visible in both modes; only the
+   ranking objective (and the emphasized column) changes. ---- */
+function hasImpMetrics(p) {
+  const t = (p.verdict && p.verdict.table) || [];
+  return t.length > 0 && t[0].exp_imps !== undefined;
+}
+function acceptedFor(p, mode) {
+  const bm = p.verdict && p.verdict.by_mode;
+  if (bm && bm[mode] && bm[mode].accepted && bm[mode].accepted.length)
+    return bm[mode].accepted;
+  return (p.verdict && p.verdict.accepted) || [];
+}
+function recommendedFor(p, mode) {
+  const bm = p.verdict && p.verdict.by_mode;
+  if (bm && bm[mode] && bm[mode].recommended) return bm[mode].recommended;
+  return acceptedFor(p, mode)[0];
+}
+function primaryOf(r, mode) {
+  return mode === "IMP" ? r.exp_imps : r.avg_def_tricks;
+}
+function fmtPrimary(v, mode) {
+  if (v === undefined || v === null) return "—";
+  return mode === "IMP"
+    ? (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2) + " IMP"
+    : (+v).toFixed(2) + " טר'";
+}
+/* the mode's ranked rows, best first (stored ranks; legacy rows fall back
+   to the tricks order — legacy records are MP-only by construction) */
+function modeTable(p, mode) {
+  const rows = ((p.verdict && p.verdict.table) || []).slice();
+  const rk = mode === "IMP" ? "rank_imp" : "rank_mp";
+  if (rows.length && rows[0][rk] !== undefined)
+    rows.sort((a, b) => a[rk] - b[rk]);
+  else rows.sort((a, b) => primaryOf(b, mode) - primaryOf(a, mode));
+  return rows;
+}
 /* Label one bar. A group of interchangeable cards (same suit, same result)
    shows as one line, e.g. "♥ 5/4/3"; a lone card keeps its normal form. */
 function groupLabel(g) {
@@ -1585,7 +1711,8 @@ function groupLabel(g) {
   return suitHtml(g.suit) + " " + ranks.join("/");
 }
 function reveal(chosen) {
-  const v = P.verdict, acc = v.accepted;
+  const v = P.verdict, acc = acceptedFor(P, MODE);
+  const rows = modeTable(P, MODE);
   document.querySelectorAll("button.cardbtn").forEach(b => {
     const a = b.dataset.action;
     if (acc.includes(a)) b.classList.add("good");
@@ -1599,17 +1726,27 @@ function reveal(chosen) {
     : '<span class="no">✗</span> עדיף היה <span class="ltr">' + acc.map(cardHtml).join(" / ") + '</span>';
   document.getElementById("subhead").innerHTML = acc.length > 1
     ? "טובות באותה מידה: " + acc.map(cardHtml).join(", ") : "";
-  const tbl = v.table, maxv = tbl.length ? tbl[0].avg_def_tricks : 1;
-  // Group the ranked cards into per-suit buckets of equal outcome: cards in
-  // the same suit that yield the same average are interchangeable, so they
-  // collapse into a single line (e.g. "♥ 5/4/3"). A suit can still contribute
-  // more than one line when its cards give genuinely different results
-  // (e.g. ♥A at 5.19 vs the low hearts at 5.13).
+  // your lead vs the active mode's recommendation, and your rank in it
+  const rec = recommendedFor(P, MODE);
+  const myIdx = rows.findIndex(r => r.card === chosen);
+  document.getElementById("resid").innerHTML =
+    '<div class="resultline">מצב: <b class="ltr">' + MODE_INFO[MODE].banner +
+    '</b> · <span class="modegoal">' + MODE_INFO[MODE].goal + '</span></div>' +
+    '<div class="resultline">ההובלה שלך: <b class="ltr">' + cardHtml(chosen) + '</b></div>' +
+    '<div class="resultline">ההובלה המומלצת (' + MODE_INFO[MODE].title +
+    '): <b class="ltr">' + cardHtml(rec) + '</b></div>' +
+    (myIdx >= 0 ? '<div class="resultline">הדירוג שלך: <b>' + (myIdx + 1) +
+      '</b> מתוך ' + rows.length + '</div>' : "");
+  // Group the ranked cards into per-suit buckets of equal outcome under the
+  // ACTIVE mode's primary metric: cards in the same suit with the same value
+  // are interchangeable, so they collapse into a single line (e.g. "♥ 5/4/3").
   const groups = [], byKey = {};
-  tbl.forEach(r => {
-    const key = r.card[0] + ":" + r.avg_def_tricks.toFixed(2);
+  rows.forEach(r => {
+    const val = primaryOf(r, MODE);
+    if (val === undefined) return;
+    const key = r.card[0] + ":" + (+val).toFixed(2);
     let g = byKey[key];
-    if (!g) { g = {suit: r.card[0], val: r.avg_def_tricks, cards: []};
+    if (!g) { g = {suit: r.card[0], val: +val, cards: []};
               byKey[key] = g; groups.push(g); }
     g.cards.push(r.card);
   });
@@ -1632,43 +1769,69 @@ function reveal(chosen) {
   const chosenGroup = groups.find(g => g.cards.indexOf(chosen) >= 0);
   if (chosenGroup && picked.indexOf(chosenGroup) < 0) picked.push(chosenGroup);
   picked.sort((a, b) => b.val - a.val);
+  // bar widths: normalized to the picked range (IMP values can be negative)
+  const maxv = picked.length ? Math.max.apply(null, picked.map(g => g.val)) : 1;
+  const minv = picked.length ? Math.min.apply(null, picked.map(g => g.val)) : 0;
   document.getElementById("bars").innerHTML = picked.map(g => {
     const val = g.val, good = g.cards.some(c => acc.includes(c));
     const mine = g.cards.indexOf(chosen) >= 0;
-    const pct = maxv > 0 ? Math.max(4, Math.round(val / maxv * 100)) : 0;
+    const pct = maxv > minv
+      ? Math.round(4 + 96 * (val - minv) / (maxv - minv))
+      : 100;
     const you = mine ? ' <span class="muted">(שלך)</span>' : "";
     const mark = good ? '<span class="ok" aria-label="הטוב ביותר">✓</span> ' : "";
     return '<div class="barrow"><span class="bl">' + mark + groupLabel(g) + '</span>' +
       '<span class="bartrack"><span class="' + (good ? "good" : "") +
       '" style="width:' + pct + '%"></span></span>' +
-      "<span class=\"barval\">" + val.toFixed(2) + " טר'" + you + '</span></div>';
+      '<span class="barval ltr">' + fmtPrimary(val, MODE) + '</span>' + you + '</div>';
   }).join("");
   // Card explanation, built here in Hebrew from the verdict numbers (the pool
   // stores an English phrasing we intentionally don't surface).
   const noteFor = c => {
-    const i = v.table.findIndex(r => r.card === c);
+    const i = rows.findIndex(r => r.card === c);
     if (i < 0) return "";
-    const r = v.table[i], a = r.avg_def_tricks.toFixed(2);
+    const r = rows[i];
+    if (MODE === "IMP") {
+      const a = fmtPrimary(r.exp_imps, "IMP");
+      return acc.includes(c)
+        ? "ההובלה המיטבית ל-IMP — ערך IMP צפוי של " + a +
+          ", גבוה מכל קלף אחר."
+        : "ערך IMP צפוי " + a + " (מדורג " + (i + 1) + " מתוך " +
+          rows.length + ").";
+    }
+    const a = r.avg_def_tricks.toFixed(2);
     if (acc.includes(c))
       return "ההובלה המיטבית — ההגנה לוקחת בממוצע " + a +
              " טריקים, יותר מכל קלף אחר.";
-    const vs = (r.vs_best >= 0 ? "+" : "") + r.vs_best.toFixed(2);
+    const vs = (r.vs_best >= 0 ? "+" : "") + (r.vs_best || 0).toFixed(2);
     return "בממוצע " + a + " טריקים הגנתיים (" + vs +
            " מול ההובלה המיטבית · מדורג " + (i + 1) + " מתוך " +
-           v.table.length + ").";
+           rows.length + ").";
   };
   let expl = noteFor(acc[0]);
   if (!ok) { const y = noteFor(chosen); if (y) expl += "\n\n" + y; }
   document.getElementById("lead-expl").textContent = expl;
   const lv = (P.classification && P.classification.difficulty_level) || P.difficulty;
   document.getElementById("difficulty").textContent = "רמת קושי " + lv + "/5";
-  let rt = "<tr><th>קלף</th><th>טריקים ממוצע</th><th>מול המיטבי</th><th>BEN</th></tr>";
-  v.table.forEach(r => {
+  // ranked leads table: rank / lead / primary metric / expected defensive
+  // tricks / expected IMP value / set probability. The active mode's primary
+  // metric column is emphasized; every metric shows in BOTH modes.
+  const mpEm = MODE === "MP" ? ' class="emph"' : "";
+  const impEm = MODE === "IMP" ? ' class="emph"' : "";
+  let rt = "<tr><th>#</th><th>קלף</th><th>המדד המוביל</th>" +
+    "<th" + mpEm + ">טריקים צפויים</th><th" + impEm + ">IMP צפוי</th>" +
+    "<th>סיכוי הכשלה</th></tr>";
+  rows.forEach((r, i) => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
-    rt += "<tr" + g + "><td>" + cardHtml(r.card) + "</td><td>" +
-      r.avg_def_tricks.toFixed(2) + "</td><td>" +
-      (r.vs_best >= 0 ? "+" : "") + r.vs_best.toFixed(2) + "</td><td>" +
-      Math.round((r.ben_softmax || 0) * 100) + "%</td></tr>";
+    rt += "<tr" + g + "><td>" + (i + 1) + "</td><td>" + cardHtml(r.card) +
+      '</td><td class="ltr">' + fmtPrimary(primaryOf(r, MODE), MODE) + "</td>" +
+      "<td" + mpEm + ">" + r.avg_def_tricks.toFixed(2) + "</td>" +
+      '<td class="ltr' + (MODE === "IMP" ? " emph" : "") + '">' +
+      (r.exp_imps === undefined ? "—"
+        : (r.exp_imps >= 0 ? "+" : "−") + Math.abs(r.exp_imps).toFixed(2)) +
+      "</td><td>" +
+      (r.set_prob === undefined ? "—" : Math.round(r.set_prob * 100) + "%") +
+      "</td></tr>";
   });
   document.getElementById("ltable").innerHTML = rt;
   if (P.full_deal) {
@@ -1686,7 +1849,7 @@ function reveal(chosen) {
 function commit(a) {
   if (store()[P.id]) return;
   reveal(a);
-  const rec = window.BT.gradeLead(P, a);
+  const rec = window.BT.gradeLead(P, a, MODE);
   window.BT.record(P.id, rec);
   bumpSession(rec.correct);
   const hl = document.getElementById("headline");
@@ -1718,20 +1881,45 @@ function loadLead() {
   catch (e) { return null; }
 }
 async function init() {
-  const id = new URLSearchParams(location.search).get("id");
+  const q = new URLSearchParams(location.search);
+  const id = q.get("id");
   P = await window.BT.getProblem(id);
   if (!P) { document.getElementById("problem").innerHTML =
     '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
     '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }
+  // active training mode: URL param wins, then the stored selection. A prior
+  // answer replays in the mode it was graded in; a legacy problem without
+  // IMP metrics falls back to MP (it must never be ranked by IMPs).
+  const qm = q.get("mode");
+  MODE = qm === "IMP" || qm === "MP" ? qm : leadMode();
+  const prevAns = store()[P.id];
+  if (prevAns && (prevAns.trainingMode === "MP" ||
+                  prevAns.trainingMode === "IMP"))
+    MODE = prevAns.trainingMode;
+  if (MODE === "IMP" && !hasImpMetrics(P)) { MODE = "MP"; MODE_FALLBACK = true; }
   const meanings = (P.explanations && P.explanations.auction) || [];
   // contract is {level}{denom}{declarer}{doubled}, e.g. 4HE / 3NTWx / 6SSxx —
   // strip the declarer seat AND any double marker, then show a doubled tag.
   const cm = /^(\d(?:NT|[CDHS]))[NESW](x{0,2})$/.exec(P.contract);
   const callPart = cm ? cm[1] : P.contract.slice(0, -1);
   const dblTag = cm && cm[2] === "xx" ? " XX" : cm && cm[2] === "x" ? " X" : "";
+  const dblText = cm && cm[2] === "xx" ? "מוכפל כפול (XX)"
+                : cm && cm[2] === "x" ? "מוכפל (X)" : "לא מוכפל";
   document.getElementById("meta").innerHTML =
     'חוזה <span class="ltr">' + callHtml(callPart) + dblTag +
     '</span> ע"י ' + P.declarer + " · אתה מוביל (" + P.leader + ")";
+  // mode banner: the active mode, its objective, and the deal facts
+  // (contract, declarer, vulnerability, doubling status) — always visible.
+  const info = MODE_INFO[MODE];
+  document.getElementById("modebanner").innerHTML =
+    '<div class="modebanner"><span class="modechip">' + info.banner +
+    '</span><span class="modegoal">' + info.goal + '</span></div>' +
+    '<div class="ctline">חוזה <b class="ltr">' + callHtml(callPart) + dblTag +
+    '</b> ע"י <b>' + P.declarer + '</b> · פגיעות: <b class="ltr">' +
+    (P.vul || "None") + '</b> · ' + dblText + '</div>' +
+    (MODE_FALLBACK
+      ? '<div class="fog">מדדי IMP אינם זמינים לבעיה זו (רשומה מדור ' +
+        'קודם) — מוצג מצב Matchpoints.</div>' : "");
   document.getElementById("problem").innerHTML =
     '<div class="card">' + typeBadgeHtml(P) +
     completeAuctionTableHtml(P, meanings) +
@@ -1777,7 +1965,8 @@ async function init() {
     if (s && (s.count || 0) >= s.size) { location.href = "index.html?summary=1"; return; }
     if (!INDEX) INDEX = await fetchIndex();
     const flt = (s && s.kind === "lead")
-      ? {kind: "lead", levels: s.levels, types: s.types}
+      ? {kind: "lead", mode: s.mode || leadMode(),
+         levels: s.levels, types: s.types}
       : resolveFilters(INDEX, loadLead(), "lead");
     const nid = pickUnseen(INDEX, flt);
     if (!nid) { location.href = "index.html?summary=1"; return; }
@@ -1802,6 +1991,7 @@ def _lead_html() -> str:
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted" id="meta"></span></div>\n'
         '<div class="sessribbon" id="sessribbon" hidden></div>\n'
+        '<div class="card" id="modebanner"></div>\n'
         '<div id="problem"></div>\n'
         '<div class="leadgrid" id="grid"></div>\n'
         '<div id="confirm"></div>\n'
@@ -1809,14 +1999,18 @@ def _lead_html() -> str:
         'aria-live="polite">\n'
         '<h2 class="headline" id="headline" tabindex="-1"></h2>\n'
         '<p class="muted" id="subhead"></p>\n'
+        '<div id="resid"></div>\n'
         '<div id="bars"></div>\n'
         '<p id="lead-expl" style="white-space:pre-line"></p>\n'
         '<div class="muted" id="difficulty"></div>\n'
         '<button class="big" id="next">ההובלה הבאה &larr;</button>\n'
-        '<details><summary>כל 13 ההובלות, מדורגות</summary>'
+        '<details open><summary>כל 13 ההובלות, מדורגות</summary>'
         '<table class="plain" id="ltable"></table>'
-        '<p class="footnote">טריקים הגנתיים ממוצעים על פני סימולציית '
-        'double-dummy מלאה. קלפים שווים במקסימום — כולם נכונים.</p></details>\n'
+        '<p class="footnote">קלפים שווים במדד המוביל — כולם נכונים.</p>'
+        '</details>\n'
+        '<p class="footnote ltr">Recommendations are based on sampled '
+        'hidden-hand deals and double-dummy analysis. The active scoring '
+        'mode determines how leads are ranked.</p>\n'
         '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
         '</div>\n</main>\n<script>' + _SHARED_JS + _LEAD_JS + '</script>\n</body></html>'
@@ -1860,8 +2054,10 @@ _DASHBOARD_CSS = """
 
 _DASHBOARD_JS = r"""
 const MIN_N = 5, MIN_TREND = 8;
-// distribution-band thresholds; units differ by scenario (IMPs vs tricks)
-const COST = { bidding: {unit: "IMP", near: 2.0}, lead: {unit: "טריק", near: 1.0} };
+// distribution-band thresholds; units differ by scenario AND, for leads, by
+// training mode (MP costs are tricks below best; IMP costs are IMPs below best)
+const COST = { bidding: {unit: "IMP", near: 2.0}, lead: {unit: "טריק", near: 1.0},
+               leadIMP: {unit: "IMP", near: 2.0} };
 const SUIT_NAME = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
 const RANKS = "AKQJT98765432";
 function num(x) { return typeof x === "number" ? x : (parseFloat(x) || 0); }
@@ -1949,12 +2145,14 @@ function suitRows(list) {
       '<div class="drillbody">' + cards + '</div></details>';
   }).join("");
 }
-function scenarioCard(title, list, kind) {
+function scenarioCard(title, list, kind, costKey) {
   if (!list.length) return "";
+  const cfg = COST[costKey || kind] || COST.bidding;
   let html = '<div class="card scen"><b>' + title + '</b> ' +
-    '<span class="muted">' + (kind === "lead" ? "טריקים" : "IMP") +
+    '<span class="muted">' + (kind === "lead" && cfg.unit !== "IMP"
+      ? "טריקים" : "IMP") +
     ' · n=' + list.length + '</span>' +
-    costBand(list, kind) +
+    costBand(list, costKey || kind) +
     '<div class="subh">לפי דרגת קושי</div>' + diffRows(list);
   if (kind === "lead") {
     html += '<div class="subh">לפי סוג חוזה</div>' + typeRows(list) +
@@ -2003,9 +2201,12 @@ function render(attempts) {
   const recent = [...first].sort((a, b) => tsMillis(b) - tsMillis(a));
   let streak = 0;
   for (const a of recent) { if (a.correct) streak++; else break; }
-  // split first-attempts by scenario (units differ: IMPs vs tricks)
+  // split first-attempts by scenario, and leads further by training mode
+  // (cost units differ: MP grades in tricks, IMP in IMPs)
   const scen = {bidding: [], lead: []};
   for (const a of first) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
+  const leadMP = scen.lead.filter(a => a.trainingMode !== "IMP");
+  const leadIMP = scen.lead.filter(a => a.trainingMode === "IMP");
   const byKind = {};
   for (const a of first) { const kd = a.kind || "bidding";
     (byKind[kd] ??= {k: 0, n: 0}); byKind[kd].n++; if (a.correct) byKind[kd].k++; }
@@ -2056,11 +2257,13 @@ function render(attempts) {
       row(kd === "lead" ? "הובלה" : "הכרזה", byKind[kd].k, byKind[kd].n)).join("") +
     '</div>' +
     scenarioCard("הכרזה", scen.bidding, "bidding") +
-    scenarioCard("הובלה", scen.lead, "lead") +
+    scenarioCard("הובלה · Matchpoints", leadMP, "lead") +
+    scenarioCard("הובלה · IMPs", leadIMP, "lead", "leadIMP") +
     missList +
     '<p class="footnote">ניסיון ראשון בלבד. אחוזים מוסתרים עד ' +
     'לפחות ' + MIN_N + ' ניסיונות; הטווחים הם רווחי־סמך Wilson 95%. ' +
-    '“מתחת למיטבי” = ממוצע ה-IMP (הכרזה) או הטריקים (הובלה) שאבדו ' +
+    '“מתחת למיטבי” = ממוצע ה-IMP (הכרזה, או הובלה במצב IMPs) או ' +
+    'הטריקים (הובלה במצב Matchpoints) שאבדו ' +
     'מול הפעולה המיטבית; תשובה נכונה נספרת כאפס.</p>';
 }
 async function init() {
