@@ -166,6 +166,61 @@ def cmd_lead_corpus(args: argparse.Namespace) -> int:
                  and r["source_leak_failures"] == 0) else 1
 
 
+def cmd_lead_calibration(args: argparse.Namespace) -> int:
+    """Calibrate a sampler's hidden-hand distribution against REAL deals.
+
+    Reads a JSON list of complete deals (each: {"hands": {seat: pbn}, "auction":
+    [...], "contract": "3NTW", optional "dealer"/"vul"}), groups them by auction
+    family, and reports per-feature real-vs-sampled total-variation divergence.
+    Ben-free samplers only (uniform, constraint); 'current' would need Ben.
+    """
+    import json as _json
+    from ..engine.lead_calibration import calibrate_corpus
+    from ..engine.lead_samplers import UniformSampler
+
+    with open(args.deals) as f:
+        deals = _json.load(f)
+
+    if args.sampler == "uniform":
+        sampler = UniformSampler()
+    elif args.sampler == "constraint":
+        # derive constraints from the first family's auction (all boards in a
+        # family share it); per-family derivation would need a per-family
+        # sampler, so we build one keyed on each board's own auction lazily.
+        sampler = _PerBoardConstraintSampler()
+    else:
+        print(f"unknown sampler {args.sampler!r} (use uniform|constraint)")
+        return 2
+
+    out = calibrate_corpus(deals, sampler, requested=args.samples,
+                           seed=args.seed, tol=args.tol,
+                           min_boards=args.min_boards)
+    if args.out:
+        with open(args.out, "w") as f:
+            _json.dump(out, f, indent=2)
+    s = out["summary"]
+    print(f"families={s['n_families']} calibrated={s['calibrated']} "
+          f"miscalibrated={s['miscalibrated']} insufficient={s['insufficient']}")
+    for feat, cnt in s["most_off_features"][:12]:
+        print(f"  off x{cnt:<3d} {feat}")
+    return 0
+
+
+class _PerBoardConstraintSampler:
+    """Adapter: derives auction constraints per board via the rule engine.
+
+    The calibration harness calls sample(problem, ...) with each board's public
+    state; this builds the matching ConstraintSampler on the fly so a whole
+    real-deal corpus can be calibrated with one --sampler constraint flag.
+    """
+    sampling_model = "auction_constraint_bands"
+
+    def sample(self, problem, requested, seed):
+        from ..engine.lead_samplers import ConstraintSampler
+        return ConstraintSampler.from_auction(problem).sample(
+            problem, requested, seed)
+
+
 def cmd_pool(args: argparse.Namespace) -> int:
     from ..pool.store import ProblemPool
     # Firestore-only subcommands (push/backfill-leads) don't take --pool.
@@ -318,8 +373,8 @@ def main(argv: list[str] | None = None) -> int:
     lpa.add_argument("--contract", default=None,
                      help="e.g. 3NTW, 4HEx")
     lpa.add_argument("--samplers", default="uniform",
-                     help="comma list: uniform,current,fixture,ben-replay,"
-                          "ben-likelihood")
+                     help="comma list: uniform,constraint,current,fixture,"
+                          "ben-replay,ben-likelihood")
     lpa.add_argument("--thresholds", default="0.70",
                      help="comma list of 'current' acceptance thresholds")
     lpa.add_argument("--samples", type=int, default=512,
@@ -346,6 +401,26 @@ def main(argv: list[str] | None = None) -> int:
     lc.add_argument("--n-boot", type=int, default=500)
     lc.add_argument("--out", default=None, help="write JSON report here")
     lc.set_defaults(func=cmd_lead_corpus)
+
+    cal = sub.add_parser(
+        "lead-calibration",
+        help="calibrate a sampler's hidden-hand distribution against REAL "
+             "complete deals grouped by auction family (HCP, shape, announced-"
+             "suit lengths, fits, controls, honor locations); Ben-free")
+    cal.add_argument("--deals", required=True,
+                     help="JSON list of complete deals: {hands:{seat:pbn}, "
+                          "auction:[...], contract:'3NTW', dealer, vul}")
+    cal.add_argument("--sampler", default="uniform",
+                     help="uniform | constraint (Ben-free)")
+    cal.add_argument("--samples", type=int, default=256,
+                     help="sampled layouts per board")
+    cal.add_argument("--seed", type=int, default=1)
+    cal.add_argument("--tol", type=float, default=0.20,
+                     help="total-variation tolerance for 'calibrated'")
+    cal.add_argument("--min-boards", type=int, default=5,
+                     help="min real boards per family to attempt calibration")
+    cal.add_argument("--out", default=None, help="write JSON report here")
+    cal.set_defaults(func=cmd_lead_calibration)
 
     pool_p = sub.add_parser("pool", help="add/remove/list pool problems")
     pool_sub = pool_p.add_subparsers(dest="pool_cmd", required=True)

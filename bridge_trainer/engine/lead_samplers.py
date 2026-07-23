@@ -14,6 +14,11 @@ Modes (owner requirement 6):
   * ``UniformSampler``      a Ben-free, unconstrained, card-conserving baseline
                             — an HONEST non-posterior used for offline audit
                             plumbing and as a sampler-sensitivity counterpoint;
+  * ``ConstraintSampler``   Ben-free; applies EXPLICIT accumulated auction
+                            constraints (per-seat HCP / suit-length / suit-
+                            quality / denial / exclusion bands, optionally
+                            derived from the auction by the rule engine) as an
+                            importance-weighted modelled prior;
   * ``SyntheticSampler``    explicit layouts/scores for tests and fixtures.
 
 Ben-likelihood weighting and a formal-rule sampler are provided only where
@@ -403,9 +408,146 @@ def _default_engine():
     return get_engine()
 
 
+# ---------------------------------------------------------------------------
+# explicit auction-constraint sampler (owner requirement 3, first bullet)
+# ---------------------------------------------------------------------------
+def _pbn_to_seats(pbn: str) -> dict:
+    """'N:874.AQ94.T.97642 KT652... ...' -> {'N':..,'E':..,'S':..,'W':..}."""
+    body = pbn.split(":", 1)[1] if ":" in pbn else pbn
+    parts = body.strip().split()
+    return {SEATS[i]: parts[i] for i in range(4)}
+
+
+DEFAULT_RULESETS = ("our_2over1.yaml", "opps_sound.yaml")
+
+
+def constraint_profile_from_auction(problem: LeadProblem,
+                                    our_ruleset: str | None = None,
+                                    opps_ruleset: str | None = None):
+    """Derive an accumulated per-seat ConstraintProfile from the PUBLIC auction
+    via the existing rule engine (owner requirement 3, first bullet).
+
+    The rule engine walks every concealed call — including passes — and merges
+    each recognised call's soft HCP/suit-length/suit-quality/denial/exclusion
+    constraints into that seat's profile (conjunction => weights multiply).
+    Calls with no matching rule degrade GRACEFULLY: known constraints still
+    apply and the gap is surfaced in `unrecognized_calls`. Returns
+    (ConstraintProfile, system_label). Ben-free; depends only on public state.
+    """
+    from pathlib import Path
+    # Import `dealing` fully BEFORE `semantics` to break a latent import cycle
+    # (semantics.predicates <-> dealing.rejection): if semantics.engine is the
+    # first of the two touched, predicates is still mid-init when rejection
+    # imports it. Loading dealing first makes the order safe from any entrypoint.
+    from ..dealing import rejection as _rejection  # noqa: F401
+    from ..semantics.engine import RuleEngine, load_ruleset
+    from ..domain.auction import Auction
+
+    rules_dir = Path(__file__).resolve().parent.parent / "semantics" / "rules"
+    our = load_ruleset(rules_dir / (our_ruleset or DEFAULT_RULESETS[0]))
+    opps = load_ruleset(rules_dir / (opps_ruleset or DEFAULT_RULESETS[1]))
+    engine = RuleEngine(our, opps, my_seat=problem.leader)
+    auction = Auction.from_tokens(problem.dealer, list(problem.auction))
+    profile = engine.extract(auction)
+    label = f"rule_engine:{our.system}+{opps.system}"
+    return profile, label
+
+
+class ConstraintSampler:
+    """Deal card-conserving hidden hands consistent with EXPLICIT accumulated
+    auction constraints (owner requirement 3, first bullet).
+
+    Given a `ConstraintProfile` (per concealed seat: weighted HCP bands,
+    suit-length bands, suit-quality bands, conditional denials, and named
+    exclusion predicates for shape/convention meaning) this fixes the leader's
+    hand and rejection-samples the other three hands so that the accumulated
+    auction constraints are satisfied. Soft margin bands become per-deal
+    IMPORTANCE WEIGHTS, so the trick average is weight-aware and ESS is
+    reported.
+
+    Honest labelling (requirement 3): the constraints are a hand-authored,
+    per-seat MODELLED PRIOR, not a calibrated deal posterior, and the per-seat
+    band model does not encode cross-hand partnership fits — so the status is
+    `modelled_prior_uncalibrated`, never "probability". What IS gained over the
+    uniform baseline is that the accepted deals honour the auction's explicit
+    HCP / suit-length / shape / convention constraints instead of ignoring the
+    auction entirely.
+
+    Ben-free, deterministic in the seed, and source-deal independent (the
+    profile and RNG seed both derive only from public state).
+    """
+    sampling_model = "auction_constraint_bands"
+    posterior_calibration_status = "modelled_prior_uncalibrated"
+
+    def __init__(self, profile=None, semantic_constraint_mode: str = "explicit",
+                 batch_size: int = 20_000, max_seconds: float = 15.0,
+                 unrecognized_calls=None):
+        self.profile = profile
+        self.semantic_constraint_mode = semantic_constraint_mode
+        self.batch_size = batch_size
+        self.max_seconds = max_seconds
+        self.unrecognized_calls = list(unrecognized_calls or [])
+
+    @classmethod
+    def from_auction(cls, problem: LeadProblem, our_ruleset: str | None = None,
+                     opps_ruleset: str | None = None, **kw):
+        """Build a sampler whose constraints are derived from the auction via
+        the rule engine (requirement 3: 'where available'). Unrecognised calls
+        are recorded and reported, not silently dropped."""
+        profile, label = constraint_profile_from_auction(
+            problem, our_ruleset, opps_ruleset)
+        return cls(profile=profile, semantic_constraint_mode=label,
+                   unrecognized_calls=list(profile.unrecognized_calls), **kw)
+
+    def sample(self, problem: LeadProblem, requested: int, seed: int) -> LayoutSet:
+        from ..domain.constraints import ConstraintProfile
+        from ..domain.interfaces import GenerationBudget
+        from ..dealing.rejection import RejectionDealSource
+
+        profile = self.profile if self.profile is not None else ConstraintProfile()
+        # How many concealed seats actually carry a constraint (drives the
+        # honest 'did the auction constrain anything?' diagnostic).
+        constrained_seats = sorted(
+            s for s in profile.seats
+            if s != problem.leader and s in ("N", "E", "S", "W"))
+        src = RejectionDealSource(my_seat=problem.leader,
+                                  batch_size=self.batch_size)
+        budget = GenerationBudget(max_seconds=self.max_seconds)
+        deals, diag = src.generate(problem.hand, profile, requested,
+                                   _seed_int(problem, seed), budget=budget)
+        hands = [_pbn_to_seats(d.deal.to_pbn()) for d in deals]
+        weights = np.array([d.weight for d in deals], dtype=float)
+        if weights.size == 0:
+            weights = np.ones(0)
+        n = len(hands)
+        ls = LayoutSet(
+            problem=problem, hands=hands,
+            bidding_score=np.ones(n), weight=weights,
+            sampling_model=self.sampling_model, sampler_version=SAMPLER_VERSION,
+            posterior_calibration_status=self.posterior_calibration_status,
+            weighting_method="constraint_importance_bands",
+            score_threshold=None, proposal_count=int(diag.attempts),
+            requested_samples=requested, accepted_samples=n, seed=seed,
+            auction_replay_mode="none",
+            semantic_constraint_mode=self.semantic_constraint_mode,
+            source_deal_independent=True)
+        # attach diagnostics the audit surfaces (not part of the invariant set)
+        ls.constraint_diagnostics = {
+            "constrained_seats": constrained_seats,
+            "any_constraint_applied": bool(constrained_seats),
+            "unrecognized_calls": list(self.unrecognized_calls
+                                       or profile.unrecognized_calls),
+            "acceptance_rate": round(float(diag.acceptance_rate), 6),
+            "shortfall": int(diag.shortfall),
+            "generator_ess": round(float(diag.effective_sample_size), 2),
+        }
+        return ls
+
+
 SAMPLERS = {
     "uniform": UniformSampler,
     "current": BenCurrentSampler,
     "ben-replay": BenReplaySampler,
     "ben-likelihood": BenLikelihoodSampler,
+    "constraint": ConstraintSampler,
 }

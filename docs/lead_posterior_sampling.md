@@ -185,6 +185,8 @@ All in `tests/test_lead_posterior.py`, Ben-free, run in normal CI:
 | Likelihood log-sum-exp weights + ESS stability | `test_likelihood_weights_normalize_and_ess` |
 | Tail-dominated / sampler-sensitive / insufficient / robust flags | `test_tail_dominated_detection`, `test_quality_flag_*` |
 | Low-card correctness (see §6) | `test_low_cards_*`, `test_card_trace_*`, `test_candidate_sorting_*` |
+| Explicit auction-constraint sampler honours HCP/suit-length bands, importance-weights, source-independent (§11) | `test_constraint_sampler_*` (`tests/test_lead_constraint_calibration.py`) |
+| Calibration vs real deals detects miscalibration on announced-suit lengths (§12) | `test_calibration_*` |
 
 ---
 
@@ -243,7 +245,8 @@ counts.
 | `current` (thresholded-uniform neural) | **Requires Ben venv** | `BenCurrentSampler`; extracts accepted deals + scores from Ben's opening-lead sampler; honest uncalibrated labels; threshold is the swept knob. |
 | `ben-replay` (exact auction reproduction) | **Requires Ben venv**; math implemented+tested | Accept only deals where the bidder's argmax reproduces **every** observed call. Pure logic: `replay_exact_mask`. |
 | `ben-likelihood` (log-sum-exp weights) | **Only if valid per-legal-call probabilities exist**; math implemented+tested | `policy_full` (`engine/ben.py:144`) exposes the full per-call softmax, so a genuine per-call likelihood is available. Weighting + ESS: `likelihood_log_weights`. Still uncalibrated as a *deal* posterior; use with ESS reported. |
-| `formal-rule` | **Not available** | No formal per-call constraint rules exist in this repo (meanings come from GIB, which is descriptive, not a sampler). Not faked. |
+| `constraint` (explicit auction constraints) | **Ships, Ben-free** | `ConstraintSampler` (requirement 3, first bullet): applies the accumulated auction constraints — per concealed seat, weighted HCP / suit-length / suit-quality bands, conditional denials, and named exclusion predicates (shape/convention meaning) — via the existing `RuleEngine` + YAML rulesets and the vectorised `RejectionDealSource`. Soft margin bands become **importance weights** (ESS reported). Constraints can be derived from the auction (`from_auction`, unrecognised calls surfaced, not dropped) or supplied explicitly. Honest label: `auction_constraint_bands` / **`modelled_prior_uncalibrated`** — a per-seat modelled prior, *not* a calibrated deal posterior, and it does not encode cross-hand partnership fits. `semantic_constraint_mode` is finally set (`explicit` or `rule_engine:<system>`), never `none`. It **votes** as an independent auction-aware sampler, but only when at least one concealed seat was actually constrained (an all-unrecognised auction leaves it equivalent to uniform, so it abstains). |
+| `formal-rule` | **Partially available** | The `constraint` sampler above *is* the formal per-call constraint path where rulesets match; coverage is limited to the shipped rulesets (`our_2over1`, `opps_sound`, `opps_light_preempts`) and unmatched calls degrade gracefully. Not faked; the gap is reported in `constraint_diagnostics.unrecognized_calls`. |
 | `uniform` (offline baseline) | **Ships, Ben-free** | `UniformSampler`: unconstrained card-conserving completions. Honest `not_a_posterior` label. Runs the whole audit on real DDS without Ben and acts as a deliberate sampler-sensitivity counterpoint. |
 | `fixture` / `synthetic` | Ships | Load/inject layouts (capture-once fixtures; test scenarios). |
 
@@ -529,8 +532,97 @@ must be graded with the physical-card engine, not the 32-code path.
 
 ---
 
-## 10. Findings summary
+## 11. Explicit auction-constraint sampler (requirement 3, first bullet)
 
+Previously the audit's `semantic_constraint_mode` was always `none`: the
+production `current` sampler used Ben's neural consistency filter, the
+independent samplers used exact-replay / likelihood, and the offline baseline
+was unconstrained uniform. **No path applied the auction's *explicit* HCP /
+suit-length / shape / convention constraints.** That is now `ConstraintSampler`
+(`engine/lead_samplers.py`), wiring the repo's existing constraint stack —
+`domain.constraints` (weighted bands), `semantics.engine.RuleEngine` + YAML
+rulesets, `semantics.predicates` (shape/convention exclusions), and the
+vectorised `dealing.rejection.RejectionDealSource` — into the lead audit.
+
+What it does, precisely:
+
+* **Constraints.** For every concealed seat, the accumulated auction
+  constraints are: weighted **HCP** bands, per-suit **length** bands, per-suit
+  **quality** (honor-strength) bands, conditional **denials**, and named
+  **exclusion predicates** (shape/convention meaning). They are derived from
+  the public auction by the rule engine (`from_auction`), walking every
+  concealed call — passes included — and merging matched rules (conjunction ⇒
+  weights multiply). Unmatched calls **degrade gracefully** and are reported in
+  `constraint_diagnostics.unrecognized_calls`; nothing is faked.
+* **Proposal + acceptance.** `RejectionDealSource` fixes the leader's 13 cards
+  and rejection-samples card-conserving completions for the other three seats
+  that satisfy the hard bands; **soft margin bands become per-deal importance
+  weights**, so the trick average is weight-aware and **ESS is reported**.
+* **Honest labels (requirement 3).** `sampling_model =
+  auction_constraint_bands`, `posterior_calibration_status =
+  modelled_prior_uncalibrated`, `weighting_method =
+  constraint_importance_bands`. It is a **per-seat modelled prior, not a
+  calibrated deal posterior**, and the per-seat band model does **not** encode
+  cross-hand partnership fits — stated plainly, never called a probability.
+* **Determinism / independence.** The RNG seed and the constraints both derive
+  only from public state, so runs are deterministic in the seed and
+  source-deal independent (same tests as the other samplers:
+  `test_constraint_sampler_deterministic_and_source_independent`).
+* **Voting.** It is an independent auction-aware sampler and therefore **votes**
+  in the cross-sampler verdict — but only when at least one concealed seat was
+  actually constrained (an all-unrecognised auction leaves it equivalent to
+  uniform, so it abstains rather than masquerade as a vote).
+
+CLI: add `constraint` to `--samplers`. Runtime note: rejection acceptance falls
+with constraint tightness; the sampler carries a `max_seconds` budget and
+reports `shortfall`. Filter-before-DDS still holds — constraints cut the batch
+before any board is double-dummied.
+
+## 12. Calibration against real deals (requirement 6)
+
+The blind-labelled corpus (§8b) checks *verdict* agreement; it never asked
+whether a sampler's hidden hands *look like real hidden hands*. `engine/
+lead_calibration.py` + `trainer lead-calibration` add that posterior-predictive
+check, Ben-free and sampler-agnostic:
+
+* **Group by auction family.** `auction_family_key` canonicalises the public
+  auction (trailing passes dropped); real complete deals sharing an auction are
+  one family.
+* **Two distributions, by role.** The **real** distribution pools each board's
+  actual hidden hands (declarer / dummy / partner). The **model** distribution
+  runs the sampler on each board's public state and pools every sampled hidden
+  hand. Both are compared marginally.
+* **Features (requirement 6, verbatim):** HCP, shape class, **announced-suit
+  lengths**, the declarer+dummy **fit** in each announced suit, **controls**
+  (A=2, K=1), and **key-honor locations** (which role holds each suit's A / K).
+  Divergence is total-variation distance over the binned marginals, in [0, 1];
+  a family is `calibrated` only if no role/feature exceeds the tolerance, else
+  `miscalibrated` with the offending `(role, feature)` pairs (or
+  `insufficient_real_data`).
+* **It actually detects miscalibration.** On a family whose declarer always
+  holds six of the announced suit, the `uniform` sampler is flagged
+  `miscalibrated` with `declarer.len_S` TV ≈ 0.96 (real mean 6.0 vs sampled
+  ≈3.4); a `constraint` sampler that respects the announced suit drives that to
+  TV = 0.0 (model mean 6.0). Tests:
+  `test_calibration_detects_uniform_miscalibration_on_announced_suit`,
+  `test_calibration_constraint_sampler_matches_announced_suit`.
+
+CLI: `trainer lead-calibration --deals real_deals.json --sampler
+{uniform|constraint}` prints per-family labels and the most-frequently-off
+features. This is the tool to run offline on a real-deal corpus grouped by
+auction family before trusting any sampler's posterior on that family.
+
+## 13. Findings summary
+
+* **Added (requirement 3, first bullet):** an explicit auction-constraint
+  sampler (§11) — HCP / suit-length / suit-quality / denial / exclusion bands
+  from the auction, importance-weighted, ESS-reported, honestly labelled a
+  *modelled prior, not a posterior*. `semantic_constraint_mode` is no longer
+  always `none`.
+* **Added (requirement 6):** a real-deal calibration harness (§12) comparing
+  sampled vs real hidden-hand distributions by auction family on HCP, shape,
+  announced-suit lengths, fits, controls, and honor locations — and it
+  demonstrably flags a uniform sampler as miscalibrated on the announced suit.
 * **Confirmed:** the production estimator targets a *thresholded uniform neural
   consistency distribution `Q_τ`*, not the intended posterior `P`; the filter
   `biddingScore` is an **uncalibrated heuristic**, not a likelihood (§1.3–1.5).
