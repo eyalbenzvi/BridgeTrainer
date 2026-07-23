@@ -105,6 +105,35 @@ def defender_score_table(level: int, denom: str, doubled: int,
                      for d in range(14)], dtype=np.int64)
 
 
+def per_sample_scores(def_tricks: dict, contract: str, vul: str) -> dict:
+    """Per-sample defender duplicate scores for every candidate lead.
+
+    ``def_tricks`` maps card -> per-sample array of DEFENSIVE tricks (all
+    cards share one sample set). Trick counts are rounded to the nearest
+    integer before table lookup (DD counts are integral; float storage must
+    not truncate)."""
+    level, denom, doubled, declarer = parse_contract_full(contract)
+    table = defender_score_table(level, denom, doubled,
+                                 declarer_vulnerable(vul, declarer))
+    return {c: table[np.rint(np.asarray(t)).astype(np.int64)]
+            for c, t in def_tricks.items()}
+
+
+def per_sample_imps(def_tricks: dict, contract: str, vul: str,
+                    baseline: dict = LEAD_IMP_BASELINE) -> dict:
+    """Per-sample IMP value of every candidate lead against the centralized
+    baseline (``datum_mean_v1``: on each layout, the mean defender score
+    across all candidate leads). This is the evidence the IMP mode judges
+    and ranks on — shape-compatible with ``def_tricks`` so the same verdict
+    machinery works in either unit."""
+    if baseline["id"] != LEAD_IMP_BASELINE["id"]:
+        raise ValueError(f"unknown IMP baseline {baseline['id']!r}")
+    scores = per_sample_scores(def_tricks, contract, vul)
+    datum = np.mean(np.stack([scores[c] for c in scores]), axis=0)
+    return {c: imps_array(s - datum).astype(np.float64)
+            for c, s in scores.items()}
+
+
 def compute_lead_metrics(def_tricks: dict, contract: str, vul: str,
                          weights=None,
                          baseline: dict = LEAD_IMP_BASELINE) -> dict:
@@ -118,30 +147,25 @@ def compute_lead_metrics(def_tricks: dict, contract: str, vul: str,
     the ``datum_mean_v1`` baseline is implemented; passing an unknown
     baseline id raises rather than silently mis-scoring.
     """
-    if baseline["id"] != LEAD_IMP_BASELINE["id"]:
-        raise ValueError(f"unknown IMP baseline {baseline['id']!r}")
-    level, denom, doubled, declarer = parse_contract_full(contract)
-    table = defender_score_table(level, denom, doubled,
-                                 declarer_vulnerable(vul, declarer))
+    level = parse_contract_full(contract)[0]
     cards = list(def_tricks)
-    tricks = {c: np.asarray(def_tricks[c], dtype=np.int64) for c in cards}
-    n = tricks[cards[0]].shape[0]
+    n = np.asarray(def_tricks[cards[0]]).shape[0]
     if weights is None:
         w = np.full(n, 1.0 / n)
     else:
         w = np.asarray(weights, dtype=np.float64)
         w = w / w.sum()
-    scores = {c: table[tricks[c]] for c in cards}
-    # Butler-style datum: per-sample mean over all candidate leads.
-    datum = np.mean(np.stack([scores[c] for c in cards]), axis=0)
+    scores = per_sample_scores(def_tricks, contract, vul)
+    imps = per_sample_imps(def_tricks, contract, vul, baseline)
     to_set = 8 - level          # defensive tricks needed to beat the contract
     out = {}
     for c in cards:
+        tr = np.asarray(def_tricks[c], dtype=np.float64)
         out[c] = {
-            "exp_def_tricks": float(w @ tricks[c]),
+            "exp_def_tricks": float(w @ tr),
             "exp_score": float(w @ scores[c]),
-            "exp_imps": float(w @ imps_array(scores[c] - datum)),
-            "set_prob": float(w @ (tricks[c] >= to_set)),
+            "exp_imps": float(w @ imps[c]),
+            "set_prob": float(w @ (tr >= to_set)),
         }
     return out
 
@@ -198,12 +222,17 @@ def mode_rankings(metrics: dict) -> dict:
     return out
 
 
-def training_block(n_samples: int, sample_counts: dict | None = None) -> dict:
+def training_block(n_samples: int, sample_counts: dict | None = None,
+                   target_mode: str = MODE_MP) -> dict:
     """The persisted evaluation/run metadata for a mode-aware lead record:
-    algorithm version, per-mode ranking metric + goal, sample counts, and the
-    IMP baseline metadata."""
+    algorithm version, the mode the board was FORGED for (whose gates
+    selected it as interesting), per-mode ranking metric + goal, sample
+    counts, and the IMP baseline metadata."""
+    if target_mode not in TRAINING_MODES:
+        raise ValueError(f"unknown training mode {target_mode!r}")
     return {
         "algorithm_version": LEAD_ALGO_VERSION,
+        "target_mode": target_mode,
         "n_samples": n_samples,
         "sample_counts": sample_counts or {"confirm": n_samples},
         "modes": {
@@ -236,3 +265,11 @@ def supported_modes(rec: dict) -> list[str]:
     average-tricks ranking must never determine IMP recommendations."""
     modes = (rec.get("training") or {}).get("modes") or {}
     return [m for m in TRAINING_MODES if m in modes] or [MODE_MP]
+
+
+def target_mode_of(rec: dict) -> str:
+    """Which training mode a stored lead record was FORGED for — i.e. whose
+    acceptance gates selected the board as interesting. Legacy and
+    pre-split records were all selected by the tricks (MP) gates."""
+    mode = (rec.get("training") or {}).get("target_mode", MODE_MP)
+    return mode if mode in TRAINING_MODES else MODE_MP

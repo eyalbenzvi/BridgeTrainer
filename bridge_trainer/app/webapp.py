@@ -538,6 +538,13 @@ function problemModes(p) {
   }
   return ["MP"];
 }
+/* which mode's generator FORGED a lead problem (whose gates selected it).
+   The generator is split by mode, and each section serves its own pool;
+   legacy and pre-split records were all selected by the MP (tricks) gates. */
+function targetModeOf(p) {
+  const t = p.target_mode || (p.training && p.training.target_mode);
+  return t === "IMP" ? "IMP" : "MP";
+}
 /* which levels/types exist for a scenario right now, and how many each holds.
    Bidding facets on difficulty x type; leads on difficulty only. */
 function poolFacets(index, kind) {
@@ -545,6 +552,7 @@ function poolFacets(index, kind) {
   const levelCount = {}, typeCount = {};
   for (const p of index.problems) {
     if (kindOf(p) !== kind) continue;
+    if (kind === "lead" && targetModeOf(p) !== leadMode()) continue;
     if (p.difficulty_level)
       levelCount[p.difficulty_level] = (levelCount[p.difficulty_level] || 0) + 1;
     if (p.type) typeCount[p.type] = (typeCount[p.type] || 0) + 1;
@@ -569,10 +577,11 @@ function resolveFilters(index, raw, kind) {
 }
 function matchesFilters(p, f) {
   if (kindOf(p) !== (f.kind || "bidding")) return false;
-  // IMP mode serves only problems that carry IMP metrics; legacy
-  // tricks-only records must never be ranked by IMPs.
-  if (f.kind === "lead" && (f.mode || leadMode()) === "IMP" &&
-      !problemModes(p).includes("IMP")) return false;
+  // each lead section serves its own generator's pool: MP shows boards the
+  // MP (tricks) gates selected, IMP shows boards the IMP gates selected —
+  // so legacy tricks-only records never appear in (or get ranked by) IMP.
+  if (f.kind === "lead" &&
+      targetModeOf(p) !== (f.mode || leadMode())) return false;
   if (!f.levels.includes(p.difficulty_level)) return false;
   return f.types.includes(p.type);            // both scenarios: difficulty + type
 }
@@ -1057,8 +1066,10 @@ function syncModeUi() {{
 document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = () => {{
   setLeadMode(b.dataset.mode);
   syncModeUi();
-  FILTERS.mode = leadMode();
-  updateFacetCounts(); renderStats();
+  // each mode serves its own generator's pool, so the facet options and
+  // counts are rebuilt from that pool
+  FILTERS = resolveFilters(INDEX, loadCur(), SCEN);
+  buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
 }});
 function toggleFilter(list, value) {{
   const i = list.indexOf(value);
@@ -1092,8 +1103,8 @@ function facetCounts(index, flt) {{
   const levelCount = {{}}, typeCount = {{}};
   for (const p of index.problems) {{
     if (kindOf(p) !== flt.kind) continue;
-    if (flt.kind === "lead" && (flt.mode || leadMode()) === "IMP" &&
-        !problemModes(p).includes("IMP")) continue;
+    if (flt.kind === "lead" &&
+        targetModeOf(p) !== (flt.mode || leadMode())) continue;
     if (p.difficulty_level && flt.types.includes(p.type))
       levelCount[p.difficulty_level] =
         (levelCount[p.difficulty_level] || 0) + 1;
@@ -1171,11 +1182,27 @@ function renderStats() {{
     if (rec) {{ done++; if (rec.correct) right++; }}
   }}
   const f = poolFacets(INDEX, FILTERS.kind);
-  const kindTotal =
-    INDEX.problems.filter(p => kindOf(p) === FILTERS.kind).length;
+  const kindTotal = INDEX.problems.filter(p =>
+    kindOf(p) === FILTERS.kind &&
+    (FILTERS.kind !== "lead" ||
+     targetModeOf(p) === (FILTERS.mode || leadMode()))).length;
   const narrowed = FILTERS.levels.length < f.levels.length ||
     FILTERS.types.length < f.types.length;
-  const label = FILTERS.kind === "lead" ? "בעיות הובלה" : "בעיות הכרזה";
+  const label = FILTERS.kind === "lead"
+    ? "בעיות הובלה (" + MODE_INFO[leadMode()].title + ")" : "בעיות הכרזה";
+  if (FILTERS.kind === "lead" && !kindTotal) {{
+    document.getElementById("stats").innerHTML =
+      '<div class="state"><div class="em">עוד אין בעיות ' +
+      MODE_INFO[leadMode()].title + ' במאגר</div>' +
+      '<div class="muted">המחולל של מצב זה טרם הריץ — ' +
+      'בעיות חדשות יופיעו כאן לאחר הרצתו.</div></div>';
+    document.getElementById("fbar-sub").textContent = "";
+    document.getElementById("fbar").classList.remove("on");
+    const dl = document.getElementById("deal");
+    dl.classList.add("off");
+    dl.innerHTML = "אין בעיות במצב זה עדיין";
+    return;
+  }}
   const waiting = matching.length - done;
   let h = (narrowed
       ? `<b>${{matching.length}}</b> מתוך ${{kindTotal}} ${{label}} נבחרו `
@@ -1887,11 +1914,12 @@ async function init() {
   if (!P) { document.getElementById("problem").innerHTML =
     '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
     '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }
-  // active training mode: URL param wins, then the stored selection. A prior
+  // active training mode: URL param wins, then the mode this problem was
+  // forged for (each section serves its own generator's pool). A prior
   // answer replays in the mode it was graded in; a legacy problem without
   // IMP metrics falls back to MP (it must never be ranked by IMPs).
   const qm = q.get("mode");
-  MODE = qm === "IMP" || qm === "MP" ? qm : leadMode();
+  MODE = qm === "IMP" || qm === "MP" ? qm : targetModeOf(P);
   const prevAns = store()[P.id];
   if (prevAns && (prevAns.trainingMode === "MP" ||
                   prevAns.trainingMode === "IMP"))

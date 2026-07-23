@@ -64,6 +64,35 @@ self-describing. Score→IMP conversion reuses the golden-tested
   `["MP","IMP"]`); the web app's IMP section only offers problems whose
   index entry includes `"IMP"`.
 
+## The generators: one per mode
+
+The problem generator is **split by training mode**. Both share the whole
+pipeline — bid-out, final contract, the 32/64/128 screening cascade, the
+512-sample confirm, explanations — and differ ONLY in the unit their
+acceptance gates run in (`engine/lead_verdict.py: MP_SCALE / IMP_SCALE`):
+
+| gate | MP generator (tricks) | IMP generator (expected IMPs) |
+|------|----------------------|-------------------------------|
+| C1 "obvious" | BEN policy mass on the tricks-best answer set > 50% | BEN policy mass on the IMP-best answer set > 50% |
+| C2 "suit indifferent" | best vs best-different-suit gap < **0.25 tricks** | gap < **0.5 IMPs** (the bidding verdict's long-standing toss-up line) |
+| split-half stability | drift > 0.30 tricks | drift > 0.6 IMPs |
+| difficulty scale | trap decisive at 0.5 tricks, live suit within 0.5 | trap decisive at 1.0 IMPs, live suit within 1.0 |
+
+Run them with:
+
+```
+trainer lead-forge --mode MP  --count 20 --seed 1   # trick-decision boards
+trainer lead-forge --mode IMP --count 20 --seed 1   # score-swing boards
+MODE=IMP scripts/generate_and_push_leads.sh 96      # forge + push
+```
+
+Records are stamped with the mode they were forged for
+(`training.target_mode`, `generator.target_mode`) and get per-mode id
+prefixes (`lead1-…` for MP, `lead1i-…` for IMP) so the two generators never
+collide on a seed. Every record still carries BOTH modes' metrics; the
+target mode only says whose gates selected the board. The web app serves
+each section from its own generator's pool (index `target_mode` flag).
+
 ## Legacy records (algorithm version 1)
 
 Pre-mode lead records store only per-card trick AVERAGES — no per-sample

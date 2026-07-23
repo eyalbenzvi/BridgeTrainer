@@ -134,7 +134,8 @@ def cmd_lead_forge(args: argparse.Namespace) -> int:
         max_seconds=args.max_seconds, workers=args.workers,
         require_doubled=args.only_doubled,
         doubled_min_gap=args.doubled_min_gap,
-        doubled_apply_obvious=args.doubled_obvious)
+        doubled_apply_obvious=args.doubled_obvious,
+        target_mode=args.mode)
     import json as _json
     print(_json.dumps(summary, indent=1))
     return 0 if summary["count"] == args.count else 1
@@ -344,6 +345,12 @@ def main(argv: list[str] | None = None) -> int:
 
     lf_p = sub.add_parser(
         "lead-forge", help="generate opening-lead problems with the Ben engine")
+    lf_p.add_argument("--mode", choices=["MP", "IMP"], default="MP",
+                      help="target training mode: MP selects boards whose "
+                           "suit choice matters in DD tricks; IMP selects "
+                           "boards whose suit choice matters in expected "
+                           "IMPs from the final score (records are stamped "
+                           "with the mode they were forged for)")
     lf_p.add_argument("--pool", default="data")
     lf_p.add_argument("--count", type=int, default=20)
     lf_p.add_argument("--seed", type=int, default=1)

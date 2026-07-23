@@ -39,8 +39,11 @@ def index_entry(rec: dict) -> dict:
         # training modes this problem can serve: legacy tricks-only records
         # are MP-only; schema-2 records carry IMP metrics too. The web app
         # filters the IMP tab on this flag.
-        from ..scoring.lead_metrics import supported_modes
+        from ..scoring.lead_metrics import supported_modes, target_mode_of
         entry["modes"] = supported_modes(rec)
+        # which mode's generator FORGED this board (whose gates found it
+        # interesting); each trainer section serves its own generator's pool
+        entry["target_mode"] = target_mode_of(rec)
     return entry
 
 
