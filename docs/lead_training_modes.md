@@ -81,7 +81,17 @@ acceptance gates run in (`engine/lead_verdict.py: MP_SCALE / IMP_SCALE`):
 ### Running the generators on GitHub (the normal way)
 
 Problem creation runs on GitHub Actions — no local machine or Claude session
-needed. Open **Actions → "Forge lead problems" → Run workflow** and choose:
+needed.
+
+**Hourly schedule** — every hour the workflow forges one MP batch and one
+IMP batch (10 problems each by default) and pushes them to Firestore. Seeds
+are hour-based, so every firing works fresh boards. Tune it with repository
+variables (Settings → Secrets and variables → Actions → Variables), no YAML
+edit needed: `FORGE_COUNT` (problems per mode per hour) and
+`FORGE_MAX_SECONDS` (per-mode time budget, default 1500 s).
+
+**Manual runs** — open **Actions → "Forge lead problems" → Run workflow**
+and choose:
 
 * **mode** — `MP` or `IMP` (which generator's gates select the boards);
 * **count** — how many problems to generate;

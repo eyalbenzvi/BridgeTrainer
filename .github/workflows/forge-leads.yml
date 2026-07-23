@@ -1,9 +1,16 @@
 name: Forge lead problems
 
 # Generates opening-lead problems on a GitHub-hosted runner and pushes them
-# straight to Firestore — no local machine needed. Run it from the Actions
-# tab ("Run workflow"): pick the training mode (MP or IMPs) and how many
-# problems to forge.
+# straight to Firestore — no local machine needed.
+#
+# Two ways to run:
+#   * HOURLY SCHEDULE — every hour, one MP batch and one IMP batch (10
+#     problems each by default) forge back-to-back and push. Tune without
+#     editing this file via repository variables (Settings → Secrets and
+#     variables → Actions → Variables): FORGE_COUNT (problems per mode per
+#     hour) and FORGE_MAX_SECONDS (per-mode time budget, default 1500).
+#   * MANUAL — Actions tab → "Run workflow": pick the training mode (MP or
+#     IMPs), how many problems, and optionally a seed / time budget.
 #
 # What a run needs (all available on ubuntu-latest):
 #   * the Ben engine — cloned + built by scripts/setup_ben.sh (pinned commit,
@@ -15,6 +22,11 @@ name: Forge lead problems
 #     Actions). The push step fails with a clear error if it is missing.
 
 on:
+  schedule:
+    # hourly: each firing forges an MP batch then an IMP batch. Seeds are
+    # hour-based (not the script's day-based default!) so consecutive hours
+    # generate fresh boards instead of re-deriving the same day seed.
+    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -40,7 +52,9 @@ on:
         required: false
 
 # Serialize runs: two concurrent pushes would race the Firestore index
-# update (read-union-write). Queued, never cancelled.
+# update (read-union-write). Queued, never cancelled; if a run overflows the
+# hour, GitHub keeps at most one pending run per group, so scheduled firings
+# can never pile up into a backlog.
 concurrency:
   group: forge-leads
   cancel-in-progress: false
@@ -56,6 +70,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Validate inputs
+        if: github.event_name == 'workflow_dispatch'
         env:
           COUNT: ${{ inputs.count }}
         run: |
@@ -79,7 +94,7 @@ jobs:
             ~/fbenv
           key: ben-${{ runner.os }}-${{ hashFiles('scripts/setup_ben.sh') }}
 
-      - name: Forge ${{ inputs.count }} ${{ inputs.mode }} problems and push
+      - name: Forge and push
         # explicit bash => pipefail, so a forge failure isn't masked by tee
         shell: bash
         env:
@@ -88,25 +103,54 @@ jobs:
           COUNT: ${{ inputs.count }}
           SEED: ${{ inputs.seed }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
+          FORGE_COUNT: ${{ vars.FORGE_COUNT }}
+          FORGE_MAX_SECONDS: ${{ vars.FORGE_MAX_SECONDS }}
           PYTHON: python3.12
           # stream forge output line-by-line into the live Actions log —
           # without this, Python buffers through the tee pipe and progress
           # only appears in large late chunks
           PYTHONUNBUFFERED: "1"
         run: |
-          # empty optional inputs fall back to the script's own defaults
-          [ -z "$SEED" ] && unset SEED
-          [ -z "$MAX_SECONDS" ] && unset MAX_SECONDS
-          scripts/generate_and_push_leads.sh "$COUNT" 2>&1 | tee forge.log
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            # hourly: one MP batch then one IMP batch, 10 problems each by
+            # default. Hour-based seeds, far apart per mode, so no hour (and
+            # no mode) rescans another's boards; a same-hour re-run just
+            # skips its own duplicates.
+            HOUR=$(( $(date +%s) / 3600 ))
+            N="${FORGE_COUNT:-10}"
+            BUDGET="${FORGE_MAX_SECONDS:-1500}"
+            rc=0
+            for M in MP IMP; do
+              [ "$M" = MP ] && S=$(( HOUR * 100000 )) \
+                            || S=$(( HOUR * 100000 + 50000 ))
+              echo ">> hourly $M batch: $N problems, seed $S, ${BUDGET}s"
+              MODE="$M" SEED="$S" MAX_SECONDS="$BUDGET" \
+                scripts/generate_and_push_leads.sh "$N" \
+                2>&1 | tee -a forge.log || rc=1
+            done
+            exit "$rc"
+          else
+            # manual dispatch: empty optional inputs fall back to the
+            # script's own defaults
+            [ -z "$SEED" ] && unset SEED
+            [ -z "$MAX_SECONDS" ] && unset MAX_SECONDS
+            scripts/generate_and_push_leads.sh "$COUNT" 2>&1 | tee forge.log
+          fi
 
       - name: Job summary
         if: always()
         env:
           MODE: ${{ inputs.mode }}
           COUNT: ${{ inputs.count }}
+          FORGE_COUNT: ${{ vars.FORGE_COUNT }}
         run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            HEAD="hourly MP + IMP, ${FORGE_COUNT:-10} problems each"
+          else
+            HEAD="mode $MODE, requested $COUNT"
+          fi
           {
-            echo "## Lead forge — mode $MODE, requested $COUNT"
+            echo "## Lead forge — $HEAD"
             echo
             echo '```'
             grep -E "^>> |^Done:|^lead-forge:|progress: |uploaded " \
@@ -120,7 +164,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: forged-problems-${{ inputs.mode }}-${{ github.run_number }}
+          name: forged-problems-${{ inputs.mode || 'hourly' }}-${{ github.run_number }}
           path: |
             data/
             forge.log
