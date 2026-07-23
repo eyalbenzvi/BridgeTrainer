@@ -200,8 +200,13 @@ function gradeBidding(P, action) {
   if (action === best) outcomeClass = "winner";
   else if (correct) outcomeClass = "accepted-alt";
   else if (dead.includes(action)) outcomeClass = "dead";
+  // panel score (0-100): btScoreBidding lives in the pages' shared inline
+  // script (docs/scoring_scale.md), which runs before this module. Guarded
+  // so grading still works if a page omits it (score falls back to binary).
+  const score = (typeof window !== "undefined" && window.btScoreBidding)
+    ? window.btScoreBidding(P, action).score : (correct ? 100 : 0);
   return { ...meta(P), answer: action, chosenCall: action, correct,
-           outcomeClass, gradedCost, acceptedSet: accepted };
+           outcomeClass, gradedCost, score, acceptedSet: accepted };
 }
 
 function gradeLead(P, card, mode) {
@@ -229,7 +234,10 @@ function gradeLead(P, card, mode) {
   }
   const primaryValue = row
     ? (trainingMode === "IMP" ? row.exp_imps : row.avg_def_tricks) : null;
-  return { ...meta(P), answer: card, chosenCall: card, correct,
+  // panel score (0-100); see gradeBidding for the window-boundary note
+  const score = (typeof window !== "undefined" && window.btScoreLead)
+    ? window.btScoreLead(P, card, trainingMode).score : (correct ? 100 : 0);
+  return { ...meta(P), answer: card, chosenCall: card, correct, score,
            trainingMode,
            rankingMetric: trainingMode === "IMP" ? "exp_imps"
                                                  : "exp_def_tricks",

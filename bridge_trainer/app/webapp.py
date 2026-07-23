@@ -5,9 +5,11 @@ Two pages, no build step, no framework:
   p.html?id=X — renders one problem document fetched live from Firestore
                 (the ``problems`` collection; see web/bt-firebase.js)
 
-Answers live in localStorage under key "bt_pool" ({id: {answer, correct,
-ts}}). Problems come from Firestore, so the producer's `pool push` makes
-new problems appear without any redeploy.
+Answers persist as per-user attempt docs in Firestore ({answer, correct,
+score, ts, ...}; web/bt-firebase.js syncs and caches them). Problems come
+from Firestore too, so the producer's `pool push` makes new problems
+appear without any redeploy. Each answer is graded on the 0-100 panel
+score (docs/scoring_scale.md) next to the legacy binary `correct` flag.
 
 Look and feel follows Bridge Base Online (ux/bridge panel redesign):
 green-felt page with white content cards, a fixed W-N-E-S auction diagram
@@ -238,6 +240,12 @@ button.cand.good::after, button.cand.bad::after {
   position: absolute; top: 2px; right: 6px; font-size: 13px; }
 button.cand.good::after { content: "\\2713"; color: var(--win); }
 button.cand.bad::after { content: "\\2717"; color: var(--loss); }
+/* a near-miss (panel score 65-84): gold, neither the green check nor the
+   red cross */
+button.cand.near { border: 2px solid var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, var(--card)); }
+button.cand.near::after { position: absolute; top: 2px; right: 6px;
+  font-size: 13px; content: "\\2248"; color: var(--gold); }
 @media (prefers-color-scheme: dark) {
   button.cand.good { background: #24382C; }
   button.cand.bad { background: #3A2626; }
@@ -247,6 +255,17 @@ button.cand.bad::after { content: "\\2717"; color: var(--loss); }
 .headline { font-size: 18px; font-weight: 700; margin: 0 0 2px; }
 .headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
 .subline { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+/* panel-score chip (verdict headline, dashboard rows) + its breakdown line */
+.scorechip { display: inline-flex; align-items: center;
+  justify-content: center; min-width: 46px; height: 34px;
+  border-radius: 10px; padding: 0 9px; font-size: 20px; font-weight: 800;
+  color: #fff; vertical-align: middle; font-variant-numeric: tabular-nums; }
+.scorechip.tone-win { background: var(--win); }
+.scorechip.tone-gold { background: var(--gold); color: var(--on-gold); }
+.scorechip.tone-loss { background: var(--loss); }
+.scorechip.sm { min-width: 36px; height: 24px; font-size: 14px;
+                border-radius: 7px; font-weight: 700; }
+.scoreline { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
 .legend { font-size: 11px; color: var(--muted); margin: 8px 0 2px; }
 .legend i { display: inline-block; width: 8px; height: 8px;
             border-radius: 2px; margin: 0 3px 0 10px; }
@@ -312,6 +331,8 @@ button.cardbtn.good { border-color: var(--win);
   background: color-mix(in srgb, var(--win) 16%, var(--card)); }
 button.cardbtn.bad { border-color: var(--loss);
   background: color-mix(in srgb, var(--loss) 16%, var(--card)); }
+button.cardbtn.near { border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 16%, var(--card)); }
 /* reveal: per-suit bar comparison instead of a wall of decimals */
 .barrow { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 14px; }
 .barrow .bl { width: 3.4em; }
@@ -532,7 +553,173 @@ a.missrow .go { color: var(--accent); font-weight: 700; white-space: nowrap; }
 .gnav .ico svg { display: block; }
 """
 
-_SHARED_JS = """
+_SCORE_JS = r"""
+/* ===== panel score: the 0-100 graded verdict scale =====
+   (docs/scoring_scale.md). Pure functions of the problem doc + the chosen
+   action — no DOM, no Firebase — so tests run this block under node as-is
+   and bt-firebase.js can call it across the classic-script/module boundary
+   (inline scripts execute before the deferred module). */
+const SCORE_CAP = 95;          // a non-accepted answer never quite ties best
+const SCORE_EXP = 1.6;         // soft shoulder, then a fast drop
+const SCORE_LENIENCY = 6;      // max field-leniency points (x policy weight)
+const SCORE_TAU = {bidding: 2.0, leadMP: 0.6, leadIMP: 1.75};
+const STAKES_REF = 2.5;        // stakes at which the bidding scale is neutral
+const STAKES_STRETCH_MIN = 0.8, STAKES_STRETCH_MAX = 1.8;
+const MP_RANK_WEIGHT = 0.35;   // matchpoints are frequency scoring: blend rank
+function btClamp(x, lo, hi) { return Math.min(hi, Math.max(lo, x)); }
+function btCurve(cost, tau) {
+  if (!(cost > 0)) return SCORE_CAP;
+  return SCORE_CAP / (1 + Math.pow(cost / tau, SCORE_EXP));
+}
+/* display bands; 100 and 0 are semantic (accepted set / dead option) */
+function btBandOf(score) {
+  if (typeof score !== "number") return null;
+  if (score >= 100) return "best";
+  if (score >= 85) return "near";
+  if (score >= 65) return "minor";
+  if (score >= 40) return "error";
+  if (score >= 1) return "blunder";
+  return "dead";
+}
+const BAND_HE = {best: "מיטבי", near: "כמעט מיטבי", minor: "סטייה קלה",
+                 error: "טעות", blunder: "טעות חמורה", dead: "אפשרות מתה"};
+const BAND_TONE = {best: "win", near: "win", minor: "gold",
+                   error: "loss", blunder: "loss", dead: "loss"};
+/* bidding: IMP cost below best, a CI haircut (charge the gap minus half its
+   noise margin), a stakes-stretched scale (slam swings are judged wider than
+   part-score battles), and field leniency by the engine's policy weight.
+   Handles both the raw record shape (verdict.table / accepted as a string)
+   and the page-normalized shape (verdict.corrected / accepted as an array). */
+function btScoreBidding(P, action) {
+  const v = (P && P.verdict) || {};
+  const accepted = (Array.isArray(v.accepted) ? v.accepted
+    : (v.toss_up ? (v.toss_up_set || []) : [v.accepted])).filter(Boolean);
+  const out = {kind: "bidding", unit: "IMP", accepted: accepted};
+  if (accepted.includes(action)) { out.score = 100; return out; }
+  if ((v.dead_options || []).some(d => (d.bid || d) === action)) {
+    out.score = 0; out.dead = true; return out;
+  }
+  let row = (v.corrected || []).find(r => r.bid === action);
+  if (!row) {
+    const t = (v.table || []).find(r => (r.bid || r.action) === action);
+    if (t) row = {ev: t.ev_imp_vs_top !== undefined ? t.ev_imp_vs_top : t.ev,
+                  ci: t.ci};
+  }
+  if (!row || row.ev === undefined || row.ev === null) {
+    out.score = 40; out.fallback = true; return out;
+  }
+  out.cost = Math.max(0, -(+row.ev));
+  out.ci = +row.ci || 0;
+  out.cEff = Math.max(0, out.cost - out.ci / 2);
+  const stakes = P.quality && +P.quality.stakes;
+  out.stretch = stakes ? btClamp(stakes / STAKES_REF, STAKES_STRETCH_MIN,
+                                 STAKES_STRETCH_MAX) : 1;
+  out.tau = SCORE_TAU.bidding * out.stretch;
+  out.policy = 0;
+  for (const c of P.candidates || [])
+    if ((c.call || c) === action) out.policy = +c.policy || 0;
+  out.base = btCurve(out.cEff, out.tau);
+  out.leniency = SCORE_LENIENCY * out.policy;
+  out.score = Math.round(btClamp(out.base + out.leniency, 1, 94));
+  return out;
+}
+/* leads: MP grades tricks below best BLENDED with the matchpoint rank
+   (distinct trick values — the second-best lead still beats most of the
+   room); IMP grades expected IMPs below the mode's best, pure magnitude.
+   Leniency by the lead's own softmax weight. No dead pin (leads have no
+   dead concept) and no CI haircut (per-card CIs aren't published; ties
+   already collapse into the accepted set at forge time). */
+function btScoreLead(P, card, mode) {
+  mode = mode === "IMP" ? "IMP" : "MP";
+  const v = (P && P.verdict) || {};
+  const bm = v.by_mode && v.by_mode[mode];
+  const accepted = (bm && bm.accepted && bm.accepted.length)
+    ? bm.accepted : (v.accepted || []);
+  const out = {kind: "lead", mode: mode,
+               unit: mode === "IMP" ? "IMP" : "לקיחות", accepted: accepted};
+  if (accepted.includes(card)) { out.score = 100; return out; }
+  const rows = v.table || [];
+  const row = rows.find(r => r.card === card);
+  if (!row) { out.score = 40; out.fallback = true; return out; }
+  if (mode === "IMP" && row.exp_imps !== undefined) {
+    let best = -Infinity;
+    for (const r of rows)
+      if (r.exp_imps !== undefined && +r.exp_imps > best) best = +r.exp_imps;
+    out.cost = Math.max(0, best - +row.exp_imps);
+    out.tau = SCORE_TAU.leadIMP;
+    out.base = btCurve(out.cost, out.tau);
+  } else {
+    out.unit = "לקיחות";   // also the IMP-mode fallback for a row with no
+                           // exp_imps: it is graded (and labeled) in tricks
+    out.cost = Math.max(0, -(+row.vs_best || 0));
+    out.tau = SCORE_TAU.leadMP;
+    const vals = [];
+    for (const r of rows) {
+      if (r.avg_def_tricks === undefined) continue;
+      const q = Math.round(+r.avg_def_tricks * 100);
+      if (!vals.includes(q)) vals.push(q);
+    }
+    vals.sort((a, b) => b - a);
+    const idx = vals.indexOf(Math.round(+row.avg_def_tricks * 100));
+    out.base = btCurve(out.cost, out.tau);
+    if (vals.length > 1 && idx >= 0) {
+      out.rank = idx + 1; out.groups = vals.length;
+      const rankScore = SCORE_CAP * (vals.length - 1 - idx) / (vals.length - 1);
+      out.base = (1 - MP_RANK_WEIGHT) * out.base + MP_RANK_WEIGHT * rankScore;
+    }
+  }
+  out.policy = +row.ben_softmax || 0;
+  out.leniency = SCORE_LENIENCY * out.policy;
+  out.score = Math.round(btClamp(out.base + out.leniency, 1, 94));
+  return out;
+}
+/* stored attempts: new ones carry `score`; legacy ones are approximated from
+   gradedCost + outcomeClass with the base curve only (the haircut, stakes
+   stretch and leniency need the problem doc, which isn't loaded here). */
+function btScoreOfAttempt(a) {
+  if (!a) return null;
+  if (typeof a.score === "number") return a.score;
+  if (a.correct) return 100;
+  if (a.outcomeClass === "dead") return 0;
+  const cost = +a.gradedCost || 0;
+  // a recorded MISTAKE with no measured cost (the old graders left cost 0
+  // when the chosen option had no table row) gets the scorers' explicit
+  // no-data fallback, not a free ride up the curve at cost 0
+  if (!(cost > 0)) return 40;
+  const tau = a.kind === "lead"
+    ? (a.trainingMode === "IMP" ? SCORE_TAU.leadIMP : SCORE_TAU.leadMP)
+    : SCORE_TAU.bidding;
+  return Math.round(btClamp(btCurve(cost, tau), 1, 94));
+}
+function btScoreChipHtml(score, small) {
+  const band = btBandOf(score);
+  if (!band) return "";
+  return '<span class="scorechip tone-' + BAND_TONE[band] +
+         (small ? ' sm' : '') + '" aria-label="ציון ' + score + ' מתוך 100">' +
+         score + '</span>';
+}
+/* the transparency line: how the number came to be, in Hebrew */
+function btScoreExplain(parts) {
+  if (!parts || parts.score === 100 || parts.dead || parts.fallback) return "";
+  const bits = [];
+  let gap = "פער " + (+parts.cost).toFixed(parts.unit === "IMP" ? 1 : 2) +
+            " " + parts.unit + " מהמיטבי";
+  if (parts.ci) gap += " (±" + (+parts.ci).toFixed(1) + " — חויב " +
+                       (+parts.cEff).toFixed(1) + ")";
+  bits.push(gap);
+  if (parts.stretch > 1.05) bits.push("סולם מקל — לוח עתיר תנודה");
+  else if (parts.stretch && parts.stretch < 0.95)
+    bits.push("סולם מחמיר — לוח שקט");
+  if (parts.rank) bits.push("מדורגת " + parts.rank + " מתוך " + parts.groups +
+                            " (שקלול מצ'פוינטס)");
+  if (parts.leniency >= 0.5)
+    bits.push("+" + Math.round(parts.leniency) + " הקלת שדה (המנוע נתן לבחירתך " +
+              Math.round(parts.policy * 100) + "%)");
+  return "מרכיבי הציון: " + bits.join(" · ");
+}
+"""
+
+_SHARED_JS = _SCORE_JS + """
 /* Progress + pool now live in Firestore (see web/bt-firebase.js, window.BT).
    store() returns the signed-in user's answered-problem cache synchronously
    (preloaded at sign-in); answers persist through BT.record. */
@@ -557,7 +744,7 @@ const HE = {
   you: "אתה", partner: "שותף", leader: "מוביל", declarer: "מכריז",
   dummy: "דומם", vul: "פגיע", notVul: "לא פגיע",
   best: "הטוב", yours: "שלך", engine: "מנוע", wins: "זכייה",
-  correct: "נכונות", level: "רמה",
+  correct: "נכונות", level: "רמה", avgScore: "ממוצע",
   notFound: "הבעיה לא נמצאה.", backHome: "חזרה לתרגול",
 };
 /* role keys -> on-screen Hebrew (keys stay English: they drive styling) */
@@ -1013,13 +1200,17 @@ function getSession() {
   try { return JSON.parse(localStorage.getItem("bt_session")); }
   catch (e) { return null; }
 }
-function bumpSession(correct, id) {
+function bumpSession(score, id) {
   const s = getSession();
   if (!s) return;
   s.count = (s.count || 0) + 1;
-  if (correct) s.right = (s.right || 0) + 1;
-  // per-problem trail so the end-of-run summary can link the misses
-  (s.items = s.items || []).push({id: id || null, correct: !!correct});
+  const scored = typeof score === "number";
+  if (scored) { s.sum = (s.sum || 0) + score;
+                s.scored = (s.scored || 0) + 1; }
+  if (score >= 100) s.right = (s.right || 0) + 1;
+  // per-problem trail so the end-of-run summary can link the review items
+  (s.items = s.items || []).push({id: id || null,
+                                  score: scored ? score : null});
   localStorage.setItem("bt_session", JSON.stringify(s));
   renderSessRibbon();
 }
@@ -1030,11 +1221,16 @@ function renderSessRibbon() {
   if (!s || !s.size) { el.hidden = true; return; }
   const done = Math.min(s.count || 0, s.size);
   el.hidden = false;
+  // a session begun before the panel score shipped has no score trail yet —
+  // fall back to its correct count rather than a bogus average
+  const tail = s.scored
+    ? HE.avgScore + ' <b>' + Math.round(s.sum / s.scored) + '</b>'
+    : (s.right || 0) + ' ' + HE.correct;
   el.innerHTML =
     '<span>תרגול \\u00b7 ' + done + '/' + s.size + '</span>' +
     '<span class="prog"><span style="width:' + Math.round(100 * done / s.size) +
     '%"></span></span>' +
-    '<span>' + (s.right || 0) + ' ' + HE.correct + '</span>';
+    '<span>' + tail + '</span>';
 }
 /* bottom-nav icons: inline SVG (glyph fonts render inconsistently) */
 const ICO = {
@@ -1365,10 +1561,10 @@ function renderStats() {{
   if (!INDEX) return;
   const s = store();
   const matching = INDEX.problems.filter(p => matchesFilters(p, FILTERS));
-  let done = 0, right = 0;
+  let done = 0, scoreSum = 0;
   for (const p of matching) {{
     const rec = s[p.id];
-    if (rec) {{ done++; if (rec.correct) right++; }}
+    if (rec) {{ done++; scoreSum += btScoreOfAttempt(rec) || 0; }}
   }}
   const f = poolFacets(INDEX, FILTERS.kind);
   const kindTotal = INDEX.problems.filter(p =>
@@ -1399,11 +1595,11 @@ function renderStats() {{
     `<span class="pill" style="border-color:var(--line);color:var(--muted)">` +
     `${{waiting}} ממתינות לך</span>`;
   if (done) {{
-    const pct = Math.round(100 * right / done);
-    h += `<div style="margin-top:8px">ההישג שלך: <b>${{right}}</b> / ` +
-      `${{done}} נענו · <a href="dashboard.html">להתקדמות המלאה &larr;</a></div>` +
-      `<div class="wpl" role="img" aria-label="${{pct}}% נכון">` +
-      `<span class="w" style="width:${{pct}}%">${{pct}}%</span></div>`;
+    const avg = Math.round(scoreSum / done);
+    h += `<div style="margin-top:8px">ההישג שלך: ציון ממוצע <b>${{avg}}</b> ` +
+      `על ${{done}} שנענו · <a href="dashboard.html">להתקדמות המלאה &larr;</a></div>` +
+      `<div class="wpl" role="img" aria-label="ציון ממוצע ${{avg}} מתוך 100">` +
+      `<span class="w" style="width:${{avg}}%">${{avg}}</span></div>`;
   }} else if (Object.keys(s).length) {{
     h += `<div style="margin-top:8px" class="muted">` +
       `עוד לא ענית על אף אחת בבחירה הזו.</div>`;
@@ -1481,7 +1677,7 @@ document.getElementById("deal").onclick = () => {{
     return false;
   }}
   localStorage.setItem("bt_session", JSON.stringify({{
-    kind: FILTERS.kind, size: 10, count: 0, right: 0,
+    kind: FILTERS.kind, size: 10, count: 0, right: 0, sum: 0, scored: 0,
     mode: FILTERS.kind === "lead" ? leadMode() : null,
     levels: FILTERS.levels.slice(), types: FILTERS.types.slice()}}));
   location.href = routeFor(FILTERS.kind, id);
@@ -1493,22 +1689,27 @@ function renderSessionSummary() {{
   if (!s || !s.count) return;
   localStorage.removeItem("bt_session");   // the run is over
   const kindLabel = s.kind === "lead" ? "הובלה" : "הכרזה";
-  const pct = Math.round(100 * s.right / s.count);
-  const misses = (s.items || []).map((it, idx) => ({{...it, idx}}))
-    .filter(i => !i.correct && i.id);
+  // score trail; a legacy in-flight session carries only a correct flag —
+  // map its misses to the no-data fallback (40), not to 0 (= dead option)
+  const items = (s.items || []).map((it, idx) => ({{...it, idx,
+    sc: typeof it.score === "number" ? it.score : (it.correct ? 100 : 40)}}));
+  const avg = items.length
+    ? Math.round(items.reduce((t, i) => t + i.sc, 0) / items.length)
+    : Math.round(100 * (s.right || 0) / s.count);
+  const misses = items.filter(i => i.sc < 85 && i.id);
   const missHtml = misses.length
-    ? `<div style="margin-top:10px;font-weight:700">לסקירת הטעויות</div>` +
+    ? `<div style="margin-top:10px;font-weight:700">לסקירה — החלטות מתחת ל־85</div>` +
       `<ul class="notes">` + misses.map(i =>
         `<li><a href="${{routeFor(s.kind || "bidding", i.id)}}">` +
-        `בעיה ${{i.idx + 1}} בסבב &larr;</a></li>`).join("") + `</ul>`
-    : `<div style="margin-top:8px">ללא טעויות — כל הכבוד!</div>`;
+        `בעיה ${{i.idx + 1}} בסבב (ציון ${{i.sc}}) &larr;</a></li>`).join("") + `</ul>`
+    : `<div style="margin-top:8px">הכול מיטבי או קרוב לכך — כל הכבוד!</div>`;
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = `<h2>סיכום התרגול</h2>` +
     `<div style="margin-top:6px">ענית על <b>${{s.count}}</b> בעיות ${{kindLabel}} — ` +
-    `<b>${{s.right}}</b> נכונות (${{pct}}%).</div>` +
-    `<div class="wpl" role="img" aria-label="${{pct}}% נכון" style="margin-top:8px">` +
-    `<span class="w" style="width:${{pct}}%">${{pct}}%</span></div>` +
+    `ציון ממוצע <b>${{avg}}</b>.</div>` +
+    `<div class="wpl" role="img" aria-label="ציון ממוצע ${{avg}} מתוך 100" style="margin-top:8px">` +
+    `<span class="w" style="width:${{avg}}%">${{avg}}</span></div>` +
     missHtml +
     `<button type="button" class="big" id="again">עוד סבב &larr;</button>`;
   const main = document.getElementById("main");
@@ -1550,6 +1751,7 @@ def _problem_html() -> str:
 <div id="confirm"></div>
 <div id="verdict" class="card" role="status" aria-live="polite">
 <h2 class="headline" id="headline" tabindex="-1"></h2>
+<div class="scoreline" id="scoreline"></div>
 <div class="subline" id="subline"></div>
 <div class="diffline" id="diffline"></div>
 <div id="fog"></div>
@@ -1633,10 +1835,11 @@ function optRowHtml(row, i, chosen, accepted) {{
 }}
 function reveal(chosen) {{
   const v = P.verdict;
+  const sp = btScoreBidding(P, chosen);
   document.querySelectorAll("button.cand").forEach(b => {{
     const a = b.dataset.action;
     if (v.accepted.includes(a)) b.classList.add("good");
-    else if (a === chosen) b.classList.add("bad");
+    else if (a === chosen) b.classList.add(sp.score >= 65 ? "near" : "bad");
     else b.classList.add("off");
     if (a === chosen) b.classList.add("chosen");
     b.disabled = true;
@@ -1645,21 +1848,24 @@ function reveal(chosen) {{
   if (turn) turn.innerHTML = callHtml(chosen);
   const ok = v.accepted.includes(chosen);
   const rows = v.corrected || [];
+  const chip = btScoreChipHtml(sp.score);
+  const band = BAND_HE[btBandOf(sp.score)];
   let head;
   if (v.toss_up) {{
-    head = `<span class="${{ok ? "ok" : "no"}}">${{ok ? "\\u2713" : "\\u2717"}}</span> ` +
-      `שקול — <span class="ltr">${{v.accepted.map(callHtml).join(" / ")}}</span> שניהם טובים`;
+    head = `${{chip}} ${{band}} — שקול: ` +
+      `<span class="ltr">${{v.accepted.map(callHtml).join(" / ")}}</span> שניהם טובים`;
   }} else if (ok) {{
-    head = `<span class="ok">\\u2713</span> הכרזה מיטבית — ` +
+    head = `${{chip}} הכרזה מיטבית — ` +
            `<span class="ltr">${{callHtml(chosen)}}</span>`;
   }} else {{
     const mine = rows.find(r => r.bid === chosen);
     const gap = mine ? ` (${{(+mine.ev).toFixed(1)}} IMP)` : "";
-    head = `<span class="no">\\u2717</span> עדיף היה ` +
-           `<span class="ltr">${{callHtml(v.accepted[0])}}${{gap}}</span> — בחרת ` +
+    head = `${{chip}} ${{band}} — עדיף היה ` +
+           `<span class="ltr">${{callHtml(v.accepted[0])}}${{gap}}</span>, בחרת ` +
            `<span class="ltr">${{callHtml(chosen)}}</span>`;
   }}
   document.getElementById("headline").innerHTML = head;
+  document.getElementById("scoreline").textContent = btScoreExplain(sp);
   const n = (P.quality && P.quality.n_samples) ||
             (P.generator && P.generator.n_deals) || 0;
   document.getElementById("subline").innerHTML =
@@ -1754,7 +1960,7 @@ function choose(action) {{
   reveal(action);
   const rec = window.BT.gradeBidding(P, action);
   window.BT.record(P.id, rec);
-  bumpSession(rec.correct, P.id);
+  bumpSession(rec.score, P.id);
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
 }}
@@ -1974,17 +2180,21 @@ function groupLabel(g) {
 function reveal(chosen) {
   const v = P.verdict, acc = acceptedFor(P, MODE);
   const rows = modeTable(P, MODE);
+  const sp = btScoreLead(P, chosen, MODE);
   document.querySelectorAll("button.cardbtn").forEach(b => {
     const a = b.dataset.action;
     if (acc.includes(a)) b.classList.add("good");
-    else if (a === chosen) b.classList.add("bad");
+    else if (a === chosen) b.classList.add(sp.score >= 65 ? "near" : "bad");
     if (a === chosen) b.classList.add("chosen");
     b.disabled = true;
   });
   const ok = acc.includes(chosen);
+  const chip = btScoreChipHtml(sp.score);
   document.getElementById("headline").innerHTML = ok
-    ? '<span class="ok">✓</span> הובלה מיטבית — <span class="ltr">' + cardHtml(chosen) + '</span>'
-    : '<span class="no">✗</span> עדיף היה <span class="ltr">' + acc.map(cardHtml).join(" / ") + '</span>';
+    ? chip + ' הובלה מיטבית — <span class="ltr">' + cardHtml(chosen) + '</span>'
+    : chip + ' ' + BAND_HE[btBandOf(sp.score)] + ' — עדיף היה <span class="ltr">' +
+      acc.map(cardHtml).join(" / ") + '</span>';
+  document.getElementById("scoreline").textContent = btScoreExplain(sp);
   document.getElementById("subhead").innerHTML = acc.length > 1
     ? "טובות באותה מידה: " + acc.map(cardHtml).join(", ") : "";
   // your lead vs the active mode's recommendation, and your rank in it
@@ -2112,7 +2322,7 @@ function commit(a) {
   reveal(a);
   const rec = window.BT.gradeLead(P, a, MODE);
   window.BT.record(P.id, rec);
-  bumpSession(rec.correct, P.id);
+  bumpSession(rec.score, P.id);
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
 }
@@ -2264,6 +2474,7 @@ def _lead_html() -> str:
         '<div id="verdict" class="card" style="display:none" role="status" '
         'aria-live="polite">\n'
         '<h2 class="headline" id="headline" tabindex="-1"></h2>\n'
+        '<div class="scoreline" id="scoreline"></div>\n'
         '<p class="muted" id="subhead"></p>\n'
         '<div id="resid"></div>\n'
         '<div id="bars"></div>\n'
@@ -2319,10 +2530,11 @@ _DASHBOARD_CSS = """
 
 _DASHBOARD_JS = r"""
 const MIN_N = 5, MIN_TREND = 8;
-// distribution-band thresholds; units differ by scenario AND, for leads, by
-// training mode (MP costs are tricks below best; IMP costs are IMPs below best)
-const COST = { bidding: {unit: "IMP", near: 2.0}, lead: {unit: "לקיחה", near: 1.0},
-               leadIMP: {unit: "IMP", near: 2.0} };
+// cost-line units differ by scenario AND, for leads, by training mode
+// (MP costs are tricks below best; IMP costs are IMPs below best). The
+// distribution band itself groups by the panel score, not by raw cost.
+const COST = { bidding: {unit: "IMP"}, lead: {unit: "לקיחה"},
+               leadIMP: {unit: "IMP"} };
 const SUIT_NAME = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
 const RANKS = "AKQJT98765432";
 function num(x) { return typeof x === "number" ? x : (parseFloat(x) || 0); }
@@ -2331,82 +2543,87 @@ function median(xs) {
   const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
-function wilson(k, n) {
-  if (!n) return {p: 0, lo: 0, hi: 0};
-  const z = 1.96, ph = k / n, z2 = z * z, den = 1 + z2 / n;
-  const c = (ph + z2 / (2 * n)) / den;
-  const h = z * Math.sqrt((ph * (1 - ph) + z2 / (4 * n)) / n) / den;
-  return {p: ph, lo: Math.max(0, c - h), hi: Math.min(1, c + h)};
+/* mean panel score with a 95% CI on the mean (replaces the Wilson
+   proportion — the aggregate is now an average of 0-100 scores) */
+function meanCI(xs) {
+  const n = xs.length;
+  const m = xs.reduce((s, x) => s + x, 0) / n;
+  const sd = n > 1
+    ? Math.sqrt(xs.reduce((s, x) => s + (x - m) * (x - m), 0) / (n - 1)) : 0;
+  const h = 1.96 * sd / Math.sqrt(n);
+  return {m, lo: Math.max(0, m - h), hi: Math.min(100, m + h)};
 }
-function pct(x) { return Math.round(x * 100) + "%"; }
 function tsMillis(a) {
   if (!a || !a.ts) return 0;
   if (typeof a.ts.toMillis === "function") return a.ts.toMillis();
   if (a.ts.seconds) return a.ts.seconds * 1000;
   return 0;
 }
-function row(label, k, n) {
+function row(label, scores) {
+  const n = scores.length;
   if (n < MIN_N)
     return `<div class="catrow"><span>${label}</span>` +
       `<span class="muted">אין מספיק נתונים</span>` +
-      `<span class="muted">${k}/${n}</span></div>`;
-  const w = wilson(k, n);
+      `<span class="muted">n=${n}</span></div>`;
+  const c = meanCI(scores);
   return `<div class="catrow"><span>${label}</span>` +
-    `<span class="dbar"><span style="width:${w.p * 100}%"></span></span>` +
-    `<span>${pct(w.p)} <span class="muted">(${pct(w.lo)}–${pct(w.hi)}, ` +
-    `n=${n})</span></span></div>`;
+    `<span class="dbar"><span style="width:${c.m}%"></span></span>` +
+    `<span>${Math.round(c.m)} <span class="muted">(${Math.round(c.lo)}–` +
+    `${Math.round(c.hi)}, n=${n})</span></span></div>`;
 }
 function diffRows(list) {
   const by = {};
   list.forEach(a => { const d = a.difficultyLevel || 0;
-    (by[d] ??= {k: 0, n: 0}); by[d].n++; if (a.correct) by[d].k++; });
+    (by[d] ??= []).push(btScoreOfAttempt(a)); });
   const out = [1, 2, 3, 4, 5].filter(d => by[d])
-    .map(d => row(DIFF_NAMES[d] || ("level " + d), by[d].k, by[d].n)).join("");
+    .map(d => row(DIFF_NAMES[d] || ("level " + d), by[d])).join("");
   return out || '<div class="muted">אין נתונים</div>';
 }
 function typeRows(list) {
   const by = {};
   list.forEach(a => { const t = a.type || "—";
-    (by[t] ??= {k: 0, n: 0}); by[t].n++; if (a.correct) by[t].k++; });
-  const es = Object.entries(by).sort((a, b) => b[1].n - a[1].n);
+    (by[t] ??= []).push(btScoreOfAttempt(a)); });
+  const es = Object.entries(by).sort((a, b) => b[1].length - a[1].length);
   return es.length
-    ? es.map(([t, s]) => row((TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t, s.k, s.n)).join("")
+    ? es.map(([t, s]) => row((TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t, s)).join("")
     : '<div class="muted">אין נתונים</div>';
 }
 function costBand(list, kind) {
   const cfg = COST[kind] || COST.bidding, n = list.length;
   if (!n) return "";
   let opt = 0, near = 0, bl = 0; const costs = [];
-  list.forEach(a => { const c = num(a.gradedCost); costs.push(c);
-    if (a.correct) opt++; else if (c < cfg.near) near++; else bl++; });
+  list.forEach(a => { costs.push(num(a.gradedCost));
+    const sc = btScoreOfAttempt(a);
+    if (sc >= 85) opt++; else if (sc >= 40) near++; else bl++; });
   const mean = costs.reduce((s, c) => s + c, 0) / n, med = median(costs), u = cfg.unit;
   const seg = (cls, v) => v
     ? `<span class="bseg ${cls}" style="width:${(v / n * 100).toFixed(1)}%">` +
       `${Math.round(v / n * 100)}%</span>` : "";
   return `<div class="costline">ממוצע <b>${mean.toFixed(1)}</b> ${u} מתחת למיטבי ` +
     `<span class="muted">(חציון ${med.toFixed(1)})</span></div>` +
-    `<div class="band" role="img" aria-label="מיטבי ${opt}, כמעט ${near}, ` +
+    `<div class="band" role="img" aria-label="מיטבי או קרוב ${opt}, סטייה ${near}, ` +
     `כשל ${bl} מתוך ${n}">` + seg("opt", opt) + seg("near", near) + seg("bl", bl) +
     '</div><div class="blegend">' +
-    '<span><i class="sw opt"></i>מיטבי</span>' +
-    `<span><i class="sw near"></i>כמעט (&lt;${cfg.near} ${u})</span>` +
-    `<span><i class="sw bl"></i>כשל (≥${cfg.near} ${u})</span></div>`;
+    '<span><i class="sw opt"></i>מיטבי או קרוב (ציון 85+)</span>' +
+    '<span><i class="sw near"></i>סטייה (40–84)</span>' +
+    '<span><i class="sw bl"></i>כשל (&lt;40)</span></div>';
 }
 function suitRows(list) {
-  const suits = {S: {k: 0, n: 0, c: {}}, H: {k: 0, n: 0, c: {}},
-                 D: {k: 0, n: 0, c: {}}, C: {k: 0, n: 0, c: {}}};
+  const suits = {S: {all: [], c: {}}, H: {all: [], c: {}},
+                 D: {all: [], c: {}}, C: {all: [], c: {}}};
   list.forEach(a => { const card = a.chosenCall || "", st = card[0], s = suits[st];
     if (!s) return;
-    s.n++; if (a.correct) s.k++;
-    (s.c[card] ??= {k: 0, n: 0}); s.c[card].n++; if (a.correct) s.c[card].k++; });
-  const order = ["S", "H", "D", "C"].filter(st => suits[st].n);
+    const sc = btScoreOfAttempt(a);
+    s.all.push(sc);
+    (s.c[card] ??= []).push(sc); });
+  const order = ["S", "H", "D", "C"].filter(st => suits[st].all.length);
   if (!order.length) return '<div class="muted">אין נתונים</div>';
   return order.map(st => {
     const s = suits[st], label = suitHtml(st) + " " + SUIT_NAME[st];
     const cards = Object.keys(s.c)
       .sort((a, b) => RANKS.indexOf(a[1]) - RANKS.indexOf(b[1]))
-      .map(c => row(cardHtml(c), s.c[c].k, s.c[c].n)).join("");
-    return '<details class="drill"><summary>' + row(label, s.k, s.n) + '</summary>' +
+      .map(c => row(cardHtml(c), s.c[c])).join("");
+    return '<details class="drill"><summary>' + row(label, s.all) + '</summary>' +
       '<div class="drillbody">' + cards + '</div></details>';
   }).join("");
 }
@@ -2431,21 +2648,22 @@ function scenarioCard(title, list, kind, costKey) {
 }
 function weakArea(scen) {
   let worst = null;
+  const mean = xs => xs.reduce((s, x) => s + x, 0) / xs.length;
   const bt = {};
   scen.bidding.forEach(a => { const t = a.type; if (!t) return;
-    (bt[t] ??= {k: 0, n: 0}); bt[t].n++; if (a.correct) bt[t].k++; });
-  for (const [t, s] of Object.entries(bt)) if (s.n >= MIN_N) {
-    const r = s.k / s.n;
-    if (!worst || r < worst.r) worst = {r, kind: "bidding",
+    (bt[t] ??= []).push(btScoreOfAttempt(a)); });
+  for (const [t, xs] of Object.entries(bt)) if (xs.length >= MIN_N) {
+    const m = mean(xs);
+    if (!worst || m < worst.m) worst = {m, kind: "bidding",
       label: (TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t,
       href: "index.html?kind=bidding&type=" + t};
   }
   const ld = {};
   scen.lead.forEach(a => { const d = a.difficultyLevel; if (!d) return;
-    (ld[d] ??= {k: 0, n: 0}); ld[d].n++; if (a.correct) ld[d].k++; });
-  for (const [d, s] of Object.entries(ld)) if (s.n >= MIN_N) {
-    const r = s.k / s.n;
-    if (!worst || r < worst.r) worst = {r, kind: "lead",
+    (ld[d] ??= []).push(btScoreOfAttempt(a)); });
+  for (const [d, xs] of Object.entries(ld)) if (xs.length >= MIN_N) {
+    const m = mean(xs);
+    if (!worst || m < worst.m) worst = {m, kind: "lead",
       label: "הובלה — " + (DIFF_NAMES[d] || d),
       href: "index.html?kind=lead&lv=" + d};
   }
@@ -2461,11 +2679,12 @@ function render(attempts) {
     return;
   }
   const first = attempts.filter(a => a.isFirstAttempt !== false);
-  const n = first.length, k = first.filter(a => a.correct).length;
-  const w = wilson(k, n);
+  const n = first.length;
+  const avgAll = n
+    ? first.reduce((s, a) => s + btScoreOfAttempt(a), 0) / n : 0;
   const recent = [...first].sort((a, b) => tsMillis(b) - tsMillis(a));
   let streak = 0;
-  for (const a of recent) { if (a.correct) streak++; else break; }
+  for (const a of recent) { if (btScoreOfAttempt(a) >= 100) streak++; else break; }
   // split first-attempts by scenario, and leads further by training mode
   // (cost units differ: MP grades in tricks, IMP in IMPs)
   const scen = {bidding: [], lead: []};
@@ -2474,37 +2693,37 @@ function render(attempts) {
   const leadIMP = scen.lead.filter(a => a.trainingMode === "IMP");
   const byKind = {};
   for (const a of first) { const kd = a.kind || "bidding";
-    (byKind[kd] ??= {k: 0, n: 0}); byKind[kd].n++; if (a.correct) byKind[kd].k++; }
+    (byKind[kd] ??= []).push(btScoreOfAttempt(a)); }
   const chrono = [...first].sort((a, b) => tsMillis(a) - tsMillis(b));
   let trend = "";
   if (chrono.length >= MIN_TREND) {
     let cum = 0; const pts = [];
-    chrono.forEach((a, i) => { cum += a.correct ? 1 : 0; pts.push(cum / (i + 1) * 100); });
+    chrono.forEach((a, i) => { cum += btScoreOfAttempt(a); pts.push(cum / (i + 1)); });
     const W = 300, H = 60, step = W / (pts.length - 1);
     const path = pts.map((y, i) =>
       `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
     const last = Math.round(pts[pts.length - 1]);
-    // cumulative accuracy plus a rolling window: the cumulative line flattens
-    // and hides recent change, so overlay a last-min(20, n/2) moving average
+    // cumulative mean score plus a rolling window: the cumulative line
+    // flattens and hides recent change, so overlay a last-min(20, n/2) window
     const win = Math.max(MIN_TREND, Math.min(20, Math.round(chrono.length / 2)));
     const roll = chrono.map((a, i) => {
       const lo = Math.max(0, i - win + 1);
-      let s = 0; for (let j = lo; j <= i; j++) s += chrono[j].correct ? 1 : 0;
-      return s / (i - lo + 1) * 100;
+      let s = 0; for (let j = lo; j <= i; j++) s += btScoreOfAttempt(chrono[j]);
+      return s / (i - lo + 1);
     });
     const rpath = roll.map((y, i) =>
       `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
-    trend = '<div class="card"><b>דיוק לאורך זמן</b> ' +
+    trend = '<div class="card"><b>ציון לאורך זמן</b> ' +
       '<span class="muted">(ניסיון ראשון)</span><br>' +
-      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="דיוק לאורך זמן, כעת ${last}%" style="width:100%;height:auto;margin-top:6px">` +
+      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ציון לאורך זמן, כעת ${last}" style="width:100%;height:auto;margin-top:6px">` +
       `<line x1="0" y1="${H - 30}" x2="${W}" y2="${H - 30}" stroke="#8884" ` +
       'stroke-dasharray="3"></line>' +
       `<path d="${rpath}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 3"></path>` +
       `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"></path>` +
       '</svg><div class="muted">' +
       '<span style="color:var(--accent)">■</span> מצטבר · ' +
-      '<span>▨</span> חלון אחרון (' + win + ') · קו מקווקו = 50% · כעת ' +
-      last + '%</div></div>';
+      '<span>▨</span> חלון אחרון (' + win + ') · קו מקווקו = ציון 50 · כעת ' +
+      last + '</div></div>';
   }
   const badge = m => {
     const t = TYPE_NAMES[m.type];
@@ -2513,12 +2732,12 @@ function render(attempts) {
       (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
         `${"★".repeat(d)}</span><span class="off">${"★".repeat(5 - d)}</span></span>` : "");
   };
-  const misses = recent.filter(a => !a.correct).slice(0, 10);
+  const misses = recent.filter(a => btScoreOfAttempt(a) < 85).slice(0, 10);
   const missList = misses.length
-    ? '<div class="card"><b>טעויות אחרונות</b> <span class="muted">(הקש לחזרה)</span>' +
+    ? '<div class="card"><b>לשיפור — החלטות מתחת ל־85</b> <span class="muted">(הקש לחזרה)</span>' +
       '<ul class="misslist">' + misses.map(m =>
         `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId)}">` +
-        `<div>${badge(m)}</div>` +
+        `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
         `<div style="margin-top:4px">בחרת <b class="ltr">${m.chosenCall}</b> — ` +
         `${OUTCOME_HE[m.outcomeClass] || m.outcomeClass}` +
         (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
@@ -2530,27 +2749,30 @@ function render(attempts) {
   const weak = weakArea(scen);
   const weakCard = weak
     ? '<div class="card"><b>מה כדאי לתרגל</b>' +
-      `<div style="margin:6px 0 8px">הנקודה החלשה שלך: <b>${weak.label}</b> (${pct(weak.r)}).</div>` +
+      `<div style="margin:6px 0 8px">הנקודה החלשה שלך: <b>${weak.label}</b> ` +
+      `(ציון ממוצע ${Math.round(weak.m)}).</div>` +
       `<a class="big" href="${weak.href}">תרגל 10 כאלה &larr;</a></div>`
     : "";
   const statCard =
     '<div class="card"><div class="statgrid">' +
-    `<div class="stat"><b>${n < MIN_N ? "—" : pct(w.p)}</b>` +
-    `<span class="muted">דיוק ניסיון ראשון</span></div>` +
-    `<div class="stat"><b>${streak}</b><span class="muted">רצף נוכחי</span></div>` +
+    `<div class="stat"><b>${n < MIN_N ? "—" : Math.round(avgAll)}</b>` +
+    `<span class="muted">ציון ממוצע</span></div>` +
+    `<div class="stat"><b>${streak}</b><span class="muted">רצף מיטבי</span></div>` +
     `<div class="stat"><b>${n}</b><span class="muted">בעיות שנענו</span></div>` +
     `<div class="stat"><b>${attempts.length}</b><span class="muted">סה"כ ניסיונות</span></div>` +
     '</div></div>';
   const byKindCard = '<div class="card"><b>לפי תרחיש</b>' +
     Object.keys(byKind).map(kd =>
-      row(kd === "lead" ? "הובלה" : "הכרזה", byKind[kd].k, byKind[kd].n)).join("") +
+      row(kd === "lead" ? "הובלה" : "הכרזה", byKind[kd])).join("") +
     '</div>';
   const footnote =
-    '<p class="footnote">ניסיון ראשון בלבד. אחוזים מוסתרים עד ' +
-    'לפחות ' + MIN_N + ' ניסיונות; הטווחים הם רווחי־סמך Wilson 95%. ' +
-    '“מתחת למיטבי” = ממוצע ה-IMP (הכרזה, או הובלה במצב IMP) או ' +
-    'הלקיחות (הובלה במצב MP) שאבדו ' +
-    'מול הפעולה המיטבית; תשובה נכונה נספרת כאפס.</p>';
+    '<p class="footnote">ניסיון ראשון בלבד. לכל החלטה ציון 0–100: ' +
+    '100 = הפעולה המיטבית (או שקולה לה), 0 = אפשרות שלא ניצחה באף חלוקה, ' +
+    'ובתווך הציון יורד עם העלות מול הפעולה המיטבית — IMP בהכרזה ובהובלת ' +
+    'IMP, לקיחות בהובלת MP — בסולם המותאם לתנודת הלוח. ' +
+    'ממוצעים מוסתרים עד לפחות ' + MIN_N + ' ניסיונות; הטווח בסוגריים הוא ' +
+    'רווח בר־סמך 95% של הממוצע. “מתחת למיטבי” = העלות הגולמית; ' +
+    'תשובה מיטבית נספרת כאפס.</p>';
   // three tabbed panels: overview / bidding / leads
   const tabs = [
     ["overview", "סקירה"], ["bidding", "הכרזה"], ["lead", "הובלה"],
