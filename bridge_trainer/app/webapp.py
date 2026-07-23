@@ -311,8 +311,15 @@ a.big, button.big { display: block; width: 100%; text-align: center;
   margin: 14px 0 6px; background: var(--gold); color: var(--on-gold);
   text-decoration: none; border: none; cursor: pointer; min-height: 52px; }
 details { margin: 6px 0 0; }
-details summary { cursor: pointer; color: var(--muted); font-size: 13px;
+/* summaries must LOOK tappable: link color + an explicit chevron (the
+   flex display below removes the native disclosure triangle) */
+details summary { cursor: pointer; color: var(--accent); font-size: 13px;
+                  font-weight: 600;
                   min-height: 40px; display: flex; align-items: center; }
+details summary::before { content: "\\25C2"; color: var(--accent);
+                          font-size: 11px; margin-inline-end: 7px;
+                          flex: 0 0 auto; }
+details[open] > summary::before { content: "\\25BE"; }
 .notes ul { margin: 4px 0 8px; padding-left: 18px; font-size: 13px; }
 .notes li { margin: 6px 0; line-height: 1.4; }
 table.plain { border-collapse: collapse; width: 100%; font-size: 13px;
@@ -545,7 +552,29 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
 }
 /* inline Hebrew jargon explainer */
 .infot { display: inline-block; margin-inline-start: 4px; color: var(--accent);
-         cursor: help; font-style: normal; font-size: 13px; }
+         font-style: normal; font-size: 13px;
+         background: none; border: 0; padding: 0; cursor: pointer; }
+/* tap-to-explain: a dotted underline marks any term that opens a gloss
+   card on tap — the same visual cue as tappable auction calls */
+button.gloss { background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; cursor: pointer;
+  text-decoration: underline dotted 1.5px; text-underline-offset: 3px;
+  text-decoration-color: var(--accent); }
+.scorechip[data-gloss] { cursor: pointer; }
+button.typebadge { font: inherit; cursor: pointer; }
+button.modechip { border: 0; font: inherit; cursor: pointer;
+  font-size: 12px; font-weight: 800; }
+#glossbox { position: fixed; inset-inline: 12px; z-index: 120;
+  bottom: calc(76px + env(safe-area-inset-bottom)); }
+.glosscard { background: var(--card); color: var(--fg);
+  border: 1px solid var(--accent); border-radius: 12px;
+  padding: 12px 14px; padding-inline-end: 46px; font-size: 14px;
+  line-height: 1.5; box-shadow: 0 6px 24px #0005; position: relative; }
+.glosscard b { margin-inline-end: 6px; }
+.glosscard b:empty { display: none; }
+.glosscard .x { position: absolute; inset-inline-end: 0; top: 0; width: 44px;
+  height: 44px; border: 0; background: none; color: var(--muted);
+  font-size: 16px; cursor: pointer; }
 /* confirm sheet stays reachable above the bottom nav */
 #confirm .confirmbox { position: sticky; bottom: 92px; z-index: 60;
                        box-shadow: 0 6px 24px #0004; }
@@ -712,7 +741,8 @@ function btScoreChipHtml(score, small) {
   const band = btBandOf(score);
   if (!band) return "";
   return '<span class="scorechip tone-' + BAND_TONE[band] +
-         (small ? ' sm' : '') + '" aria-label="ציון ' + score + ' מתוך 100">' +
+         (small ? ' sm' : '') + '" data-gloss="panel"' +
+         ' aria-label="ציון ' + score + ' מתוך 100">' +
          score + '</span>';
 }
 /* the transparency line: how the number came to be, in Hebrew */
@@ -777,62 +807,82 @@ const NOTE_HE = {
   "call meanings follow standard 2/1 game force":
     "משמעויות ההכרזות לפי שיטת 2/1 Game Force סטנדרטית.",
 };
-/* GIB convention-name glossary: the (closed, small) name vocabulary the
-   engine emits. Unmapped names stay English and are logged, so the map
-   converges over real pool data. */
-const CONV_HE = {
-  "stayman": "סטיימן", "puppet stayman": "פאפט סטיימן",
-  "jacoby transfer": "העברה (טרנספר)", "transfer": "העברה (טרנספר)",
-  "texas transfer": "העברת טקסס",
-  "blackwood": "בלאקווד", "rkc blackwood": "בלאקווד RKC",
-  "roman key card blackwood": "בלאקווד RKC", "gerber": "גרבר",
-  "cue bid": "קיו־ביד", "cuebid": "קיו־ביד", "cue-bid": "קיו־ביד",
-  "michaels cuebid": "מייקלס", "michaels": "מייקלס",
-  "unusual notrump": "2NT הלא־רגיל", "unusual nt": "2NT הלא־רגיל",
-  "lebensohl": "לבנסוהל", "lebensohl after double": "לבנסוהל אחרי כפל",
-  "negative double": "כפל שלילי", "takeout double": "כפל מוציא",
-  "takeout": "מוציא", "penalty double": "כפל עונשין",
-  "penalty": "עונשין", "responsive double": "כפל מגיב",
-  "support double": "כפל תמיכה", "reopening double": "כפל חידוש",
-  "optional double": "כפל אופציונלי", "lead-directing double": "כפל מכוון הובלה",
-  "splinter": "ספלינטר", "jacoby 2nt": "ג'קובי 2NT",
-  "drury": "דרורי", "reverse drury": "דרורי",
-  "fourth suit forcing": "סדרה רביעית מחייבת",
-  "new minor forcing": "מיינור חדש מחייב",
-  "overcall": "אוברקול", "jump overcall": "אוברקול בקפיצה",
-  "weak jump overcall": "אוברקול חלש בקפיצה",
-  "preempt": "מנע", "preemptive": "מנע", "weak two": "שתיים חלש",
-  "weak": "חלש", "strong": "חזק", "intermediate": "בינוני",
-  "invitational": "מזמין", "invitational or better": "מזמין ומעלה",
-  "game forcing": "מחייב למשחק מלא", "game force": "מחייב למשחק מלא",
-  "natural": "טבעי", "balanced": "מאוזנת", "semi-balanced": "חצי־מאוזנת",
-  "semibalanced": "חצי־מאוזנת",
-  "minimum": "מינימום", "maximum": "מקסימום",
-  "sign-off": "עצירה", "signoff": "עצירה", "to play": "לשחק",
-  "raise": "תמיכה", "simple raise": "תמיכה פשוטה",
-  "jump raise": "תמיכה בקפיצה", "limit raise": "תמיכה מזמינה",
-  "single raise": "תמיכה פשוטה", "constructive raise": "תמיכה בונה",
-  "new suit": "סדרה חדשה", "reverse": "ריוורס",
-  "opening bid": "פתיחה", "opening": "פתיחה", "response": "תשובה",
-  "rebid": "הכרזה שנייה", "sacrifice": "הקרבה",
-  "negative free bid": "הכרזה חופשית שלילית",
-  "free bid": "הכרזה חופשית", "trap pass": "פאס אורב",
-};
-const CONV_KEYS = Object.keys(CONV_HE).sort((a, b) => b.length - a.length);
-function hebName(name) {
-  if (!name) return name;
-  const key = name.toLowerCase().replace(/\\s+/g, " ").trim();
-  if (CONV_HE[key]) return CONV_HE[key];
-  for (const k of CONV_KEYS)          // longest-prefix word match:
-    if (key.startsWith(k + " "))      // "weak 5+!S" -> "חלש 5+!S"
-      return CONV_HE[k] + key.slice(k.length);
-  console.info("bt: untranslated convention name:", name);
-  return name;
-}
-/* inline Hebrew explainer for statistical jargon */
+/* Bid explanations stay in the engine's English (universal bridge
+   vocabulary) and render LTR via the .en/.shows styling — convention
+   names are deliberately NOT translated. */
+/* inline explainer for statistical jargon: tap to open the gloss card
+   (title-only tooltips are unreachable on touch screens) */
 function infoHtml(text) {
-  return '<span class="infot" role="img" tabindex="0" aria-label="' + text +
-         '" title="' + text + '">&#9432;</span>';
+  return '<button type="button" class="infot" data-glosstext="' + text +
+         '" aria-label="' + text + '">&#9432;</button>';
+}
+/* ===== tap-to-explain glossary =====
+   Any element carrying data-gloss="<key>" (a GLOSS entry) or
+   data-glosstext="<literal>" opens a floating explainer card above the
+   bottom nav; tapping the same term again, the X, or Escape closes it. */
+const GLOSS = {
+  ben: ["BEN", "מנוע הכרזות מבוסס למידת מכונה (Bridge Engine). האחוז " +
+    "מציין את ההסתברות שהמנוע היה בוחר בהכרזה זו."],
+  imp: ["IMP", "International Match Points \\u2014 סולם הניקוד במשחקי " +
+    "קבוצות: הפרש הנקודות מול תוצאת הייחוס מתורגם לסולם מדורג של עד 24 " +
+    "נקודות. כאן מוצג ממוצע על פני כל החלוקות המדומות."],
+  mp: ["MP", "Matchpoints \\u2014 ניקוד תחרות זוגות: התוצאה מושווית לכל " +
+    "שאר השולחנות, וכל לקיחה משנה. בהובלה, המטרה למקסם את הלקיחות בהגנה."],
+  dd: ["Double-dummy", "ניתוח ממוחשב שבו כל 52 הקלפים גלויים והמשחק " +
+    "מושלם משני הצדדים \\u2014 מדד ייחוס אובייקטיבי לכל חלוקה."],
+  sd: ["תוצאה מתוקנת", "כל אפשרות נבדקה על אותן חלוקות מדומות התואמות " +
+    "את המכרז; תיקון single-dummy מקרב את פתרון המחשב (שרואה את כל " +
+    "הקלפים) למשחק אנושי, שרואה רק יד אחת ודומם."],
+  panel: ["ציון", "ציון 0-100 לכל החלטה: 100 = הפעולה המיטבית או שקולה " +
+    "לה; ככל שהעלות מול המיטבית גדלה הציון יורד; 0 = אפשרות שלא ניצחה " +
+    "באף חלוקה מדומה."],
+  ev: ["IMP צפוי", "הפער הממוצע ב-IMP מול האפשרות המיטבית, על פני כל " +
+    "החלוקות המדומות. הסימן \\u00b1 הוא רווח בר-סמך של 95%."],
+  win: ["זכייה / שוויון / הפסד", "אחוז החלוקות המדומות שבהן האפשרות " +
+    "גוברת על האפשרות המיטבית האחרת, משתווה לה, או נופלת ממנה."],
+  tricks: ["לקיחות צפויות", "מספר הלקיחות הממוצע שההגנה לוקחת נגד החוזה, " +
+    "על פני כל החלוקות המדומות."],
+  set: ["סיכוי הכשלה", "אחוז החלוקות שבהן החוזה נכשל \\u2014 המכריז לא " +
+    "משיג את מספר הלקיחות הדרוש."],
+  diff: ["רמת קושי", "דירוג אוטומטי מ-1 (קל) עד 5 (מומחה) לפי מורכבות " +
+    "ההחלטה: גודל הפערים בין האפשרויות ורגישות התוצאה."],
+  streak: ["רצף מיטבי", "כמה מהתשובות האחרונות שלך קיבלו ציון 100 ברצף."],
+};
+let GLOSS_KEY = null;
+function hideGloss() {
+  GLOSS_KEY = null;
+  const b = document.getElementById("glossbox");
+  if (b) b.remove();
+}
+function showGloss(key, title, text) {
+  if (GLOSS_KEY === key) { hideGloss(); return; }   // second tap closes
+  hideGloss();
+  GLOSS_KEY = key;
+  const box = document.createElement("div");
+  box.id = "glossbox";
+  box.innerHTML = '<div class="glosscard" role="status"><b></b><span></span>' +
+    '<button type="button" class="x" aria-label="' + HE.close +
+    '">\\u2715</button></div>';
+  box.querySelector("b").textContent = title;
+  box.querySelector("span").textContent = text;
+  box.querySelector(".x").onclick = hideGloss;
+  document.body.appendChild(box);
+}
+document.addEventListener("click", ev => {
+  const g = ev.target.closest("[data-gloss], [data-glosstext]");
+  if (!g) return;
+  ev.preventDefault();          // gloss chips can sit inside links
+  if (g.dataset.gloss) {
+    const e = GLOSS[g.dataset.gloss];
+    if (e) showGloss(g.dataset.gloss, e[0], e[1]);
+  } else {
+    showGloss(g.dataset.glosstext, "", g.dataset.glosstext);
+  }
+});
+addEventListener("keydown", ev => { if (ev.key === "Escape") hideGloss(); });
+function glossHtml(key, label) {
+  return '<button type="button" class="gloss" data-gloss="' + key + '">' +
+         label + '</button>';
 }
 /* Deal filters. Everything is selected by default: an absent key means
    "the whole pool", and selecting every option again clears the key so the
@@ -1015,7 +1065,7 @@ function terse(card, call) {
       if (name.endsWith(" to !" + st))
         name = name.slice(0, -(" to !" + st).length);
   const frags = [];
-  if (name) frags.push(glyphify(hebName(name)));
+  if (name) frags.push(glyphify(name));
   const maxlen = card.maxlen || {};
   for (const [st, v] of suits) {
     const mx = (maxlen[st] === undefined) ? 13 : maxlen[st];
@@ -1200,12 +1250,13 @@ function typeBadgeHtml(p) {
   const t = p.classification && p.classification.type;
   const nm = TYPE_NAMES[t];
   if (!nm) return "";
-  return `<div><span class="typebadge" title="${nm[1]}">${nm[0]}</span></div>`;
+  return `<div><button type="button" class="typebadge" ` +
+    `data-glosstext="${nm[1]}">${nm[0]}</button></div>`;
 }
 function diffLineHtml(p) {
   const lv = p.classification && p.classification.difficulty_level;
   if (!lv || lv < 1 || lv > 5) return "";
-  return `<span>רמת קושי</span>` +
+  return glossHtml("diff", "רמת קושי") +
     `<span class="stars" role="img" aria-label="רמת קושי ${lv} מתוך 5">` +
     `<span class="on">${"\\u2605".repeat(lv)}</span>` +
     `<span class="off">${"\\u2605".repeat(5 - lv)}</span></span>` +
@@ -1785,9 +1836,12 @@ def _problem_html() -> str:
 <div class="subline" id="subline"></div>
 <div class="diffline" id="diffline"></div>
 <div id="fog"></div>
-<div class="legend"><i style="background:var(--win)"></i>זכייה
-<i style="background:var(--push)"></i>שוויון
-<i style="background:var(--loss)"></i>הפסד</div>
+<div class="legend"><i style="background:var(--win)"></i><button
+type="button" class="gloss" data-gloss="win">זכייה</button>
+<i style="background:var(--push)"></i><button type="button" class="gloss"
+data-gloss="win">שוויון</button>
+<i style="background:var(--loss)"></i><button type="button" class="gloss"
+data-gloss="win">הפסד</button></div>
 <div id="opts"></div>
 <details class="notes" id="more-box" style="display:none" open>
 <summary>כל האפשרויות שנבדקו</summary><div id="opts-more"></div></details>
@@ -1844,8 +1898,10 @@ function chipsHtml(row) {{
               `${{contractHtml(tok)}} ${{Math.round(share * 100)}}%</span>`);
   }}
   if (row.policy !== undefined)
-    bits.push(`<span>${{HE.engine}} ${{Math.round(row.policy * 100)}}%</span>`);
-  bits.push(`<span>${{HE.wins}} ${{Math.round(row.p_gain * 100)}}%</span>`);
+    bits.push(`<span>${{glossHtml("ben", HE.engine)}} ` +
+              `${{Math.round(row.policy * 100)}}%</span>`);
+  bits.push(`<span>${{glossHtml("win", HE.wins)}} ` +
+            `${{Math.round(row.p_gain * 100)}}%</span>`);
   return `<div class="chips">${{bits.join("")}}</div>`;
 }}
 function optRowHtml(row, i, chosen, accepted) {{
@@ -1905,10 +1961,8 @@ function reveal(chosen) {{
   const n = (P.quality && P.quality.n_samples) ||
             (P.generator && P.generator.n_deals) || 0;
   document.getElementById("subline").innerHTML =
-    `IMP \\u00b7 תוצאה מתוקנת` +
-    (n ? ` \\u00b7 ${{n}} חלוקות מדומות` : "") +
-    infoHtml("כל אפשרות נבדקה על אותן חלוקות מדומות התואמות את המכרז; " +
-      "\\u201cתיקון single-dummy\\u201d מקרב את פתרון המחשב למשחק אנושי.");
+    glossHtml("imp", "IMP") + " \\u00b7 " + glossHtml("sd", "תוצאה מתוקנת") +
+    (n ? ` \\u00b7 ${{n}} חלוקות מדומות` : "");
   document.getElementById("diffline").innerHTML = diffLineHtml(P);
   if (v.fog) document.getElementById("fog").innerHTML =
     '<div class="fog">\\u26a0 שתי שיטות ההערכה חלוקות כאן (\\u201cערפל ' +
@@ -1988,9 +2042,13 @@ function reveal(chosen) {{
   if (rows.length) {{
     const pct = x => (x === undefined || Number.isNaN(x))
       ? "\\u2014" : Math.round(x * 100) + "%";
-    let ct = "<tr><th>#</th><th>הכרזה</th><th>ציון</th>" +
-      '<th class="emph">IMP צפוי</th><th>זכייה</th><th>שוויון</th>' +
-      "<th>הפסד</th><th>BEN</th></tr>";
+    let ct = "<tr><th>#</th><th>הכרזה</th>" +
+      "<th>" + glossHtml("panel", "ציון") + "</th>" +
+      '<th class="emph">' + glossHtml("ev", "IMP צפוי") + "</th>" +
+      "<th>" + glossHtml("win", "זכייה") + "</th>" +
+      "<th>" + glossHtml("win", "שוויון") + "</th>" +
+      "<th>" + glossHtml("win", "הפסד") + "</th>" +
+      "<th>" + glossHtml("ben", "BEN") + "</th></tr>";
     rows.forEach((r, i) => {{
       const push = r.p_push !== undefined ? r.p_push
         : (r.p_gain !== undefined && r.p_loss !== undefined
@@ -2018,8 +2076,9 @@ function reveal(chosen) {{
   }}
   const rbox = document.getElementById("rtable");
   if (v.raw && v.raw.length) {{
-    let h = "<tr><th>הכרזה</th><th>EV (IMP)</th><th>זכייה</th>" +
-            "<th>הפסד</th></tr>";
+    let h = "<tr><th>הכרזה</th><th>" + glossHtml("ev", "EV (IMP)") +
+            "</th><th>" + glossHtml("win", "זכייה") + "</th>" +
+            "<th>" + glossHtml("win", "הפסד") + "</th></tr>";
     for (const c of v.raw)
       h += `<tr><td><span class="ltr">${{callHtml(c.bid)}}</span></td>` +
            `<td>${{c.ev >= 0 ? "+" : ""}}` +
@@ -2280,7 +2339,8 @@ function reveal(chosen) {
   const rec = recommendedFor(P, MODE);
   const myIdx = rows.findIndex(r => r.card === chosen);
   document.getElementById("resid").innerHTML =
-    '<div class="resultline">מצב: <b class="ltr">' + MODE_INFO[MODE].banner +
+    '<div class="resultline">מצב: <b class="ltr">' +
+    glossHtml(MODE === "IMP" ? "imp" : "mp", MODE_INFO[MODE].banner) +
     '</b> · <span class="modegoal">' + MODE_INFO[MODE].goal + '</span></div>' +
     '<div class="resultline">ההובלה שלך: <b class="ltr">' + cardHtml(chosen) + '</b></div>' +
     '<div class="resultline">ההובלה המומלצת (' + MODE_INFO[MODE].title +
@@ -2366,15 +2426,17 @@ function reveal(chosen) {
   if (!ok) { const y = noteFor(chosen); if (y) expl += "\n\n" + y; }
   document.getElementById("lead-expl").textContent = expl;
   const lv = (P.classification && P.classification.difficulty_level) || P.difficulty;
-  document.getElementById("difficulty").textContent = "רמת קושי " + lv + "/5";
+  document.getElementById("difficulty").innerHTML =
+    glossHtml("diff", "רמת קושי") + " " + lv + "/5";
   // ranked leads table: rank / lead / expected defensive tricks / expected
   // IMP value / set probability. The active mode's own metric column is the
   // leading (emphasized) one; every metric shows in BOTH modes.
   const mpEm = MODE === "MP" ? ' class="emph"' : "";
   const impEm = MODE === "IMP" ? ' class="emph"' : "";
   let rt = "<tr><th>#</th><th>קלף</th>" +
-    "<th" + mpEm + ">לקיחות צפויות</th><th" + impEm + ">IMP צפוי</th>" +
-    "<th>סיכוי הכשלה</th></tr>";
+    "<th" + mpEm + ">" + glossHtml("tricks", "לקיחות צפויות") + "</th>" +
+    "<th" + impEm + ">" + glossHtml("ev", "IMP צפוי") + "</th>" +
+    "<th>" + glossHtml("set", "סיכוי הכשלה") + "</th></tr>";
   rows.forEach((r, i) => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
     rt += "<tr" + g + "><td>" + (i + 1) + '</td><td><span class="ltr">' +
@@ -2468,8 +2530,9 @@ async function init() {
   // (contract, declarer, vulnerability, doubling status) — always visible.
   const info = MODE_INFO[MODE];
   document.getElementById("modebanner").innerHTML =
-    '<div class="modebanner"><span class="modechip">' + info.banner +
-    '</span><span class="modegoal">' + info.goal + '</span></div>' +
+    '<div class="modebanner"><button type="button" class="modechip" ' +
+    'data-gloss="' + (MODE === "IMP" ? "imp" : "mp") + '">' + info.banner +
+    '</button><span class="modegoal">' + info.goal + '</span></div>' +
     '<div class="ctline">חוזה <b class="ltr">' + callHtml(callPart) +
     '</b>' + dblTag + ' ע"י <b>' + P.declarer + '</b> · פגיעות: <b>' +
     vulLabel(P.vul) + '</b> · ' + dblText + '</div>' +
@@ -2497,8 +2560,8 @@ async function init() {
     openNote = +el.dataset.i;
     el.classList.add("open");
     const a = meanings[openNote] || {};
-    // prefer the terse Hebrew grammar (convention names glossed) over the
-    // raw English GIB prose, matching the bidding page
+    // prefer the terse grammar over the raw GIB prose, matching the
+    // bidding page; both stay English by design
     const note = a.card ? terse(a.card, a.call) : (a.text || "");
     box.innerHTML = '<div class="bidnote"><b><span class="ltr">' +
       cardHtml_or_call(a.call) + ' (' + (a.seat || "") + ')</span></b> ' +
@@ -2570,7 +2633,8 @@ def _lead_html() -> str:
         '<p class="footnote">קלפים שווים במדד המוביל — כולם נכונים.</p>'
         '</details>\n'
         '<p class="footnote">ההמלצות מבוססות על הגרלת ידיים נסתרות '
-        'וניתוח double-dummy; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>\n'
+        'וניתוח <button type="button" class="gloss" data-gloss="dd">'
+        'double-dummy</button>; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>\n'
         '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
         '</div>\n</main>\n<script>' + _SHARED_JS + _LEAD_JS + '</script>\n</body></html>'
@@ -2607,7 +2671,10 @@ _DASHBOARD_CSS = """
 .catrow { direction: rtl; }
 .catrow .dbar { direction: ltr; }
 .drill { border-top: 1px solid var(--line); }
-.drill > summary { cursor: pointer; padding: 2px 0; }
+/* drill rows are data rows, not captions — keep the text tone and let the
+   accent chevron alone signal that they expand */
+.drill > summary { cursor: pointer; padding: 2px 0; color: var(--fg);
+                   font-weight: 400; }
 .drill > summary .catrow { margin: 5px 0; }
 .drill .drillbody { padding: 0 1.6em 6px; }
 """
@@ -2683,7 +2750,8 @@ function costBand(list, kind) {
   const seg = (cls, v) => v
     ? `<span class="bseg ${cls}" style="width:${(v / n * 100).toFixed(1)}%">` +
       `${Math.round(v / n * 100)}%</span>` : "";
-  return `<div class="costline">ממוצע <b>${mean.toFixed(1)}</b> ${u} מתחת למיטבי ` +
+  const uHtml = u === "IMP" ? glossHtml("imp", "IMP") : u;
+  return `<div class="costline">ממוצע <b>${mean.toFixed(1)}</b> ${uHtml} מתחת למיטבי ` +
     `<span class="muted">(חציון ${med.toFixed(1)})</span></div>` +
     `<div class="band" role="img" aria-label="מיטבי או קרוב ${opt}, סטייה ${near}, ` +
     `כשל ${bl} מתוך ${n}">` + seg("opt", opt) + seg("near", near) + seg("bl", bl) +
@@ -2716,7 +2784,7 @@ function scenarioCard(title, list, kind, costKey) {
   const cfg = COST[costKey || kind] || COST.bidding;
   let html = '<div class="card scen"><b>' + title + '</b> ' +
     '<span class="muted">' + (kind === "lead" && cfg.unit !== "IMP"
-      ? "לקיחות" : "IMP") +
+      ? "לקיחות" : glossHtml("imp", "IMP")) +
     ' · n=' + list.length + '</span>' +
     costBand(list, costKey || kind) +
     '<div class="subh">לפי דרגת קושי</div>' + diffRows(list);
@@ -2840,8 +2908,9 @@ function render(attempts) {
   const statCard =
     '<div class="card"><div class="statgrid">' +
     `<div class="stat"><b>${n < MIN_N ? "—" : Math.round(avgAll)}</b>` +
-    `<span class="muted">ציון ממוצע</span></div>` +
-    `<div class="stat"><b>${streak}</b><span class="muted">רצף מיטבי</span></div>` +
+    `<span class="muted">${glossHtml("panel", "ציון ממוצע")}</span></div>` +
+    `<div class="stat"><b>${streak}</b>` +
+    `<span class="muted">${glossHtml("streak", "רצף מיטבי")}</span></div>` +
     `<div class="stat"><b>${n}</b><span class="muted">בעיות שנענו</span></div>` +
     `<div class="stat"><b>${attempts.length}</b><span class="muted">סה"כ ניסיונות</span></div>` +
     '</div></div>';

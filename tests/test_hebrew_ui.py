@@ -79,10 +79,12 @@ def test_glossary_uses_lakichot_not_trikim():
         assert "טריק" not in _visible_text(page)
 
 
-def test_convention_name_glossary_present():
+def test_no_convention_translation_table():
+    # bid explanations stay in the engine's English by design — the old
+    # convention-name glossary must not creep back in
     js = _index_html()
-    for name in ("סטיימן", "העברה (טרנספר)", "בלאקווד RKC", "כפל מוציא"):
-        assert name in js
+    for name in ("סטיימן", "בלאקווד", "לבנסוהל"):
+        assert name not in js
 
 
 # --------------------------------------------------------------------------
