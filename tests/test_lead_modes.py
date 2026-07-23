@@ -272,9 +272,13 @@ def test_lead_page_mode_banner_and_results():
 
 
 def test_methodology_note_exact():
+    import re
     note = ("ההמלצות מבוססות על הגרלת ידיים נסתרות "
             "וניתוח double-dummy; שיטת החישוב הפעילה קובעת את דירוג ההובלות.")
-    assert note in _lead_html()
+    # compare the VISIBLE copy: double-dummy is wrapped in a tap-to-explain
+    # button, so strip markup before matching
+    visible = re.sub(r"<[^>]+>", "", _lead_html())
+    assert note in visible
 
 
 def test_no_forbidden_wording_anywhere():
