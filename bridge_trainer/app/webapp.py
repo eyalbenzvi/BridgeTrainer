@@ -472,20 +472,31 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
 /* home: two scenario cards replace the segmented control */
 .scengrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
             margin: 0 0 12px; align-items: stretch; }
+/* both cards use OPAQUE backgrounds (a translucent tint would let the felt
+   bleed through and make the SELECTED card look muddy). Unselected recedes
+   via reduced opacity; selected pops with a solid accent border + ring. */
 .scencard { background: var(--card); color: var(--fg);
   border: 2px solid var(--line); border-radius: 14px; padding: 14px 12px;
-  cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+  cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+  opacity: .72; transition: opacity .12s, box-shadow .12s; }
 .scencard > b { font-size: 17px; }
 .scencard > small { color: var(--muted); font-size: 12px; line-height: 1.35; }
 .scencard .sccount { font-size: 12px; color: var(--muted); margin-top: 2px;
                      font-variant-numeric: tabular-nums; }
-.scencard[aria-checked="true"] { border-color: var(--accent);
-                                 background: var(--accent-tint); }
+.scencard[aria-checked="true"] { opacity: 1; border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
 .scencard[aria-checked="true"] > b { color: var(--accent); }
 .modepills { display: flex; gap: 6px; margin-top: 8px; }
 .modepills button.modecard { flex: 1; min-height: 0; padding: 8px;
-  border-radius: 10px; }
+  border-radius: 10px; background: var(--card); border: 1px solid var(--line);
+  opacity: .8; }
 .modepills button.modecard b { font-size: 15px; }
+/* selected pill: solid accent fill + white text — unambiguous on the card */
+.modepills button.modecard[aria-pressed="true"] { opacity: 1;
+  background: var(--accent); border-color: var(--accent); }
+.modepills button.modecard[aria-pressed="true"] b,
+.modepills button.modecard[aria-pressed="true"] small { color: #fff; }
 .scencard .modegoal { margin-top: 6px; direction: rtl; unicode-bidi: normal; }
 /* loading skeletons */
 .skl { height: 12px; border-radius: 6px; background: var(--line);
@@ -535,7 +546,7 @@ async function fetchIndex() {
    features add a key instead of an inline literal ===== */
 const HE = {
   brand: "מאמן הברידג'",
-  practice: "תרגול", progress: "התקדמות", account: "חשבון",
+  home: "בית", practice: "תרגול", progress: "התקדמות", account: "חשבון",
   skip: "דלג לתוכן", mainNav: "ניווט ראשי", settings: "הגדרות",
   theme: "ערכת נושא", themeSystem: "מערכת", themeLight: "בהיר",
   themeDark: "כהה", textSize: "גודל טקסט", sizeS: "רגיל", sizeL: "גדול",
@@ -1043,7 +1054,7 @@ const ICO = {
     'M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1"/></svg>',
 };
 const NAV_ITEMS = [
-  {id: "practice", href: "index.html", ico: ICO.spade, label: HE.practice},
+  {id: "practice", href: "index.html", ico: ICO.spade, label: HE.home},
   {id: "progress", href: "dashboard.html", ico: ICO.chart, label: HE.progress},
 ];
 function initChrome() {
