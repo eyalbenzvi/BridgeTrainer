@@ -170,20 +170,30 @@ def test_index_entries_carry_target_mode():
     assert index_entry(legacy)["target_mode"] == "MP"   # pre-split default
 
 
-def test_batch_progress_heartbeat(tmp_path):
-    # every PROGRESS_EVERY boards the batch logs a traceable one-liner,
-    # even when every board is a silent (detail-less) reject
+def test_batch_logs_only_status_every_5_accepted(tmp_path):
+    # the batch writes NOTHING per board — its only output is one status
+    # line each PROGRESS_EVERY *accepted* problems
     from bridge_trainer.engine.lead_maker import (PROGRESS_EVERY,
                                                   LeadOutcome,
                                                   _LeadBatchState)
     lines = []
-    state = _LeadBatchState(str(tmp_path), count=5, log=lines.append)
-    for seed in range(PROGRESS_EVERY):
-        state.absorb(LeadOutcome(seed, "rejected", "pre_obvious"))
-    beats = [ln for ln in lines if ln.startswith("progress:")]
-    assert len(beats) == 1
-    assert f"{PROGRESS_EVERY} boards scanned, 0/5 accepted" in beats[0]
-    assert "pre_obvious" in beats[0]
+    state = _LeadBatchState(str(tmp_path), count=20, log=lines.append)
+    # a long silent stretch of rejects (with detail) writes no lines at all
+    for seed in range(50):
+        state.absorb(LeadOutcome(seed, "rejected", "pre_obvious",
+                                 detail="pre_obvious contract=4HE"))
+    assert lines == []
+    # accepted boards emit one status line per PROGRESS_EVERY acceptances
+    for i in range(2 * PROGRESS_EVERY):
+        rec = {"schema": 1, "kind": "lead", "id": f"lead1-{i:08x}",
+               "created_at": "2026-01-01T00:00:00+00:00", "vul": "None",
+               "difficulty": 2, "classification": {}, "verdict": {}}
+        state.absorb(LeadOutcome(1000 + i, "accepted", "accepted", rec=rec,
+                                 detail=f"ACCEPTED {rec['id']}"))
+    assert len(lines) == 2
+    assert all(ln.startswith("progress:") for ln in lines)
+    assert f"{PROGRESS_EVERY}/20 accepted" in lines[0]
+    assert "pre_obvious" in lines[0]        # tallies still visible
 
 
 def test_cli_and_script_expose_the_split():
