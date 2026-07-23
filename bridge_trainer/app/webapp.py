@@ -2222,7 +2222,9 @@ function fmtPrimary(v, mode) {
   if (v === undefined || v === null) return "—";
   return mode === "IMP"
     ? (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2) + " IMP"
-    : (+v).toFixed(2) + " לק'";
+    : (+v).toFixed(2) + " לק׳";  // Hebrew geresh (bidi class R): an
+      // ASCII apostrophe is neutral and flips to the wrong side of the
+      // word inside the forced-LTR metric cells
 }
 /* the mode's ranked rows, best first (stored ranks; legacy rows fall back
    to the tricks order — legacy records are MP-only by construction) */
