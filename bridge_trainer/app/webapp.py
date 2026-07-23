@@ -272,6 +272,7 @@ button.cand.near::after { position: absolute; top: 2px; right: 6px;
 .legend i:first-child { margin-left: 0; }
 .opt { padding: 12px 4px; border-top: 1px solid var(--line); }
 .opt.mine { background: #C8102E0A; border-radius: 8px; }
+table.plain tr.mine td { background: #C8102E0A; }
 .opt .l1 { display: flex; align-items: center; gap: 8px; }
 .bidchip { min-width: 40px; height: 32px; border-radius: 6px;
            border: 1px solid var(--line); font-size: 16px; font-weight: 700;
@@ -342,6 +343,10 @@ button.cardbtn.near { border-color: var(--gold);
 .bartrack span.good { background: var(--win); }
 .barval { width: 6.2em; text-align: right; font-variant-numeric: tabular-nums;
   color: var(--muted); font-size: 12px; }
+/* fixed-width "(שלך)" slot on every row keeps all tracks the same length */
+.barrow .byou { flex: 0 0 auto; width: 2.9em; font-size: 12px;
+  color: var(--muted); }
+.barrow.mine { background: #C8102E0A; border-radius: 8px; }
 #bid-meaning { min-height: 1.2em; margin: 6px 0 0; }
 .headline { font-size: 22px; font-weight: 800; margin: 4px 0; }
 .headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
@@ -400,11 +405,21 @@ button.typerow { text-align: start; }
 .bidnote .x { right: auto; inset-inline-end: 0; }
 .notes ul { padding-left: 0; padding-inline-start: 18px; }
 table.plain th, table.plain td { text-align: start; }
+.legend i { margin: 0; margin-inline-start: 10px; margin-inline-end: 3px; }
+.legend i:first-child { margin-inline-start: 0; }
+button.typerow .tcount { text-align: end; }
 .barrow .barval { text-align: start; }
 /* bridge diagrams are LTR islands */
 .hand, .fulldeal, .leadgrid, table.bidding, .candidates,
 .wpl, .bartrack, .fdcompass { direction: ltr; }
+/* bid/contract tokens are Latin — pin their internal order too */
+.bidchip, .chip { direction: ltr; unicode-bidi: isolate; }
 .ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+/* engine explanations are English (or English-heavy) — render them LTR and
+   left-aligned so number ranges and prose don't reorder in the RTL page */
+.en { direction: ltr; unicode-bidi: isolate; text-align: left; }
+#explanation, #meanings { direction: ltr; unicode-bidi: isolate;
+  text-align: left; }
 
 
 /* non-color cue inside the win/push/loss bar */
@@ -476,7 +491,9 @@ button.modecard[aria-pressed="true"] b { color: var(--accent); }
 .modechip { display: inline-block; font-size: 12px; font-weight: 800;
   letter-spacing: .08em; color: #fff; background: var(--accent);
   border-radius: 999px; padding: 3px 10px; }
-.modegoal { font-size: 13px; color: var(--muted); direction: ltr;
+/* the goal sentence is Hebrew with embedded Latin jargon (IMP/MP) — keep an
+   RTL base direction and isolate it, or the whole sentence scrambles */
+.modegoal { font-size: 13px; color: var(--muted); direction: rtl;
   unicode-bidi: isolate; }
 .ctline { font-size: 14px; margin-top: 6px; }
 /* the active mode's primary metric is visually emphasized */
@@ -518,7 +535,7 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
   background: var(--accent); border-color: var(--accent); }
 .modepills button.modecard[aria-pressed="true"] b,
 .modepills button.modecard[aria-pressed="true"] small { color: #fff; }
-.scencard .modegoal { margin-top: 6px; direction: rtl; unicode-bidi: normal; }
+.scencard .modegoal { margin-top: 6px; }
 /* loading skeletons */
 .skl { height: 12px; border-radius: 6px; background: var(--line);
        margin: 12px 0; }
@@ -1772,7 +1789,7 @@ def _problem_html() -> str:
 <i style="background:var(--push)"></i>שוויון
 <i style="background:var(--loss)"></i>הפסד</div>
 <div id="opts"></div>
-<details class="notes" id="more-box" style="display:none">
+<details class="notes" id="more-box" style="display:none" open>
 <summary>כל האפשרויות שנבדקו</summary><div id="opts-more"></div></details>
 <div class="footnote" id="footnote"></div>
 <div class="footnote" id="source"></div>
@@ -1786,6 +1803,12 @@ def _problem_html() -> str:
 <details class="notes" id="prose-box" style="display:none">
 <summary>ניתוח מלא</summary><div id="explanation"
 style="white-space:pre-line;font-size:13px"></div></details>
+<details class="notes" id="cmp-box" style="display:none">
+<summary>טבלת השוואה: כל ההכרזות שנבדקו</summary>
+<table id="ctable" class="plain"></table>
+<p class="footnote">הציון בסולם הפאנל (0-100); עמודת ה־IMP היא הפער מול
+ההכרזה המיטבית, לאחר תיקון single-dummy; עמודת BEN — הסיכוי שמנוע ההכרזות
+היה בוחר בהכרזה זו.</p></details>
 <details class="notes" id="raw-box"><summary>נתוני double-dummy גולמיים</summary>
 <table id="rtable" class="plain"></table></details>
 </div>
@@ -1832,7 +1855,7 @@ function optRowHtml(row, i, chosen, accepted) {{
   const tags = (accepted.includes(row.bid)
                   ? '<span class="tag best">הטוב</span>' : "") +
                (row.bid === chosen ? '<span class="tag you">שלך</span>' : "");
-  const shows = row.shows ? `<span class="shows">${{row.shows}}</span>`
+  const shows = row.shows ? `<span class="shows en">${{row.shows}}</span>`
                           : '<span class="shows"></span>';
   const gp = Math.round(row.p_gain * 100), lp = Math.round(row.p_loss * 100);
   const bar = `<div class="wpl" role="img" aria-label="זכייה ` +
@@ -1909,14 +1932,17 @@ function reveal(chosen) {{
               "התייחס למספר המדויק בזהירות.");
   if (P.explanations && P.explanations.note) {{
     const note = P.explanations.note;
+    // an unmapped engine note stays English — isolate it so its final
+    // period doesn't jump to the front of the RTL line
     feet.push(NOTE_HE[note.toLowerCase().trim()] ||
-              note[0].toUpperCase() + note.slice(1) + ".");
+              `<span class="en">${{note[0].toUpperCase() + note.slice(1)}}.</span>`);
   }}
-  document.getElementById("footnote").textContent = feet.join(" ");
+  document.getElementById("footnote").innerHTML = feet.join(" ");
   if (P.source) {{
     const s = P.source;
     document.getElementById("source").innerHTML =
-      `יד אמיתית: <b>${{s.teams}}</b>, ${{s.event}}, לוח ${{s.board}}.`;
+      `יד אמיתית: <b class="en">${{s.teams}}</b>, ` +
+      `<span class="en">${{s.event}}</span>, לוח ${{s.board}}.`;
   }}
   // bid-by-bid review from the same terse grammar as the tap notes
   const items = [];
@@ -1925,8 +1951,9 @@ function reveal(chosen) {{
   P.auction.forEach((tok, j) => {{
     const who = seat === P.seat ? "אתה" : seat;
     if (NOTES[j])
-      items.push(`<li><b>${{who}} ${{callHtml(tok)}}</b> \\u2014 ` +
-                 `${{NOTES[j]}}</li>`);
+      items.push(`<li><b>${{who}} <span class="ltr">${{callHtml(tok)}}` +
+                 `</span></b> \\u2014 ` +
+                 `<span class="en">${{NOTES[j]}}</span></li>`);
     seat = seats[(seats.indexOf(seat) + 1) % 4];
   }});
   if (items.length) {{
@@ -1955,12 +1982,47 @@ function reveal(chosen) {{
   }} else {{
     document.getElementById("deal-box").style.display = "none";
   }}
+  // comparison table: rank / bid / panel score / IMP gap / win / push /
+  // loss for EVERY candidate — mirrors the ranked-leads table on the
+  // lead page
+  if (rows.length) {{
+    const pct = x => (x === undefined || Number.isNaN(x))
+      ? "\\u2014" : Math.round(x * 100) + "%";
+    let ct = "<tr><th>#</th><th>הכרזה</th><th>ציון</th>" +
+      '<th class="emph">IMP צפוי</th><th>זכייה</th><th>שוויון</th>' +
+      "<th>הפסד</th><th>BEN</th></tr>";
+    rows.forEach((r, i) => {{
+      const push = r.p_push !== undefined ? r.p_push
+        : (r.p_gain !== undefined && r.p_loss !== undefined
+            ? Math.max(0, 1 - r.p_gain - r.p_loss) : undefined);
+      const dead = (v.dead_options || []).some(d => d.bid === r.bid);
+      const tags = (v.accepted.includes(r.bid)
+                      ? ' <span class="tag best">הטוב</span>' : "") +
+        (r.bid === chosen ? ' <span class="tag you">שלך</span>' : "");
+      const ci = r.ci !== undefined ?
+        ` <small>\\u00b1${{(+r.ci).toFixed(1)}}</small>` : "";
+      const ev = (r.ev === undefined || r.ev === null) ? "\\u2014"
+        : (r.ev >= 0 ? "+" : "\\u2212") + Math.abs(+r.ev).toFixed(1) + ci;
+      ct += `<tr${{r.bid === chosen ? ' class="mine"' : ""}}` +
+        `${{v.accepted.includes(r.bid) ? ' style="font-weight:700"' : ""}}>` +
+        `<td>${{i + 1}}</td>` +
+        `<td><span class="ltr">${{callHtml(r.bid)}}` +
+        `${{dead ? "\\u2020" : ""}}</span>${{tags}}</td>` +
+        `<td>${{btScoreBidding(P, r.bid).score}}</td>` +
+        `<td class="ltr emph">${{ev}}</td>` +
+        `<td>${{pct(r.p_gain)}}</td><td>${{pct(push)}}</td>` +
+        `<td>${{pct(r.p_loss)}}</td><td>${{pct(r.policy)}}</td></tr>`;
+    }});
+    document.getElementById("ctable").innerHTML = ct;
+    document.getElementById("cmp-box").style.display = "block";
+  }}
   const rbox = document.getElementById("rtable");
   if (v.raw && v.raw.length) {{
     let h = "<tr><th>הכרזה</th><th>EV (IMP)</th><th>זכייה</th>" +
             "<th>הפסד</th></tr>";
     for (const c of v.raw)
-      h += `<tr><td>${{callHtml(c.bid)}}</td><td>${{c.ev >= 0 ? "+" : ""}}` +
+      h += `<tr><td><span class="ltr">${{callHtml(c.bid)}}</span></td>` +
+           `<td>${{c.ev >= 0 ? "+" : ""}}` +
            `${{c.ev}} \\u00b1 ${{c.ci}}</td>` +
            `<td>${{Math.round(c.p_gain * 100)}}%</td>` +
            `<td>${{Math.round(c.p_loss * 100)}}%</td></tr>`;
@@ -1992,7 +2054,8 @@ function arm(btn) {{
   const shows = OPTSHOWS[a];
   box.innerHTML = `<div class="card confirmbox"><div class="l1">` +
     `<span class="bidchip">${{callHtml(a)}}</span>` +
-    `<span class="shows">${{shows || "אין תיאור"}}</span></div>` +
+    (shows ? `<span class="shows en">${{shows}}</span>`
+           : `<span class="shows">אין תיאור</span>`) + `</div>` +
     `<button class="big" id="go">הכרז <span class="ltr">${{callHtml(a)}}</span></button></div>`;
   document.getElementById("go").onclick = () => {{
     ARMED = null; box.innerHTML = "";
@@ -2098,9 +2161,9 @@ async function init() {{
     el.classList.add("open");
     const seats = ["N", "E", "S", "W"];
     const seat = seats[(seats.indexOf(P.dealer) + openNote) % 4];
-    box.innerHTML = `<div class="bidnote"><b>` +
-      `${{callHtml(P.auction[openNote])}} (${{seat}})</b> ` +
-      `${{NOTES[openNote]}}` +
+    box.innerHTML = `<div class="bidnote"><b><span class="ltr">` +
+      `${{callHtml(P.auction[openNote])}} (${{seat}})</span></b> ` +
+      `<span class="en">${{NOTES[openNote]}}</span>` +
       `<button class="x" aria-label="${{HE.close}}">\\u2715</button></div>`;
     box.querySelector(".x").onclick = () => {{
       openNote = -1; box.innerHTML = "";
@@ -2169,7 +2232,9 @@ function fmtPrimary(v, mode) {
   if (v === undefined || v === null) return "—";
   return mode === "IMP"
     ? (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2) + " IMP"
-    : (+v).toFixed(2) + " לק'";
+    : (+v).toFixed(2) + " לק׳";  // Hebrew geresh (bidi class R): an
+      // ASCII apostrophe is neutral and flips to the wrong side of the
+      // word inside the forced-LTR metric cells
 }
 /* the mode's ranked rows, best first (stored ranks; legacy rows fall back
    to the tricks order — legacy records are MP-only by construction) */
@@ -2209,7 +2274,8 @@ function reveal(chosen) {
       acc.map(cardHtml).join(" / ") + '</span>';
   document.getElementById("scoreline").textContent = btScoreExplain(sp);
   document.getElementById("subhead").innerHTML = acc.length > 1
-    ? "טובות באותה מידה: " + acc.map(cardHtml).join(", ") : "";
+    ? 'טובות באותה מידה: <span class="ltr">' +
+      acc.map(cardHtml).join(", ") + '</span>' : "";
   // your lead vs the active mode's recommendation, and your rank in it
   const rec = recommendedFor(P, MODE);
   const myIdx = rows.findIndex(r => r.card === chosen);
@@ -2262,12 +2328,16 @@ function reveal(chosen) {
     const pct = maxv > minv
       ? Math.round(4 + 96 * (val - minv) / (maxv - minv))
       : 100;
-    const you = mine ? ' <span class="muted">(שלך)</span>' : "";
+    // "(שלך)" sits in a fixed-width slot present on EVERY row — a
+    // conditional flex item shortened only the chosen row's track,
+    // leaving its bar misaligned with the others
+    const you = '<span class="byou">' + (mine ? "(שלך)" : "") + '</span>';
     const mark = good ? '<span class="ok" aria-label="הטוב ביותר">✓</span> ' : "";
-    return '<div class="barrow"><span class="bl">' + mark + groupLabel(g) + '</span>' +
+    return '<div class="barrow' + (mine ? " mine" : "") + '"><span class="bl">' + mark +
+      '<span class="ltr">' + groupLabel(g) + '</span></span>' +
       '<span class="bartrack"><span class="' + (good ? "good" : "") +
       '" style="width:' + pct + '%"></span></span>' +
-      '<span class="barval ltr">' + fmtPrimary(val, MODE) + '</span>' + you + '</div>';
+      '<span class="barval">' + fmtPrimary(val, MODE) + '</span>' + you + '</div>';
   }).join("");
   // Card explanation, built here in Hebrew from the verdict numbers (the pool
   // stores an English phrasing we intentionally don't surface).
@@ -2297,18 +2367,18 @@ function reveal(chosen) {
   document.getElementById("lead-expl").textContent = expl;
   const lv = (P.classification && P.classification.difficulty_level) || P.difficulty;
   document.getElementById("difficulty").textContent = "רמת קושי " + lv + "/5";
-  // ranked leads table: rank / lead / primary metric / expected defensive
-  // tricks / expected IMP value / set probability. The active mode's primary
-  // metric column is emphasized; every metric shows in BOTH modes.
+  // ranked leads table: rank / lead / expected defensive tricks / expected
+  // IMP value / set probability. The active mode's own metric column is the
+  // leading (emphasized) one; every metric shows in BOTH modes.
   const mpEm = MODE === "MP" ? ' class="emph"' : "";
   const impEm = MODE === "IMP" ? ' class="emph"' : "";
-  let rt = "<tr><th>#</th><th>קלף</th><th>המדד המוביל</th>" +
+  let rt = "<tr><th>#</th><th>קלף</th>" +
     "<th" + mpEm + ">לקיחות צפויות</th><th" + impEm + ">IMP צפוי</th>" +
     "<th>סיכוי הכשלה</th></tr>";
   rows.forEach((r, i) => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
-    rt += "<tr" + g + "><td>" + (i + 1) + "</td><td>" + cardHtml(r.card) +
-      '</td><td class="ltr">' + fmtPrimary(primaryOf(r, MODE), MODE) + "</td>" +
+    rt += "<tr" + g + "><td>" + (i + 1) + '</td><td><span class="ltr">' +
+      cardHtml(r.card) + '</span></td>' +
       "<td" + mpEm + ">" + r.avg_def_tricks.toFixed(2) + "</td>" +
       '<td class="ltr' + (MODE === "IMP" ? " emph" : "") + '">' +
       (r.exp_imps === undefined ? "—"
@@ -2430,8 +2500,9 @@ async function init() {
     // prefer the terse Hebrew grammar (convention names glossed) over the
     // raw English GIB prose, matching the bidding page
     const note = a.card ? terse(a.card, a.call) : (a.text || "");
-    box.innerHTML = '<div class="bidnote"><b>' + cardHtml_or_call(a.call) +
-      ' (' + (a.seat || "") + ')</b> ' + note +
+    box.innerHTML = '<div class="bidnote"><b><span class="ltr">' +
+      cardHtml_or_call(a.call) + ' (' + (a.seat || "") + ')</span></b> ' +
+      '<span class="en">' + note + '</span>' +
       '<button class="x" aria-label="' + HE.close + '">✕</button></div>';
     box.querySelector(".x").onclick = () => {
       openNote = -1; box.innerHTML = "";
@@ -2589,7 +2660,7 @@ function diffRows(list) {
   list.forEach(a => { const d = a.difficultyLevel || 0;
     (by[d] ??= []).push(btScoreOfAttempt(a)); });
   const out = [1, 2, 3, 4, 5].filter(d => by[d])
-    .map(d => row(DIFF_NAMES[d] || ("level " + d), by[d])).join("");
+    .map(d => row(DIFF_NAMES[d] || ("רמה " + d), by[d])).join("");
   return out || '<div class="muted">אין נתונים</div>';
 }
 function typeRows(list) {
@@ -2619,7 +2690,7 @@ function costBand(list, kind) {
     '</div><div class="blegend">' +
     '<span><i class="sw opt"></i>מיטבי או קרוב (ציון 85+)</span>' +
     '<span><i class="sw near"></i>סטייה (40–84)</span>' +
-    '<span><i class="sw bl"></i>כשל (&lt;40)</span></div>';
+    '<span><i class="sw bl"></i>כשל (0–39)</span></div>';
 }
 function suitRows(list) {
   const suits = {S: {all: [], c: {}}, H: {all: [], c: {}},
@@ -2817,8 +2888,9 @@ function render(attempts) {
 async function init() {
   try { render(await window.BT.allAttempts()); }
   catch (e) {
-    document.getElementById("dash").textContent =
-      "לא ניתן לטעון את הנתונים שלך: " + e.message;
+    const el = document.getElementById("dash");
+    el.innerHTML = 'לא ניתן לטעון את הנתונים שלך: <span class="en"></span>';
+    el.querySelector(".en").textContent = e.message;
   }
 }
 if (window.BT) window.BT.start(init);
