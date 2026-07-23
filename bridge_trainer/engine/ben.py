@@ -114,6 +114,7 @@ class BenEngine:
         configuration["models"]["bba_our_cc"] = ""
         configuration["models"]["bba_their_cc"] = ""
         self.models = Models.from_conf(configuration, self.ben_home)
+        self._assert_rollout_encoder_per_sample()
         self.sampler = Sample.from_conf(configuration, verbose)
         # dds_max_threads=0 keeps DDS's default (one solver thread per
         # core); parallel forge workers pass cpu_count // workers so
@@ -122,6 +123,42 @@ class BenEngine:
         self.verbose = verbose
         self._conf_name = configuration["models"].get("name", "?")
         self.model_id = f"{self._conf_name} {os.path.basename(self.models.bidder_model.model_path) if hasattr(self.models.bidder_model, 'model_path') else 'BEN-21GF'}"
+
+    def _assert_rollout_encoder_per_sample(self):
+        """Refuse to run on a Ben checkout with the 0.8.5 rollout-encoder
+        regression (scripts/ben_rollout_context.patch).
+
+        Since upstream fdd6c78a, get_auction_binary_sampling given a numpy
+        auction matrix encodes SAMPLE 0's auction for every sample
+        (``auction[:, i][0]``). bidding_rollout feeds it exactly that matrix,
+        so once the sampled continuations diverge, every bid is predicted
+        against the wrong auction — partner passes hero's RKC 4NT, splinters
+        get raised as natural suits, and the published contract distributions
+        and EV gaps are garbage. Stock Ben masks this by bidding rollouts
+        with BBA; our pure-NN rollout is the only caller on the broken path,
+        so probe it here and fail fast instead of forging corrupted evidence.
+        """
+        import binary
+        from bidding import bidding as bb
+
+        n_cards = self.models.n_cards_bidding
+        hand = np.zeros((2, n_cards), dtype=np.float16)
+        hand[:, :4] = 1
+        rows = [["PAD_START", "1C", "PASS", "1S", "PASS"],
+                ["PAD_START", "1C", "PASS", "2C", "PASS"]]
+        auction_np = np.full((2, 12), bb.BID2ID["PAD_END"], dtype=np.int32)
+        for i, toks in enumerate(rows):
+            for j, t in enumerate(toks):
+                auction_np[i, j] = bb.BID2ID[t]
+        x = binary.get_auction_binary_sampling(
+            2, auction_np, 1, hand, [False, False], self.models, n_cards)
+        if np.array_equal(x[0], x[1]):
+            raise RuntimeError(
+                "This Ben checkout has the 0.8.5 rollout-encoder bug: "
+                "get_auction_binary_sampling encodes sample 0's auction for "
+                "every sample, corrupting all candidate rollouts. Re-run "
+                "scripts/setup_ben.sh (applies scripts/"
+                "ben_rollout_context.patch) before generating problems.")
 
     # -- bot construction ------------------------------------------------
     def bot(self, hand_pbn: str, seat_i: int, dealer_i: int,
