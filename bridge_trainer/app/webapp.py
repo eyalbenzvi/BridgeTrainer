@@ -1800,7 +1800,8 @@ style="white-space:pre-line;font-size:13px"></div></details>
 <summary>טבלת השוואה: כל ההכרזות שנבדקו</summary>
 <table id="ctable" class="plain"></table>
 <p class="footnote">הציון בסולם הפאנל (0-100); עמודת ה־IMP היא הפער מול
-ההכרזה המיטבית, לאחר תיקון single-dummy.</p></details>
+ההכרזה המיטבית, לאחר תיקון single-dummy; עמודת BEN — הסיכוי שמנוע ההכרזות
+היה בוחר בהכרזה זו.</p></details>
 <details class="notes" id="raw-box"><summary>נתוני double-dummy גולמיים</summary>
 <table id="rtable" class="plain"></table></details>
 </div>
@@ -1979,7 +1980,7 @@ function reveal(chosen) {{
       ? "\\u2014" : Math.round(x * 100) + "%";
     let ct = "<tr><th>#</th><th>הכרזה</th><th>ציון</th>" +
       '<th class="emph">IMP צפוי</th><th>זכייה</th><th>שוויון</th>' +
-      "<th>הפסד</th></tr>";
+      "<th>הפסד</th><th>BEN</th></tr>";
     rows.forEach((r, i) => {{
       const push = r.p_push !== undefined ? r.p_push
         : (r.p_gain !== undefined && r.p_loss !== undefined
@@ -2000,7 +2001,7 @@ function reveal(chosen) {{
         `<td>${{btScoreBidding(P, r.bid).score}}</td>` +
         `<td class="ltr emph">${{ev}}</td>` +
         `<td>${{pct(r.p_gain)}}</td><td>${{pct(push)}}</td>` +
-        `<td>${{pct(r.p_loss)}}</td></tr>`;
+        `<td>${{pct(r.p_loss)}}</td><td>${{pct(r.policy)}}</td></tr>`;
     }});
     document.getElementById("ctable").innerHTML = ct;
     document.getElementById("cmp-box").style.display = "block";
