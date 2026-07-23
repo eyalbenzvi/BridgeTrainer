@@ -343,6 +343,10 @@ button.cardbtn.near { border-color: var(--gold);
 .bartrack span.good { background: var(--win); }
 .barval { width: 6.2em; text-align: right; font-variant-numeric: tabular-nums;
   color: var(--muted); font-size: 12px; }
+/* fixed-width "(שלך)" slot on every row keeps all tracks the same length */
+.barrow .byou { flex: 0 0 auto; width: 2.9em; font-size: 12px;
+  color: var(--muted); }
+.barrow.mine { background: #C8102E0A; border-radius: 8px; }
 #bid-meaning { min-height: 1.2em; margin: 6px 0 0; }
 .headline { font-size: 22px; font-weight: 800; margin: 4px 0; }
 .headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
@@ -2324,13 +2328,16 @@ function reveal(chosen) {
     const pct = maxv > minv
       ? Math.round(4 + 96 * (val - minv) / (maxv - minv))
       : 100;
-    const you = mine ? ' <span class="muted">(שלך)</span>' : "";
+    // "(שלך)" sits in a fixed-width slot present on EVERY row — a
+    // conditional flex item shortened only the chosen row's track,
+    // leaving its bar misaligned with the others
+    const you = '<span class="byou">' + (mine ? "(שלך)" : "") + '</span>';
     const mark = good ? '<span class="ok" aria-label="הטוב ביותר">✓</span> ' : "";
-    return '<div class="barrow"><span class="bl">' + mark +
+    return '<div class="barrow' + (mine ? " mine" : "") + '"><span class="bl">' + mark +
       '<span class="ltr">' + groupLabel(g) + '</span></span>' +
       '<span class="bartrack"><span class="' + (good ? "good" : "") +
       '" style="width:' + pct + '%"></span></span>' +
-      '<span class="barval ltr">' + fmtPrimary(val, MODE) + '</span>' + you + '</div>';
+      '<span class="barval">' + fmtPrimary(val, MODE) + '</span>' + you + '</div>';
   }).join("");
   // Card explanation, built here in Hebrew from the verdict numbers (the pool
   // stores an English phrasing we intentionally don't surface).
@@ -2360,19 +2367,18 @@ function reveal(chosen) {
   document.getElementById("lead-expl").textContent = expl;
   const lv = (P.classification && P.classification.difficulty_level) || P.difficulty;
   document.getElementById("difficulty").textContent = "רמת קושי " + lv + "/5";
-  // ranked leads table: rank / lead / primary metric / expected defensive
-  // tricks / expected IMP value / set probability. The active mode's primary
-  // metric column is emphasized; every metric shows in BOTH modes.
+  // ranked leads table: rank / lead / expected defensive tricks / expected
+  // IMP value / set probability. The active mode's own metric column is the
+  // leading (emphasized) one; every metric shows in BOTH modes.
   const mpEm = MODE === "MP" ? ' class="emph"' : "";
   const impEm = MODE === "IMP" ? ' class="emph"' : "";
-  let rt = "<tr><th>#</th><th>קלף</th><th>המדד המוביל</th>" +
+  let rt = "<tr><th>#</th><th>קלף</th>" +
     "<th" + mpEm + ">לקיחות צפויות</th><th" + impEm + ">IMP צפוי</th>" +
     "<th>סיכוי הכשלה</th></tr>";
   rows.forEach((r, i) => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
     rt += "<tr" + g + "><td>" + (i + 1) + '</td><td><span class="ltr">' +
       cardHtml(r.card) + '</span></td>' +
-      '<td class="ltr">' + fmtPrimary(primaryOf(r, MODE), MODE) + "</td>" +
       "<td" + mpEm + ">" + r.avg_def_tricks.toFixed(2) + "</td>" +
       '<td class="ltr' + (MODE === "IMP" ? " emph" : "") + '">' +
       (r.exp_imps === undefined ? "—"
