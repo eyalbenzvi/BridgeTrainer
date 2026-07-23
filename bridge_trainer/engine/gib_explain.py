@@ -78,9 +78,16 @@ def _fetch(s: str) -> str:
     return meaning
 
 
-_EMPTY = {"text": "", "hcp": None, "minlen": {}, "maxlen": {}, "forcing": False}
+_EMPTY = {"text": "", "hcp": None, "pts": None, "minlen": {}, "maxlen": {},
+          "forcing": False}
 _SUIT_RANGE = re.compile(r"^(\d+)(?:-(\d+))?\s*([+-])?\s*!([CDHS])$", re.I)
 _HCP = re.compile(r"^(\d+)(?:-(\d+))?\s*([+-])?\s*HCP$", re.I)
+_PTS = re.compile(r"^(\d+)(?:-(\d+))?\s*([+-])?\s*total points$", re.I)
+# GIB also states suit length in prose; without these a gloss like
+# "biddable !C; 6+ HCP" rendered as just "6+", hiding the suit entirely
+_REBID = re.compile(r"^(twice rebiddable|rebiddable|biddable)\s*!([CDHS])$",
+                    re.I)
+_REBID_LEN = {"biddable": 4, "rebiddable": 5, "twice rebiddable": 6}
 
 
 def parse_meaning(m: str) -> dict:
@@ -117,6 +124,13 @@ def parse_meaning(m: str) -> dict:
             card["minlen"][st.upper()] = mn
             card["maxlen"][st.upper()] = mx
             continue
+        rm = _REBID.match(p)
+        if rm:
+            phrase, st = rm.group(1, 2)
+            st = st.upper()
+            card["minlen"][st] = max(card["minlen"].get(st, 0),
+                                     _REBID_LEN[phrase.lower()])
+            continue
         hm = _HCP.match(p)
         if hm:
             lo, hi, sign = hm.group(1, 2, 3)
@@ -130,9 +144,23 @@ def parse_meaning(m: str) -> dict:
             else:
                 card["hcp"] = (lo, lo)
             continue
+        pm = _PTS.match(p)
+        if pm:
+            lo, hi, sign = pm.group(1, 2, 3)
+            lo = int(lo)
+            if hi is not None:
+                card["pts"] = (lo, int(hi))
+            elif sign == "+":
+                card["pts"] = (lo, 40)
+            elif sign == "-":
+                card["pts"] = (0, lo)
+            else:
+                card["pts"] = (lo, lo)
+            continue
         if "forcing" in p.lower() or "game force" in p.lower():
             card["forcing"] = True
-    if not card["text"] and not card["minlen"] and card["hcp"] is None:
+    if not card["text"] and not card["minlen"] and card["hcp"] is None \
+            and card["pts"] is None:
         card["text"] = m.strip()  # nothing parsed — keep GIB's phrase verbatim
     return card
 

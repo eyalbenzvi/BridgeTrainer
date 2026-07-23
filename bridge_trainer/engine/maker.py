@@ -109,7 +109,7 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
     escalated, so `pre_*` counters alone can't see it)."""
     import numpy as np
 
-    from .explain import option_explanations, stem_explanations
+    from .explain import option_explanations
 
     t = {}
     t_board = time.perf_counter()
@@ -124,6 +124,29 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
                             detail=f"no dilemma [{t['scan_s']:.1f}s]")
     if not _round_trip_ok(spot):
         return BoardOutcome(seed, "rejected", "round_trip", timings=t)
+
+    # ---- explanation-consistency gate, cheap half (engine/explain_check):
+    # GIB's gloss for every stem call and offered option vs the ACTUAL
+    # cards. A stem that misdescribes the hand that bid it, or an option
+    # asserting specific cards the hero lacks (keycard counts, "!CQ"),
+    # kills the board before any rollout money is spent. Soft band
+    # stretches (hero shades the gloss's HCP) are kept as annotations —
+    # they ARE the training content. GIB fetches are cached, so the stem
+    # explanations computed here are reused for the published record.
+    from .explain import stem_explanations
+    from .explain_check import hand_violations
+    from .gib_explain import card_for_auction
+
+    stem_expl = stem_explanations(spot)
+    option_cards = {b: card_for_auction(spot.stem + [b])
+                    for b, _ in spot.candidates}
+    fatal, soft_gloss = hand_violations(
+        stem_expl, option_cards, spot.hands, spot.dealer_i, spot.hero_i)
+    if fatal:
+        return BoardOutcome(
+            seed, "rejected", "expl_vs_hand", timings=t,
+            detail="expl_vs_hand " + "; ".join(fatal[:3]) +
+                   (f" (+{len(fatal) - 3} more)" if len(fatal) > 3 else ""))
 
     hero_bot = engine.bot(spot.hands[spot.hero_i], spot.hero_i,
                           spot.dealer_i, spot.vul)
@@ -197,6 +220,26 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
                    f" ci={v.measured.get('ci')}"
                    f" [{t['scan_s']:.1f}+{t['verdict_s']:.1f}s]")
 
+    # ---- explanation-consistency gate, expensive half: Ben's MEASURED
+    # meaning of each stem call (sampled layouts) vs GIB's gloss. Catches
+    # conventions GIB narrates as something else entirely (Leaping
+    # Michaels glossed as a natural club overcall). Runs only here — on
+    # boards the statistical judge already accepted — so its sampling
+    # cost lands on ~1 board in 12.
+    from .explain_check import band_violations
+    try:
+        band_bad = band_violations(engine, spot, stem_expl)
+    except Exception as e:
+        return BoardOutcome(seed, "error", "expl_band_error", timings=t,
+                            detail=f"band check error "
+                                   f"({type(e).__name__}: {e})")
+    if band_bad:
+        return BoardOutcome(
+            seed, "rejected", "expl_vs_band", timings=t, audit=audit,
+            detail="expl_vs_band " + "; ".join(band_bad[:3]) +
+                   (f" (+{len(band_bad) - 3} more)"
+                    if len(band_bad) > 3 else ""))
+
     # ---- confirm at 4x samples: the published evidence (see the note
     # at CONFIRM_SAMPLES: a superset re-evaluation, not fresh samples;
     # its PBNs differ from the screen's, so dd_memo gets ~no hits here
@@ -219,12 +262,16 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
                    f"[{t['confirm_s']:.1f}s]")
 
     t_e = time.perf_counter()
-    stem_expl = stem_explanations(spot)
     opt_expl = option_explanations(spot, v, dict(spot.candidates), ev=ev)
     t["explain_s"] = time.perf_counter() - t_e
 
     elapsed = time.perf_counter() - t_board
     rec = build_record(spot, v, stem_expl, opt_expl, elapsed)
+    if soft_gloss:
+        # kept, not fatal: options whose GIB band the hero's hand shades
+        # (see explain_check.hand_violations) — available to the UI as
+        # "this call overstates/understates your hand" annotations.
+        rec["explanations"]["option_gloss_flags"] = soft_gloss
     verdict_txt = ("toss-up " + "/".join(rec["verdict"]["toss_up_set"])
                    ) if v.toss_up else v.best
     detail = (f"ACCEPTED {rec['id']} "
