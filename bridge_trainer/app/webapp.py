@@ -401,6 +401,9 @@ button.typerow { text-align: start; }
 .bidnote .x { right: auto; inset-inline-end: 0; }
 .notes ul { padding-left: 0; padding-inline-start: 18px; }
 table.plain th, table.plain td { text-align: start; }
+.legend i { margin: 0; margin-inline-start: 10px; margin-inline-end: 3px; }
+.legend i:first-child { margin-inline-start: 0; }
+button.typerow .tcount { text-align: end; }
 .barrow .barval { text-align: start; }
 /* bridge diagrams are LTR islands */
 .hand, .fulldeal, .leadgrid, table.bidding, .candidates,
@@ -1925,14 +1928,17 @@ function reveal(chosen) {{
               "התייחס למספר המדויק בזהירות.");
   if (P.explanations && P.explanations.note) {{
     const note = P.explanations.note;
+    // an unmapped engine note stays English — isolate it so its final
+    // period doesn't jump to the front of the RTL line
     feet.push(NOTE_HE[note.toLowerCase().trim()] ||
-              note[0].toUpperCase() + note.slice(1) + ".");
+              `<span class="en">${{note[0].toUpperCase() + note.slice(1)}}.</span>`);
   }}
-  document.getElementById("footnote").textContent = feet.join(" ");
+  document.getElementById("footnote").innerHTML = feet.join(" ");
   if (P.source) {{
     const s = P.source;
     document.getElementById("source").innerHTML =
-      `יד אמיתית: <b>${{s.teams}}</b>, ${{s.event}}, לוח ${{s.board}}.`;
+      `יד אמיתית: <b class="en">${{s.teams}}</b>, ` +
+      `<span class="en">${{s.event}}</span>, לוח ${{s.board}}.`;
   }}
   // bid-by-bid review from the same terse grammar as the tap notes
   const items = [];
@@ -2264,7 +2270,8 @@ function reveal(chosen) {
       acc.map(cardHtml).join(" / ") + '</span>';
   document.getElementById("scoreline").textContent = btScoreExplain(sp);
   document.getElementById("subhead").innerHTML = acc.length > 1
-    ? "טובות באותה מידה: " + acc.map(cardHtml).join(", ") : "";
+    ? 'טובות באותה מידה: <span class="ltr">' +
+      acc.map(cardHtml).join(", ") + '</span>' : "";
   // your lead vs the active mode's recommendation, and your rank in it
   const rec = recommendedFor(P, MODE);
   const myIdx = rows.findIndex(r => r.card === chosen);
@@ -2319,7 +2326,8 @@ function reveal(chosen) {
       : 100;
     const you = mine ? ' <span class="muted">(שלך)</span>' : "";
     const mark = good ? '<span class="ok" aria-label="הטוב ביותר">✓</span> ' : "";
-    return '<div class="barrow"><span class="bl">' + mark + groupLabel(g) + '</span>' +
+    return '<div class="barrow"><span class="bl">' + mark +
+      '<span class="ltr">' + groupLabel(g) + '</span></span>' +
       '<span class="bartrack"><span class="' + (good ? "good" : "") +
       '" style="width:' + pct + '%"></span></span>' +
       '<span class="barval ltr">' + fmtPrimary(val, MODE) + '</span>' + you + '</div>';
@@ -2362,8 +2370,9 @@ function reveal(chosen) {
     "<th>סיכוי הכשלה</th></tr>";
   rows.forEach((r, i) => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
-    rt += "<tr" + g + "><td>" + (i + 1) + "</td><td>" + cardHtml(r.card) +
-      '</td><td class="ltr">' + fmtPrimary(primaryOf(r, MODE), MODE) + "</td>" +
+    rt += "<tr" + g + "><td>" + (i + 1) + '</td><td><span class="ltr">' +
+      cardHtml(r.card) + '</span></td>' +
+      '<td class="ltr">' + fmtPrimary(primaryOf(r, MODE), MODE) + "</td>" +
       "<td" + mpEm + ">" + r.avg_def_tricks.toFixed(2) + "</td>" +
       '<td class="ltr' + (MODE === "IMP" ? " emph" : "") + '">' +
       (r.exp_imps === undefined ? "—"
@@ -2645,7 +2654,7 @@ function diffRows(list) {
   list.forEach(a => { const d = a.difficultyLevel || 0;
     (by[d] ??= []).push(btScoreOfAttempt(a)); });
   const out = [1, 2, 3, 4, 5].filter(d => by[d])
-    .map(d => row(DIFF_NAMES[d] || ("level " + d), by[d])).join("");
+    .map(d => row(DIFF_NAMES[d] || ("רמה " + d), by[d])).join("");
   return out || '<div class="muted">אין נתונים</div>';
 }
 function typeRows(list) {
@@ -2675,7 +2684,7 @@ function costBand(list, kind) {
     '</div><div class="blegend">' +
     '<span><i class="sw opt"></i>מיטבי או קרוב (ציון 85+)</span>' +
     '<span><i class="sw near"></i>סטייה (40–84)</span>' +
-    '<span><i class="sw bl"></i>כשל (&lt;40)</span></div>';
+    '<span><i class="sw bl"></i>כשל (0–39)</span></div>';
 }
 function suitRows(list) {
   const suits = {S: {all: [], c: {}}, H: {all: [], c: {}},
@@ -2873,8 +2882,9 @@ function render(attempts) {
 async function init() {
   try { render(await window.BT.allAttempts()); }
   catch (e) {
-    document.getElementById("dash").textContent =
-      "לא ניתן לטעון את הנתונים שלך: " + e.message;
+    const el = document.getElementById("dash");
+    el.innerHTML = 'לא ניתן לטעון את הנתונים שלך: <span class="en"></span>';
+    el.querySelector(".en").textContent = e.message;
   }
 }
 if (window.BT) window.BT.start(init);
