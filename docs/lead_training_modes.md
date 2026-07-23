@@ -78,7 +78,24 @@ acceptance gates run in (`engine/lead_verdict.py: MP_SCALE / IMP_SCALE`):
 | split-half stability | drift > 0.30 tricks | drift > 0.6 IMPs |
 | difficulty scale | trap decisive at 0.5 tricks, live suit within 0.5 | trap decisive at 1.0 IMPs, live suit within 1.0 |
 
-Run them with:
+### Running the generators on GitHub (the normal way)
+
+Problem creation runs on GitHub Actions — no local machine or Claude session
+needed. Open **Actions → "Forge lead problems" → Run workflow** and choose:
+
+* **mode** — `MP` or `IMP` (which generator's gates select the boards);
+* **count** — how many problems to generate;
+* optionally a seed and a time budget.
+
+The runner sets up the Ben engine itself (`scripts/setup_ben.sh`, cached
+between runs), talks to BBO's GIB service (`gibrest.bridgebase.com`) for the
+per-call auction interpretations, and pushes the finished problems straight
+to Firestore. One-time setup: add the Firebase service-account key JSON
+**content** as the `FIREBASE_SERVICE_ACCOUNT` repository secret
+(Settings → Secrets and variables → Actions). Runs are serialized so
+concurrent pushes never race the Firestore index.
+
+### Running locally (fallback)
 
 ```
 trainer lead-forge --mode MP  --count 20 --seed 1   # trick-decision boards
