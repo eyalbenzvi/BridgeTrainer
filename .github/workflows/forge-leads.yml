@@ -1,0 +1,123 @@
+name: Forge lead problems
+
+# Generates opening-lead problems on a GitHub-hosted runner and pushes them
+# straight to Firestore — no local machine needed. Run it from the Actions
+# tab ("Run workflow"): pick the training mode (MP or IMPs) and how many
+# problems to forge.
+#
+# What a run needs (all available on ubuntu-latest):
+#   * the Ben engine — cloned + built by scripts/setup_ben.sh (pinned commit,
+#     Python 3.12 venv with TensorFlow); cached between runs.
+#   * outbound HTTPS to BBO (gibrest.bridgebase.com) — GIB interprets each
+#     auction so every bid in a problem is explainable.
+#   * the FIREBASE_SERVICE_ACCOUNT repository secret — the Firebase
+#     service-account key JSON *content* (Settings → Secrets and variables →
+#     Actions). The push step fails with a clear error if it is missing.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Training mode to forge for"
+        type: choice
+        options: [MP, IMP]
+        default: MP
+        required: true
+      count:
+        description: "Number of problems to generate"
+        type: string
+        default: "24"
+        required: true
+      seed:
+        description: "RNG seed (blank = day-based default)"
+        type: string
+        default: ""
+        required: false
+      max_seconds:
+        description: "Generation time budget in seconds"
+        type: string
+        default: "6000"
+        required: false
+
+# Serialize runs: two concurrent pushes would race the Firestore index
+# update (read-union-write). Queued, never cancelled.
+concurrency:
+  group: forge-leads
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        env:
+          COUNT: ${{ inputs.count }}
+        run: |
+          case "$COUNT" in
+            ''|*[!0-9]*) echo "count must be a positive integer"; exit 1 ;;
+          esac
+          [ "$COUNT" -ge 1 ]
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The Ben engine (~GBs of models + a TensorFlow venv) is expensive to
+      # build; cache it keyed on the setup script (which pins the Ben commit).
+      - name: Cache Ben engine and venvs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/ben
+            ~/benv
+            ~/fbenv
+          key: ben-${{ runner.os }}-${{ hashFiles('scripts/setup_ben.sh') }}
+
+      - name: Forge ${{ inputs.count }} ${{ inputs.mode }} problems and push
+        # explicit bash => pipefail, so a forge failure isn't masked by tee
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          MODE: ${{ inputs.mode }}
+          COUNT: ${{ inputs.count }}
+          SEED: ${{ inputs.seed }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          PYTHON: python3.12
+        run: |
+          # empty optional inputs fall back to the script's own defaults
+          [ -z "$SEED" ] && unset SEED
+          [ -z "$MAX_SECONDS" ] && unset MAX_SECONDS
+          scripts/generate_and_push_leads.sh "$COUNT" 2>&1 | tee forge.log
+
+      - name: Job summary
+        if: always()
+        env:
+          MODE: ${{ inputs.mode }}
+          COUNT: ${{ inputs.count }}
+        run: |
+          {
+            echo "## Lead forge — mode $MODE, requested $COUNT"
+            echo
+            echo '```'
+            grep -E "^>> |^Done:|ACCEPTED |uploaded " forge.log | tail -40 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The generated JSON documents, for traceability/debugging (they are
+      # also in Firestore by now; the pool push skips docs already present).
+      - name: Upload forged problems
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forged-problems-${{ inputs.mode }}-${{ github.run_number }}
+          path: |
+            data/
+            forge.log
+          if-no-files-found: warn
+          retention-days: 30

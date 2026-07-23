@@ -17,12 +17,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..pool.store import ProblemPool
-from ..scoring.lead_metrics import (compute_lead_metrics, mode_rankings,
-                                    training_block)
+from ..scoring.lead_metrics import (TRAINING_MODES, compute_lead_metrics,
+                                    mode_rankings, training_block)
 from .conventions import (SEATS, contract_str, final_contract,
                           opening_leader)
 from .lead_classify import classify_contract
-from .lead_verdict import P_OBVIOUS, judge_lead, prejudge_lead
+from .lead_verdict import P_OBVIOUS, judge_lead_mode, prejudge_lead_mode
 from .scanner import VUL_NAMES, bid_out
 
 SCREEN_SAMPLES = 128    # full screen sample pool
@@ -30,6 +30,11 @@ CONFIRM_SAMPLES = 512   # published evidence
 PRESCREEN_STEPS = (32, 64)   # decisive rule-out checkpoints before full screen
 
 LEAD_SCHEMA = 2         # mode-aware lead records (MP + IMP metrics)
+
+# The generator is split by training mode: each target mode selects boards
+# with ITS OWN gates (MP: trick gaps; IMP: expected-IMP gaps) and stamps its
+# records with a distinct id prefix so the two pools never collide on a seed.
+ID_PREFIX = {"MP": "lead1", "IMP": "lead1i"}
 
 
 def _hand_ok(hand: str) -> bool:
@@ -39,7 +44,7 @@ def _hand_ok(hand: str) -> bool:
 
 def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
                       full_auction, le, verdict, auc_meanings,
-                      card_notes, elapsed) -> dict:
+                      card_notes, elapsed, target_mode: str = "MP") -> dict:
     # Mode-aware metrics: MP and IMP share the per-sample DD evidence in
     # `le.def_tricks`; only the ranking objective differs (scoring/lead_metrics).
     metrics = compute_lead_metrics(le.def_tricks, contract_str(fc),
@@ -71,18 +76,21 @@ def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
         "classification": {"difficulty_level": verdict.difficulty,
                            "type": classify_contract(
                                fc["level"], fc["denom"], fc["doubled"])},
-        "id": f"lead1-{seed:08x}",
+        "id": f"{ID_PREFIX[target_mode]}-{seed:08x}",
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "generator": {"engine": "ben BEN-21GF", "seed": seed,
                       "samples": le.n_samples,
+                      "target_mode": target_mode,
                       "elapsed_s": round(elapsed, 1)},
         "scoring_form": "tricks",
-        # evaluation/run metadata: algorithm version, per-mode ranking metric
-        # + goal, sample counts, and the IMP baseline (scoring/lead_metrics).
+        # evaluation/run metadata: algorithm version, the mode this board was
+        # forged for, per-mode ranking metric + goal, sample counts, and the
+        # IMP baseline (scoring/lead_metrics).
         "training": training_block(
             le.n_samples, {"screen": SCREEN_SAMPLES,
                            "confirm": CONFIRM_SAMPLES,
-                           "used": le.n_samples}),
+                           "used": le.n_samples},
+            target_mode=target_mode),
         "dealer": SEATS[dealer_i],
         "vul": VUL_NAMES[vul],
         "declarer": SEATS[fc["declarer_i"]],
@@ -131,7 +139,8 @@ class LeadOutcome:
 def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
                    require_doubled: bool = False,
                    doubled_min_gap: float = 0.0,
-                   doubled_apply_obvious: bool = False) -> LeadOutcome:
+                   doubled_apply_obvious: bool = False,
+                   target_mode: str = "MP") -> LeadOutcome:
     """The whole per-board pipeline: bid out -> final contract -> screening
     cascade (32/64/128) -> 512-sample confirm -> explanations. Self-contained
     so the sequential loop and the parallel workers share one implementation.
@@ -139,15 +148,24 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
     `audit_prescreen` is accepted for signature parity with maker.forge_one
     (the parallel harness passes it uniformly); leads have no prescreen audit.
 
+    `target_mode` splits the generator: "MP" selects boards whose SUIT CHOICE
+    matters in double-dummy tricks (the original gates); "IMP" selects boards
+    whose suit choice matters in EXPECTED IMPs from the final duplicate score
+    (same pipeline, IMP-unit gates — see lead_verdict.IMP_SCALE). Records are
+    stamped with the mode they were forged for and get a per-mode id prefix.
+
     `require_doubled` builds the ``lead_doubled`` category: keep ONLY doubled
     final contracts, and accept every one of them regardless of the C1 (P_OBVIOUS
-    obvious) / C2 (0.25-trick suit-indifferent) gates — leading against a
+    obvious) / C2 (suit-indifferent gap) gates — leading against a
     doubled contract is the skill being drilled, so the "interesting" filters
     deliberately do not apply. The double-dummy grade (best cards, difficulty)
     is still computed honestly; only the accept/reject gates are bypassed.
+    In IMP mode `doubled_min_gap` is measured in IMPs, not tricks.
     """
     from .lead_explain import auction_meanings, card_notes
 
+    if target_mode not in TRAINING_MODES:
+        raise ValueError(f"unknown target mode {target_mode!r}")
     t = {}
     t_board = time.perf_counter()
     try:
@@ -156,6 +174,13 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
         return LeadOutcome(seed, "error", "bid_error",
                            detail=f"bid error ({type(e).__name__}: {e})")
     t["bid_out_s"] = time.perf_counter() - t_board
+    vul_name = VUL_NAMES[vul]
+
+    def judge(le, force=False):
+        return judge_lead_mode(le, target_mode, vul=vul_name, force=force)
+
+    def prejudge(le):
+        return prejudge_lead_mode(le, target_mode, vul=vul_name)
 
     fc = final_contract(full_auction, dealer_i)
     if fc is None:
@@ -189,7 +214,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
         if not le.cards or le.n_samples == 0:
             return LeadOutcome(seed, "error", "no_samples", timings=t,
                                detail=f"no samples contract={contract}")
-        v = judge_lead(le, force=True)
+        v = judge(le, force=True)
         # optional C1 (P_OBVIOUS) "obvious" gate for doubled boards. Sum BEN's policy
         # over the tied-best set, but DEDUP by Ben's 32-card lead code: spot
         # cards (7..2) fold into one "low card per suit" slot and share a
@@ -206,8 +231,9 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
                     detail=f"obvious ben_best={best_mass:.2f} "
                            f"({'/'.join(v.best)}) contract={contract}")
         # optional cross-suit gap cut for doubled boards: require the best
-        # lead to beat the best DIFFERENT-suit lead by at least this many DD
-        # tricks (0.0 = accept every doubled board).
+        # lead to beat the best DIFFERENT-suit lead by at least this much in
+        # the target mode's unit — DD tricks for MP, expected IMPs for IMP
+        # (0.0 = accept every doubled board).
         gap = v.measured.get("gap", 0.0)
         if gap < doubled_min_gap:
             return LeadOutcome(
@@ -220,8 +246,10 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
         t["explain_s"] = time.perf_counter() - te
         elapsed = time.perf_counter() - t_board
         rec = build_lead_record(seed, hands, dealer_i, vul, fc, leader_i,
-                                hand, full_auction, le, v, auc, notes, elapsed)
-        detail = (f"ACCEPTED {rec['id']} lead {SEATS[leader_i]} vs {contract} "
+                                hand, full_auction, le, v, auc, notes,
+                                elapsed, target_mode=target_mode)
+        detail = (f"ACCEPTED {rec['id']} [{target_mode}] lead "
+                  f"{SEATS[leader_i]} vs {contract} "
                   f"(doubled) best={'/'.join(v.best)} "
                   f"gap={v.measured.get('gap')} diff={v.difficulty} "
                   f"[{elapsed:.1f}s]")
@@ -251,7 +279,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
         return LeadOutcome(seed, "rejected", "pre_obvious", timings=t)
     ruled = None
     for n in PRESCREEN_STEPS:
-        pv = prejudge_lead(grade(n))
+        pv = prejudge(grade(n))
         if pv:
             ruled = pv
             break
@@ -260,7 +288,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
     if ruled:
         return LeadOutcome(seed, "rejected", "pre_" + ruled, timings=t,
                            detail=f"pre_{ruled} contract={contract}")
-    v = judge_lead(le)
+    v = judge(le)
     if not v.accepted:
         return LeadOutcome(
             seed, "rejected", v.reason, timings=t,
@@ -274,7 +302,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
         return LeadOutcome(seed, "error", "confirm_error", timings=t,
                            detail=f"confirm error ({type(e).__name__}: {e})")
     t["confirm_s"] = time.perf_counter() - tc
-    v = judge_lead(le)
+    v = judge(le)
     if not v.accepted:
         return LeadOutcome(
             seed, "rejected", "confirm_" + v.reason, timings=t,
@@ -286,9 +314,11 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
     t["explain_s"] = time.perf_counter() - te
     elapsed = time.perf_counter() - t_board
     rec = build_lead_record(seed, hands, dealer_i, vul, fc, leader_i,
-                            hand, full_auction, le, v, auc, notes, elapsed)
-    detail = (f"ACCEPTED {rec['id']} lead {SEATS[leader_i]} vs {contract} "
-              f"best={'/'.join(v.best)} gap={v.measured.get('gap')} "
+                            hand, full_auction, le, v, auc, notes, elapsed,
+                            target_mode=target_mode)
+    detail = (f"ACCEPTED {rec['id']} [{target_mode}] lead {SEATS[leader_i]} "
+              f"vs {contract} best={'/'.join(v.best)} "
+              f"gap={v.measured.get('gap')} "
               f"diff={v.difficulty} [{elapsed:.1f}s]")
     return LeadOutcome(seed, "accepted", "accepted", rec=rec, timings=t,
                        detail=detail)
@@ -352,9 +382,12 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
                      max_seconds: float = 3600.0, log=print,
                      workers: int = 1, require_doubled: bool = False,
                      doubled_min_gap: float = 0.0,
-                     doubled_apply_obvious: bool = False) -> dict:
+                     doubled_apply_obvious: bool = False,
+                     target_mode: str = "MP") -> dict:
     pool_dir = os.path.abspath(pool_dir)   # before engine chdir's into ben
 
+    if target_mode not in TRAINING_MODES:
+        raise ValueError(f"unknown target mode {target_mode!r}")
     if workers == 0:
         # auto: each worker holds a ~1.2 GB engine — stay conservative
         workers = max(1, min(3, os.cpu_count() or 1))
@@ -364,7 +397,8 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
                                     log, workers, False, domain="lead",
                                     require_doubled=require_doubled,
                                     doubled_min_gap=doubled_min_gap,
-                                    doubled_apply_obvious=doubled_apply_obvious)
+                                    doubled_apply_obvious=doubled_apply_obvious,
+                                    target_mode=target_mode)
 
     from .ben import get_engine
 
@@ -379,7 +413,8 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
         state.absorb(forge_lead_one(
             engine, base_seed + k, require_doubled=require_doubled,
             doubled_min_gap=doubled_min_gap,
-            doubled_apply_obvious=doubled_apply_obvious))
+            doubled_apply_obvious=doubled_apply_obvious,
+            target_mode=target_mode))
         k += 1
 
     wall = time.perf_counter() - t0

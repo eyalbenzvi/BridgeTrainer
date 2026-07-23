@@ -14,6 +14,9 @@
 #
 # Usage:  scripts/generate_and_push_leads.sh [COUNT] [--key PATH]
 #   COUNT         problems to generate (default 96)
+#   MODE=MP|IMP   target training mode (default MP): which mode's gates
+#                 select the boards — MP forges trick-decision problems,
+#                 IMP forges score-swing (expected-IMP) problems
 #   SEED=...      override the RNG seed (default: day-based)
 #   MAX_SECONDS=… generation time budget (default 6000)
 set -euo pipefail
@@ -67,9 +70,11 @@ fi
 # WORKERS>1 runs board-level parallel workers (each holds a ~1.2 GB engine);
 # 0 = auto (min(3, cpus)). Default 3 to match the 4-core reference box.
 SEED="${SEED:-$(( $(date +%s) / 86400 ))000}"
-echo ">> forging $COUNT lead problems (seed $SEED, ${WORKERS:-3} workers)"
+MODE="${MODE:-MP}"
+echo ">> forging $COUNT lead problems (mode $MODE, seed $SEED, ${WORKERS:-3} workers)"
 BEN_HOME="$BEN_HOME" "$PY" -m bridge_trainer.app.cli \
-  lead-forge --count "$COUNT" --seed "$SEED" --pool "$REPO_DIR/data" \
+  lead-forge --mode "$MODE" --count "$COUNT" --seed "$SEED" \
+  --pool "$REPO_DIR/data" \
   --workers "${WORKERS:-3}" --max-seconds "${MAX_SECONDS:-6000}"
 
 # 4) Push the pool to Firestore (skips docs already present).
