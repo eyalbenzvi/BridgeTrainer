@@ -890,16 +890,29 @@ function poolFacets(index, kind) {
     levelCount, typeCount,
   };
 }
-/* turn stored (or absent) filters into concrete selected sets */
+/* turn stored (or absent) filters into concrete selected sets. A stored
+   selection is sanitized against the CURRENT pool: values that no longer
+   exist are dropped, and an axis that ends up empty falls back to "all" (the
+   pool default). This heals a stale/corrupt saved filter — e.g. an empty
+   `levels` (difficulty cleared, or an older string-vs-number format) that
+   matches no problems and would otherwise strand the home page on "0 of N"
+   with every category showing a 0 count. Coercion (Number/String) makes the
+   match robust to legacy filters that stored levels as strings. */
 function resolveFilters(index, raw, kind) {
   kind = kind || "bidding";
   const f = poolFacets(index, kind);
   const base = raw || {};
+  const pick = (stored, all, coerce) => {
+    if (!Array.isArray(stored)) return all.slice();
+    const allow = new Set(all);
+    const kept = stored.map(coerce).filter(v => allow.has(v));
+    return kept.length ? kept : all.slice();
+  };
   return {
     kind,
     mode: kind === "lead" ? leadMode() : null,
-    levels: Array.isArray(base.levels) ? base.levels : f.levels.slice(),
-    types: Array.isArray(base.types) ? base.types : f.types.slice(),
+    levels: pick(base.levels, f.levels, Number),
+    types: pick(base.types, f.types, String),
   };
 }
 function matchesFilters(p, f) {
