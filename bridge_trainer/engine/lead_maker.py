@@ -324,6 +324,9 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
                        detail=detail)
 
 
+PROGRESS_EVERY = 25     # boards between heartbeat lines (CI log tracing)
+
+
 class _LeadBatchState:
     """Aggregation shared by the sequential and parallel lead paths
     (mirrors maker._BatchState)."""
@@ -338,9 +341,22 @@ class _LeadBatchState:
         self.stage_totals = Counter()
         self.quotas = {"vuls": Counter(), "difficulty": Counter()}
         self.boards = 0
+        self.t0 = time.perf_counter()
+
+    def _progress(self) -> None:
+        """One-line heartbeat so a long batch is traceable from a CI log:
+        most boards are silent rejects (pre_obvious and friends carry no
+        detail line), which otherwise reads as a hang."""
+        mins = (time.perf_counter() - self.t0) / 60
+        top = ", ".join(f"{r} x{n}" for r, n in self.rejections.most_common(3))
+        self.log(f"progress: {self.boards} boards scanned, "
+                 f"{len(self.made)}/{self.count} accepted [{mins:.1f} min]"
+                 + (f"; top rejections: {top}" if top else ""))
 
     def absorb(self, out: LeadOutcome, tag: str = "") -> None:
         self.boards += 1
+        if self.boards % PROGRESS_EVERY == 0:
+            self._progress()
         for k, x in out.timings.items():
             self.stage_totals[k] += x
         if out.status in ("rejected", "error"):
@@ -391,6 +407,9 @@ def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
     if workers == 0:
         # auto: each worker holds a ~1.2 GB engine — stay conservative
         workers = max(1, min(3, os.cpu_count() or 1))
+    log(f"lead-forge: target {count} problems, mode {target_mode}, "
+        f"base seed {base_seed}, workers {workers}, "
+        f"budget {max_seconds:.0f}s")
     if workers > 1:
         from .parallel import forge_batch_parallel
         return forge_batch_parallel(pool_dir, count, base_seed, max_seconds,

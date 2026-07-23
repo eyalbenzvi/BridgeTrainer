@@ -89,6 +89,10 @@ jobs:
           SEED: ${{ inputs.seed }}
           MAX_SECONDS: ${{ inputs.max_seconds }}
           PYTHON: python3.12
+          # stream forge output line-by-line into the live Actions log —
+          # without this, Python buffers through the tee pipe and progress
+          # only appears in large late chunks
+          PYTHONUNBUFFERED: "1"
         run: |
           # empty optional inputs fall back to the script's own defaults
           [ -z "$SEED" ] && unset SEED
@@ -105,7 +109,8 @@ jobs:
             echo "## Lead forge — mode $MODE, requested $COUNT"
             echo
             echo '```'
-            grep -E "^>> |^Done:|ACCEPTED |uploaded " forge.log | tail -40 || true
+            grep -E "^>> |^Done:|^lead-forge:|progress: |ACCEPTED |uploaded " \
+              forge.log | tail -60 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
