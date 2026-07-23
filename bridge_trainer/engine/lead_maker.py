@@ -324,7 +324,7 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
                        detail=detail)
 
 
-PROGRESS_EVERY = 25     # boards between heartbeat lines (CI log tracing)
+PROGRESS_EVERY = 5      # boards between heartbeat lines (CI log tracing)
 
 
 class _LeadBatchState:
