@@ -36,14 +36,16 @@ def test_pushes_are_serialized_not_cancelled():
     assert wf["concurrency"]["cancel-in-progress"] is False
 
 
-def test_hourly_schedule_forges_ten_of_each_mode():
+def test_hourly_schedule_forges_twelve_of_each_mode():
     wf = _load()
-    assert [s["cron"] for s in wf[True]["schedule"]] == ["0 * * * *"]
+    # minute 23, not 0: top-of-hour cron firings are routinely dropped by
+    # GitHub's congested scheduler (observed: every other firing skipped)
+    assert [s["cron"] for s in wf[True]["schedule"]] == ["23 * * * *"]
     text = WF.read_text(encoding="utf-8")
     # each firing runs one MP batch then one IMP batch...
     assert "for M in MP IMP" in text
-    # ...of 10 problems each by default (repo variable FORGE_COUNT overrides)
-    assert '"${FORGE_COUNT:-10}"' in text
+    # ...of 12 problems each by default (repo variable FORGE_COUNT overrides)
+    assert '"${FORGE_COUNT:-12}"' in text
     assert "vars.FORGE_COUNT" in text
     # hour-based seeds so consecutive hours forge fresh boards
     assert "HOUR=$(( $(date +%s) / 3600 ))" in text

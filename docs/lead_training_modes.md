@@ -84,7 +84,7 @@ Problem creation runs on GitHub Actions — no local machine or Claude session
 needed.
 
 **Hourly schedule** — every hour the workflow forges one MP batch and one
-IMP batch (10 problems each by default) and pushes them to Firestore. Seeds
+IMP batch (12 problems each by default) and pushes them to Firestore. Seeds
 are hour-based, so every firing works fresh boards. Tune it with repository
 variables (Settings → Secrets and variables → Actions → Variables), no YAML
 edit needed: `FORGE_COUNT` (problems per mode per hour) and

@@ -4,7 +4,7 @@ name: Forge lead problems
 # straight to Firestore — no local machine needed.
 #
 # Two ways to run:
-#   * HOURLY SCHEDULE — every hour, one MP batch and one IMP batch (10
+#   * HOURLY SCHEDULE — every hour, one MP batch and one IMP batch (12
 #     problems each by default) forge back-to-back and push. Tune without
 #     editing this file via repository variables (Settings → Secrets and
 #     variables → Actions → Variables): FORGE_COUNT (problems per mode per
@@ -26,7 +26,10 @@ on:
     # hourly: each firing forges an MP batch then an IMP batch. Seeds are
     # hour-based (not the script's day-based default!) so consecutive hours
     # generate fresh boards instead of re-deriving the same day seed.
-    - cron: "0 * * * *"
+    # Minute 23, NOT 0: GitHub's cron infra is most congested at the top of
+    # the hour and routinely drops those firings (observed: every other
+    # hourly firing skipped); an off-peak minute fires far more reliably.
+    - cron: "23 * * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -112,12 +115,12 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            # hourly: one MP batch then one IMP batch, 10 problems each by
+            # hourly: one MP batch then one IMP batch, 12 problems each by
             # default. Hour-based seeds, far apart per mode, so no hour (and
             # no mode) rescans another's boards; a same-hour re-run just
             # skips its own duplicates.
             HOUR=$(( $(date +%s) / 3600 ))
-            N="${FORGE_COUNT:-10}"
+            N="${FORGE_COUNT:-12}"
             BUDGET="${FORGE_MAX_SECONDS:-1500}"
             rc=0
             for M in MP IMP; do
@@ -145,7 +148,7 @@ jobs:
           FORGE_COUNT: ${{ vars.FORGE_COUNT }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            HEAD="hourly MP + IMP, ${FORGE_COUNT:-10} problems each"
+            HEAD="hourly MP + IMP, ${FORGE_COUNT:-12} problems each"
           else
             HEAD="mode $MODE, requested $COUNT"
           fi
