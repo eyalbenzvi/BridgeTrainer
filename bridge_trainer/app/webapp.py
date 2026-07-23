@@ -272,6 +272,7 @@ button.cand.near::after { position: absolute; top: 2px; right: 6px;
 .legend i:first-child { margin-left: 0; }
 .opt { padding: 12px 4px; border-top: 1px solid var(--line); }
 .opt.mine { background: #C8102E0A; border-radius: 8px; }
+table.plain tr.mine td { background: #C8102E0A; }
 .opt .l1 { display: flex; align-items: center; gap: 8px; }
 .bidchip { min-width: 40px; height: 32px; border-radius: 6px;
            border: 1px solid var(--line); font-size: 16px; font-weight: 700;
@@ -404,7 +405,14 @@ table.plain th, table.plain td { text-align: start; }
 /* bridge diagrams are LTR islands */
 .hand, .fulldeal, .leadgrid, table.bidding, .candidates,
 .wpl, .bartrack, .fdcompass { direction: ltr; }
+/* bid/contract tokens are Latin — pin their internal order too */
+.bidchip, .chip { direction: ltr; unicode-bidi: isolate; }
 .ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+/* engine explanations are English (or English-heavy) — render them LTR and
+   left-aligned so number ranges and prose don't reorder in the RTL page */
+.en { direction: ltr; unicode-bidi: isolate; text-align: left; }
+#explanation, #meanings { direction: ltr; unicode-bidi: isolate;
+  text-align: left; }
 
 
 /* non-color cue inside the win/push/loss bar */
@@ -476,7 +484,9 @@ button.modecard[aria-pressed="true"] b { color: var(--accent); }
 .modechip { display: inline-block; font-size: 12px; font-weight: 800;
   letter-spacing: .08em; color: #fff; background: var(--accent);
   border-radius: 999px; padding: 3px 10px; }
-.modegoal { font-size: 13px; color: var(--muted); direction: ltr;
+/* the goal sentence is Hebrew with embedded Latin jargon (IMP/MP) — keep an
+   RTL base direction and isolate it, or the whole sentence scrambles */
+.modegoal { font-size: 13px; color: var(--muted); direction: rtl;
   unicode-bidi: isolate; }
 .ctline { font-size: 14px; margin-top: 6px; }
 /* the active mode's primary metric is visually emphasized */
@@ -518,7 +528,7 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
   background: var(--accent); border-color: var(--accent); }
 .modepills button.modecard[aria-pressed="true"] b,
 .modepills button.modecard[aria-pressed="true"] small { color: #fff; }
-.scencard .modegoal { margin-top: 6px; direction: rtl; unicode-bidi: normal; }
+.scencard .modegoal { margin-top: 6px; }
 /* loading skeletons */
 .skl { height: 12px; border-radius: 6px; background: var(--line);
        margin: 12px 0; }
@@ -1772,7 +1782,7 @@ def _problem_html() -> str:
 <i style="background:var(--push)"></i>שוויון
 <i style="background:var(--loss)"></i>הפסד</div>
 <div id="opts"></div>
-<details class="notes" id="more-box" style="display:none">
+<details class="notes" id="more-box" style="display:none" open>
 <summary>כל האפשרויות שנבדקו</summary><div id="opts-more"></div></details>
 <div class="footnote" id="footnote"></div>
 <div class="footnote" id="source"></div>
@@ -1786,6 +1796,11 @@ def _problem_html() -> str:
 <details class="notes" id="prose-box" style="display:none">
 <summary>ניתוח מלא</summary><div id="explanation"
 style="white-space:pre-line;font-size:13px"></div></details>
+<details class="notes" id="cmp-box" style="display:none">
+<summary>טבלת השוואה: כל ההכרזות שנבדקו</summary>
+<table id="ctable" class="plain"></table>
+<p class="footnote">הציון בסולם הפאנל (0-100); עמודת ה־IMP היא הפער מול
+ההכרזה המיטבית, לאחר תיקון single-dummy.</p></details>
 <details class="notes" id="raw-box"><summary>נתוני double-dummy גולמיים</summary>
 <table id="rtable" class="plain"></table></details>
 </div>
@@ -1832,7 +1847,7 @@ function optRowHtml(row, i, chosen, accepted) {{
   const tags = (accepted.includes(row.bid)
                   ? '<span class="tag best">הטוב</span>' : "") +
                (row.bid === chosen ? '<span class="tag you">שלך</span>' : "");
-  const shows = row.shows ? `<span class="shows">${{row.shows}}</span>`
+  const shows = row.shows ? `<span class="shows en">${{row.shows}}</span>`
                           : '<span class="shows"></span>';
   const gp = Math.round(row.p_gain * 100), lp = Math.round(row.p_loss * 100);
   const bar = `<div class="wpl" role="img" aria-label="זכייה ` +
@@ -1925,8 +1940,9 @@ function reveal(chosen) {{
   P.auction.forEach((tok, j) => {{
     const who = seat === P.seat ? "אתה" : seat;
     if (NOTES[j])
-      items.push(`<li><b>${{who}} ${{callHtml(tok)}}</b> \\u2014 ` +
-                 `${{NOTES[j]}}</li>`);
+      items.push(`<li><b>${{who}} <span class="ltr">${{callHtml(tok)}}` +
+                 `</span></b> \\u2014 ` +
+                 `<span class="en">${{NOTES[j]}}</span></li>`);
     seat = seats[(seats.indexOf(seat) + 1) % 4];
   }});
   if (items.length) {{
@@ -1955,12 +1971,47 @@ function reveal(chosen) {{
   }} else {{
     document.getElementById("deal-box").style.display = "none";
   }}
+  // comparison table: rank / bid / panel score / IMP gap / win / push /
+  // loss for EVERY candidate — mirrors the ranked-leads table on the
+  // lead page
+  if (rows.length) {{
+    const pct = x => (x === undefined || Number.isNaN(x))
+      ? "\\u2014" : Math.round(x * 100) + "%";
+    let ct = "<tr><th>#</th><th>הכרזה</th><th>ציון</th>" +
+      '<th class="emph">IMP צפוי</th><th>זכייה</th><th>שוויון</th>' +
+      "<th>הפסד</th></tr>";
+    rows.forEach((r, i) => {{
+      const push = r.p_push !== undefined ? r.p_push
+        : (r.p_gain !== undefined && r.p_loss !== undefined
+            ? Math.max(0, 1 - r.p_gain - r.p_loss) : undefined);
+      const dead = (v.dead_options || []).some(d => d.bid === r.bid);
+      const tags = (v.accepted.includes(r.bid)
+                      ? ' <span class="tag best">הטוב</span>' : "") +
+        (r.bid === chosen ? ' <span class="tag you">שלך</span>' : "");
+      const ci = r.ci !== undefined ?
+        ` <small>\\u00b1${{(+r.ci).toFixed(1)}}</small>` : "";
+      const ev = (r.ev === undefined || r.ev === null) ? "\\u2014"
+        : (r.ev >= 0 ? "+" : "\\u2212") + Math.abs(+r.ev).toFixed(1) + ci;
+      ct += `<tr${{r.bid === chosen ? ' class="mine"' : ""}}` +
+        `${{v.accepted.includes(r.bid) ? ' style="font-weight:700"' : ""}}>` +
+        `<td>${{i + 1}}</td>` +
+        `<td><span class="ltr">${{callHtml(r.bid)}}` +
+        `${{dead ? "\\u2020" : ""}}</span>${{tags}}</td>` +
+        `<td>${{btScoreBidding(P, r.bid).score}}</td>` +
+        `<td class="ltr emph">${{ev}}</td>` +
+        `<td>${{pct(r.p_gain)}}</td><td>${{pct(push)}}</td>` +
+        `<td>${{pct(r.p_loss)}}</td></tr>`;
+    }});
+    document.getElementById("ctable").innerHTML = ct;
+    document.getElementById("cmp-box").style.display = "block";
+  }}
   const rbox = document.getElementById("rtable");
   if (v.raw && v.raw.length) {{
     let h = "<tr><th>הכרזה</th><th>EV (IMP)</th><th>זכייה</th>" +
             "<th>הפסד</th></tr>";
     for (const c of v.raw)
-      h += `<tr><td>${{callHtml(c.bid)}}</td><td>${{c.ev >= 0 ? "+" : ""}}` +
+      h += `<tr><td><span class="ltr">${{callHtml(c.bid)}}</span></td>` +
+           `<td>${{c.ev >= 0 ? "+" : ""}}` +
            `${{c.ev}} \\u00b1 ${{c.ci}}</td>` +
            `<td>${{Math.round(c.p_gain * 100)}}%</td>` +
            `<td>${{Math.round(c.p_loss * 100)}}%</td></tr>`;
@@ -1992,7 +2043,8 @@ function arm(btn) {{
   const shows = OPTSHOWS[a];
   box.innerHTML = `<div class="card confirmbox"><div class="l1">` +
     `<span class="bidchip">${{callHtml(a)}}</span>` +
-    `<span class="shows">${{shows || "אין תיאור"}}</span></div>` +
+    (shows ? `<span class="shows en">${{shows}}</span>`
+           : `<span class="shows">אין תיאור</span>`) + `</div>` +
     `<button class="big" id="go">הכרז <span class="ltr">${{callHtml(a)}}</span></button></div>`;
   document.getElementById("go").onclick = () => {{
     ARMED = null; box.innerHTML = "";
@@ -2098,9 +2150,9 @@ async function init() {{
     el.classList.add("open");
     const seats = ["N", "E", "S", "W"];
     const seat = seats[(seats.indexOf(P.dealer) + openNote) % 4];
-    box.innerHTML = `<div class="bidnote"><b>` +
-      `${{callHtml(P.auction[openNote])}} (${{seat}})</b> ` +
-      `${{NOTES[openNote]}}` +
+    box.innerHTML = `<div class="bidnote"><b><span class="ltr">` +
+      `${{callHtml(P.auction[openNote])}} (${{seat}})</span></b> ` +
+      `<span class="en">${{NOTES[openNote]}}</span>` +
       `<button class="x" aria-label="${{HE.close}}">\\u2715</button></div>`;
     box.querySelector(".x").onclick = () => {{
       openNote = -1; box.innerHTML = "";
@@ -2430,8 +2482,9 @@ async function init() {
     // prefer the terse Hebrew grammar (convention names glossed) over the
     // raw English GIB prose, matching the bidding page
     const note = a.card ? terse(a.card, a.call) : (a.text || "");
-    box.innerHTML = '<div class="bidnote"><b>' + cardHtml_or_call(a.call) +
-      ' (' + (a.seat || "") + ')</b> ' + note +
+    box.innerHTML = '<div class="bidnote"><b><span class="ltr">' +
+      cardHtml_or_call(a.call) + ' (' + (a.seat || "") + ')</span></b> ' +
+      '<span class="en">' + note + '</span>' +
       '<button class="x" aria-label="' + HE.close + '">✕</button></div>';
     box.querySelector(".x").onclick = () => {
       openNote = -1; box.innerHTML = "";
