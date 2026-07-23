@@ -300,18 +300,6 @@ table.plain { border-collapse: collapse; width: 100%; font-size: 13px;
 table.plain th, table.plain td { border-top: 1px solid var(--line);
   padding: 6px 8px; text-align: left; }
 table.plain th { color: var(--muted); font-weight: 600; border-top: 0; }
-/* scenario switch: the site's top-level split (blue = bidding, gold = lead) */
-.scenaseg { display: flex; gap: 6px; background: var(--card); border-radius: 12px;
-  padding: 5px; margin: 0 0 12px; border: 1px solid var(--line); }
-.scenaseg button { flex: 1; border: 0; background: transparent; color: var(--muted);
-  border-radius: 9px; padding: 9px 6px; cursor: pointer; font-size: 15px;
-  font-weight: 700; display: flex; flex-direction: column; gap: 2px;
-  min-height: 52px; align-items: center; justify-content: center; }
-.scenaseg button small { font-weight: 400; font-size: 11px; opacity: .82; }
-.scenaseg button[data-kind="bidding"][aria-pressed="true"] {
-  background: var(--accent); color: #fff; }
-.scenaseg button[data-kind="lead"][aria-pressed="true"] {
-  background: var(--gold); color: var(--on-gold); }
 /* opening-lead answer grid: the hand IS the keypad, one row per suit */
 .leadgrid { margin: 12px 0; }
 .suitrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 5px 0; }
@@ -397,9 +385,6 @@ table.plain th, table.plain td { text-align: start; }
 .wpl, .bartrack, .fdcompass { direction: ltr; }
 .ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
 
-/* gold = commit only; selection uses accent (blue) on both scenarios */
-.scenaseg button[data-kind="lead"][aria-pressed="true"] {
-  background: var(--accent); color: #fff; }
 
 /* non-color cue inside the win/push/loss bar */
 .wpl { position: relative; height: 16px; }
@@ -456,7 +441,6 @@ table.plain th, table.plain td { text-align: start; }
 .state .em { font-size: 15px; color: var(--fg); font-weight: 700; margin-bottom: 4px; }
 
 /* ===== opening-lead training modes: MP / IMP selection + banner ===== */
-.modegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 button.modecard { font: inherit; text-align: start; background: var(--card);
   color: var(--fg); border: 2px solid var(--line); border-radius: 12px;
   padding: 12px; cursor: pointer; display: flex; flex-direction: column;
