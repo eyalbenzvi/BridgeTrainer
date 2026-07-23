@@ -1166,13 +1166,14 @@ def _index_html() -> str:
      aria-checked="false">
 <b>תרגול הובלה</b><small>איזה קלף להוביל נגד החוזה</small>
 <span class="sccount" id="count-lead"></span>
-<div class="modepills" id="modes" role="group" aria-label="שיטת חישוב" hidden>
+<div class="modepills" id="modes" role="group" aria-label="שיטת חישוב"
+     style="visibility:hidden">
 <button type="button" class="modecard" data-mode="MP" aria-pressed="true">
 <b>MP</b><small>מקסימום לקיחות בהגנה</small></button>
 <button type="button" class="modecard" data-mode="IMP" aria-pressed="false">
 <b>IMP</b><small>הפרשי תוצאה גדולים</small></button>
 </div>
-<div class="modegoal" id="modegoal" hidden></div>
+<div class="modegoal" id="modegoal" style="visibility:hidden"></div>
 </div>
 </div>
 <div class="card" id="filters">
@@ -1219,8 +1220,12 @@ function setScenario(kind) {{
   document.body.dataset.scenario = kind;
   document.querySelectorAll("#scenario .scencard").forEach(c =>
     c.setAttribute("aria-checked", c.dataset.kind === kind ? "true" : "false"));
-  document.getElementById("modes").hidden = kind !== "lead";
-  document.getElementById("modegoal").hidden = kind !== "lead";
+  // reserve the pills' space in both scenarios (visibility, not display) so
+  // the two cards keep one constant, equal height — toggling never shifts the
+  // layout. The pills only *appear* for the lead scenario.
+  const vis = kind === "lead" ? "visible" : "hidden";
+  document.getElementById("modes").style.visibility = vis;
+  document.getElementById("modegoal").style.visibility = vis;
   syncModeUi();
   FILTERS = resolveFilters(INDEX, loadCur(), kind);
   buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
