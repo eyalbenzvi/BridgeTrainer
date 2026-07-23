@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..pool.store import ProblemPool
+from ..scoring.lead_metrics import (compute_lead_metrics, mode_rankings,
+                                    training_block)
 from .conventions import (SEATS, contract_str, final_contract,
                           opening_leader)
 from .lead_classify import classify_contract
@@ -27,6 +29,8 @@ SCREEN_SAMPLES = 128    # full screen sample pool
 CONFIRM_SAMPLES = 512   # published evidence
 PRESCREEN_STEPS = (32, 64)   # decisive rule-out checkpoints before full screen
 
+LEAD_SCHEMA = 2         # mode-aware lead records (MP + IMP metrics)
+
 
 def _hand_ok(hand: str) -> bool:
     return hand.count(".") == 3 and \
@@ -36,8 +40,29 @@ def _hand_ok(hand: str) -> bool:
 def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
                       full_auction, le, verdict, auc_meanings,
                       card_notes, elapsed) -> dict:
+    # Mode-aware metrics: MP and IMP share the per-sample DD evidence in
+    # `le.def_tricks`; only the ranking objective differs (scoring/lead_metrics).
+    metrics = compute_lead_metrics(le.def_tricks, contract_str(fc),
+                                   VUL_NAMES[vul])
+    rankings = mode_rankings(metrics)
+
+    def card_row(base: dict) -> dict:
+        c = base["card"]
+        m, r = metrics[c], round
+        return {**base,
+                "exp_score": r(m["exp_score"], 1),
+                "exp_imps": r(m["exp_imps"], 2),
+                "set_prob": r(m["set_prob"], 3),
+                "rank_mp": rankings["MP"]["rank"][c],
+                "rank_imp": rankings["IMP"]["rank"][c],
+                "recommended_mp": c in rankings["MP"]["accepted"],
+                "recommended_imp": c in rankings["IMP"]["accepted"]}
+
+    by_mode = {mode: {k: rankings[mode][k] for k in
+                      ("ranking_metric", "recommended", "accepted")}
+               for mode in rankings}
     return {
-        "schema": 1,
+        "schema": LEAD_SCHEMA,
         "kind": "lead",
         # main's index reads difficulty_level + type from classification. Leads
         # carry their 1-5 difficulty and a category derived deterministically
@@ -52,6 +77,12 @@ def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
                       "samples": le.n_samples,
                       "elapsed_s": round(elapsed, 1)},
         "scoring_form": "tricks",
+        # evaluation/run metadata: algorithm version, per-mode ranking metric
+        # + goal, sample counts, and the IMP baseline (scoring/lead_metrics).
+        "training": training_block(
+            le.n_samples, {"screen": SCREEN_SAMPLES,
+                           "confirm": CONFIRM_SAMPLES,
+                           "used": le.n_samples}),
         "dealer": SEATS[dealer_i],
         "vul": VUL_NAMES[vul],
         "declarer": SEATS[fc["declarer_i"]],
@@ -60,15 +91,18 @@ def build_lead_record(seed, hands, dealer_i, vul, fc, leader_i, hand,
         "seat": SEATS[leader_i],          # lets shared UI helpers reuse it
         "hand": hand,
         "auction": list(full_auction),
-        "candidates": [{"card": r["card"],
-                        "avg_def_tricks": r["avg_def_tricks"],
-                        "ben_softmax": r["ben_softmax"]}
+        "candidates": [card_row({"card": r["card"],
+                                 "avg_def_tricks": r["avg_def_tricks"],
+                                 "ben_softmax": r["ben_softmax"]})
                        for r in verdict.table],
         "verdict": {
             "accepted": list(verdict.best),
+            # per-mode recommendation: MP ranks by expected defensive tricks,
+            # IMP by expected IMP value — never by the universal trick average.
+            "by_mode": by_mode,
             "gap": verdict.measured.get("gap"),
             "n_samples": le.n_samples,
-            "table": verdict.table,
+            "table": [card_row(r) for r in verdict.table],
             "flags": verdict.flags,
         },
         "difficulty": verdict.difficulty,

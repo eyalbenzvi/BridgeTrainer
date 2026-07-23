@@ -1,0 +1,76 @@
+# Opening Lead Trainer: MP and IMP training modes
+
+The Opening Lead Trainer has exactly **two** sections:
+
+1. **Matchpoints (MP)** — *Prioritize maximum defensive tricks.*
+   Goal: maximize expected defensive tricks.
+2. **IMPs** — *Prioritize score swings.*
+   Goal: maximize expected IMP value from the final score.
+
+Both modes share the SAME evidence pipeline — deal generation, the
+auction-consistency sampler, and double-dummy analysis
+(`engine.lead_evaluate` → per-card, per-sample defensive-trick arrays).
+**Only the ranking objective differs.** Every candidate lead always carries
+all four aggregate metrics, in both modes:
+
+| metric            | meaning                                                    |
+|-------------------|------------------------------------------------------------|
+| `avg_def_tricks`  | expected defensive tricks (the MP ranking metric)          |
+| `exp_score`       | expected duplicate score, defenders' perspective           |
+| `exp_imps`        | expected IMP value vs the baseline (the IMP ranking metric)|
+| `set_prob`        | probability the defense beats the contract                 |
+
+The UI shows all metrics in both modes and visually emphasizes the active
+mode's primary metric. Ranking is implemented once, centrally, in
+`bridge_trainer/scoring/lead_metrics.py`:
+
+* **MP** sorts by `exp_def_tricks` descending;
+* **IMP** sorts by `exp_imps` descending — never by the trick average;
+* ties break deterministically: expected score, then fixed suit-then-rank
+  card order.
+
+## The IMP baseline
+
+Converting a duplicate score to IMPs needs a reference score. No IMP
+baseline existed for lead problems before algorithm version 2 (leads were
+graded on tricks only; the bidding pipeline's pairwise action comparison has
+no analogue for a 13-way lead choice), so one centralized, configurable
+baseline was introduced — `scoring.lead_metrics.LEAD_IMP_BASELINE`:
+
+> **`datum_mean_v1`** — a Butler-style datum. On each sampled layout, the
+> baseline score is the **mean defender score across all candidate leads on
+> that same layout**; a lead's per-sample IMP value is
+> `imps(lead_score − datum)` and its expected IMP value is the (weighted)
+> mean over samples.
+
+To change it, swap `LEAD_IMP_BASELINE` (bumping its `version`) or pass
+`baseline=` to `compute_lead_metrics`. The baseline metadata is persisted in
+every record's `training.modes.IMP.imp_baseline`, so stored records are
+self-describing. Score→IMP conversion reuses the golden-tested
+`scoring.tables` (`contract_score`, `imps_array`).
+
+## Persistence
+
+* **Attempts** (`users/{uid}/attempts/*`) store `trainingMode` (`"MP"` /
+  `"IMP"`), `rankingMetric`, `chosenRank`, `recommendedLead`,
+  `primaryValue`, and the mode's accepted set (`bt-firebase.js: gradeLead`).
+* **Problem records** (schema 2, `engine/lead_maker.py`) store a `training`
+  block — algorithm version, sample counts, per-mode ranking metric + goal,
+  IMP baseline — plus per-lead aggregates on every candidate/table row:
+  `rank_mp`, `rank_imp`, `recommended_mp`, `recommended_imp`,
+  `avg_def_tricks`, `exp_score`, `exp_imps`, `set_prob`, and
+  `verdict.by_mode.{MP,IMP}.{ranking_metric,recommended,accepted}`.
+* **Index entries** for lead problems carry `modes` (`["MP"]` or
+  `["MP","IMP"]`); the web app's IMP section only offers problems whose
+  index entry includes `"IMP"`.
+
+## Legacy records (algorithm version 1)
+
+Pre-mode lead records store only per-card trick AVERAGES — no per-sample
+evidence — so their IMP metrics cannot be reconstructed and they can serve
+**MP only**. The migration `trainer pool backfill-training` stamps them with
+`training = {algorithm_version: 1, modes: {MP: …}}` and rebuilds the index
+with mode flags. They stay fully readable; opened in IMP mode they fall back
+to MP with a visible notice, and the old universal trick ranking never
+determines an IMP recommendation. Newly forged problems
+(`trainer lead-forge`) carry both modes automatically.
