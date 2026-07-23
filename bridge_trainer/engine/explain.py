@@ -122,6 +122,7 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
     frags = ([name] if name else []) + \
         [_suit_frag(st, v) for st, v in suits]
     hcp = card.get("hcp")
+    pts = card.get("pts")
     if hcp:
         lo, hi = int(hcp[0]), int(hcp[1])
         if hi >= _HCP_OPEN_TOP:
@@ -129,6 +130,16 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
                 frags.append(f"{lo}+")
         else:
             frags.append(f"{lo}-{hi}")
+    elif pts:
+        # no HCP band, but GIB stated total points — without this a limited
+        # pass ("No suitable call -- 8- total points") rendered with no
+        # range at all, which read as a missing explanation
+        lo, hi = int(pts[0]), int(pts[1])
+        if hi >= _HCP_OPEN_TOP:
+            if lo > 0:
+                frags.append(f"{lo}+ pts")
+        else:
+            frags.append(f"{lo}-{hi} pts")
     return ", ".join(frags)
 
 

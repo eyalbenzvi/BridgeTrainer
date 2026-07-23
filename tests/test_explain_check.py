@@ -142,3 +142,27 @@ def test_band_vs_card_flags_omitted_suit_and_refuted_promise():
     # disjoint hcp bands fire
     bad = band_vs_card(_card(hcp=(20, 22)), feats, "4C")
     assert any("hcp" in v for v in bad)
+
+
+def test_prose_lengths_and_total_points_parse_and_render():
+    # ben1-013527db's unclear glosses (user report): "Dbl — 6+." hid the
+    # clubs, and the limited pass rendered with no range at all
+    from bridge_trainer.engine.explain import terse_meaning
+    from bridge_trainer.engine.gib_explain import parse_meaning
+
+    x = parse_meaning("6+ HCP; biddable !C; 8- total points")
+    assert x["minlen"] == {"C": 4}
+    assert x["hcp"] == (6, 37) and x["pts"] == (0, 8)
+    assert terse_meaning(x, call="X") == "4+♣, 6+"
+
+    p = parse_meaning("No suitable call -- 8- total points")
+    assert p["pts"] == (0, 8)
+    assert terse_meaning(p, call="P") == "No suitable call, 0-8 pts"
+
+    c = parse_meaning("Overcall -- twice rebiddable !C; 19+ total points")
+    assert c["minlen"] == {"C": 6} and c["pts"] == (19, 40)
+    assert terse_meaning(c, call="4C") == "Overcall, 6+♣, 19+ pts"
+
+    # an HCP band always outranks the vaguer total-points band
+    o = parse_meaning("x -- 15-17 HCP; 18- total points")
+    assert "pts" not in terse_meaning(o, call="1NT")
