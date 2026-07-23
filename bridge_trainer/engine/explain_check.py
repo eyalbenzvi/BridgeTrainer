@@ -200,19 +200,46 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
     return fatal, soft
 
 
-def band_vs_card(card: dict, feats: dict, call: str) -> list[str]:
-    """One stem call: Ben's measured meaning band vs GIB's parsed card."""
+# GIB states suit length in prose too; parse_meaning ignores these, so the
+# band check reads them itself lest it accuse a gloss of omitting a suit it
+# stated in words. ("biddable" ~4+, "rebiddable" ~5+, "twice rebiddable" ~6+)
+_REBID_RE = re.compile(r"(twice rebiddable|rebiddable|biddable)\s*!([CDHS])",
+                       re.I)
+_REBID_LEN = {"biddable": 4, "rebiddable": 5, "twice rebiddable": 6}
+
+
+def stated_minlen(card: dict) -> dict:
+    """Suit minima a gloss states, parsed OR prose."""
+    out = dict(card.get("minlen") or {})
+    for phrase, st in _REBID_RE.findall(card.get("gib_raw") or ""):
+        st = st.upper()
+        out[st] = max(out.get(st, 0), _REBID_LEN[phrase.lower()])
+    return out
+
+
+def band_vs_card(card: dict, feats: dict, call: str,
+                 known_minlen: dict | None = None) -> list[str]:
+    """One stem call: Ben's measured meaning band vs GIB's parsed card.
+
+    known_minlen — suit minima already STATED for this seat by earlier
+    glosses (cumulative). A response needn't restate shape its earlier
+    bids established, so the omitted-suit rule only fires on suits absent
+    from the whole story so far."""
     out = []
     if not card or feats.get("n", 0) < BAND_N_MIN:
         return out
     denom = call[1:] if len(call) > 1 else ""
-    minlen = card.get("minlen") or {}
+    minlen = stated_minlen(card)
+    known = dict(known_minlen or {})
+    for st, v in minlen.items():
+        known[st] = max(known.get(st, 0), v)
     for st in "SHDC":
         # the bid systemically promises 5+ in a suit OTHER than the one it
-        # names, and the gloss doesn't mention it -> the gloss describes a
-        # different convention (Leaping Michaels glossed as a club overcall)
+        # names, and neither this gloss nor any earlier one for this seat
+        # mentions it -> the explanation describes a different convention
+        # (Leaping Michaels glossed as a natural club overcall)
         if st != denom and feats["len5plus"][st] >= BAND_P5_SURE \
-                and minlen.get(st, 0) < 4:
+                and known.get(st, 0) < 4:
             out.append(f"bid promises 5+{st} "
                        f"(P={feats['len5plus'][st]:.2f}) but gloss omits it")
         # the gloss promises a suit the bid's own meaning refutes
@@ -237,6 +264,7 @@ def band_violations(engine, spot, stem_entries: list[dict]) -> list[str]:
 
     out = []
     bots = {}
+    known: dict[int, dict] = {}     # per seat: suit minima stated so far
     for j, e in enumerate(stem_entries):
         call = e.get("call")
         if call in ("P", "X", "XX"):
@@ -250,8 +278,20 @@ def band_violations(engine, spot, stem_entries: list[dict]) -> list[str]:
             bots[observer_i], spot.dealer_i, spot.stem[:e["idx"] + 1])
         feats = seat_features(hands_np, bidder_i,
                               engine.models.n_cards_bidding)
-        for v in band_vs_card(e.get("card") or {}, feats, call):
+        card = e.get("card") or {}
+        for v in band_vs_card(card, feats, call,
+                              known_minlen=known.get(bidder_i)):
             out.append(f"stem {call} ({e.get('seat', '?')}): {v}")
+        acc = known.setdefault(bidder_i, {})
+        for st, v in stated_minlen(card).items():
+            acc[st] = max(acc.get(st, 0), v)
+        if feats.get("n", 0) >= BAND_N_MIN:
+            # once the band itself establishes a suit it is "known" — an
+            # omission fires at the first call that hides it, not again on
+            # every later call by the same seat
+            for st in "SHDC":
+                if feats["len5plus"][st] >= BAND_P5_SURE:
+                    acc[st] = max(acc.get(st, 0), 5)
     return out
 
 
