@@ -27,7 +27,7 @@ from bridge_trainer.app.webapp import (_dashboard_html, _index_html,
 # scoring jargon, the technical DD term, contract denomination, seat letters,
 # doubling markers. Card ranks are single letters and filtered by length.
 ALLOWED = {
-    "IMP", "MP", "NT", "double-dummy", "Google",
+    "IMP", "MP", "NT", "double-dummy", "single-dummy", "BEN", "Google",
     "N", "E", "S", "W", "X", "XX",
 }
 
