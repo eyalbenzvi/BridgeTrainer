@@ -5,11 +5,11 @@ Two pages, no build step, no framework:
   p.html?id=X — renders one problem document fetched live from Firestore
                 (the ``problems`` collection; see web/bt-firebase.js)
 
-Answers live in localStorage under key "bt_pool" ({id: {answer, correct,
-score, ts}}). Problems come from Firestore, so the producer's `pool push`
-makes new problems appear without any redeploy. Each answer is graded on
-the 0-100 panel score (docs/scoring_scale.md) next to the legacy binary
-`correct` flag.
+Answers persist as per-user attempt docs in Firestore ({answer, correct,
+score, ts, ...}; web/bt-firebase.js syncs and caches them). Problems come
+from Firestore too, so the producer's `pool push` makes new problems
+appear without any redeploy. Each answer is graded on the 0-100 panel
+score (docs/scoring_scale.md) next to the legacy binary `correct` flag.
 
 Look and feel follows Bridge Base Online (ux/bridge panel redesign):
 green-felt page with white content cards, a fixed W-N-E-S auction diagram
@@ -649,6 +649,8 @@ function btScoreLead(P, card, mode) {
     out.tau = SCORE_TAU.leadIMP;
     out.base = btCurve(out.cost, out.tau);
   } else {
+    out.unit = "לקיחות";   // also the IMP-mode fallback for a row with no
+                           // exp_imps: it is graded (and labeled) in tricks
     out.cost = Math.max(0, -(+row.vs_best || 0));
     out.tau = SCORE_TAU.leadMP;
     const vals = [];
@@ -679,10 +681,15 @@ function btScoreOfAttempt(a) {
   if (typeof a.score === "number") return a.score;
   if (a.correct) return 100;
   if (a.outcomeClass === "dead") return 0;
+  const cost = +a.gradedCost || 0;
+  // a recorded MISTAKE with no measured cost (the old graders left cost 0
+  // when the chosen option had no table row) gets the scorers' explicit
+  // no-data fallback, not a free ride up the curve at cost 0
+  if (!(cost > 0)) return 40;
   const tau = a.kind === "lead"
     ? (a.trainingMode === "IMP" ? SCORE_TAU.leadIMP : SCORE_TAU.leadMP)
     : SCORE_TAU.bidding;
-  return Math.round(btClamp(btCurve(+a.gradedCost || 0, tau), 1, 94));
+  return Math.round(btClamp(btCurve(cost, tau), 1, 94));
 }
 function btScoreChipHtml(score, small) {
   const band = btBandOf(score);
@@ -737,7 +744,7 @@ const HE = {
   you: "אתה", partner: "שותף", leader: "מוביל", declarer: "מכריז",
   dummy: "דומם", vul: "פגיע", notVul: "לא פגיע",
   best: "הטוב", yours: "שלך", engine: "מנוע", wins: "זכייה",
-  correct: "נכונות", level: "רמה", avgScore: "ממוצע", score: "ציון",
+  correct: "נכונות", level: "רמה", avgScore: "ממוצע",
   notFound: "הבעיה לא נמצאה.", backHome: "חזרה לתרגול",
 };
 /* role keys -> on-screen Hebrew (keys stay English: they drive styling) */
@@ -1682,9 +1689,10 @@ function renderSessionSummary() {{
   if (!s || !s.count) return;
   localStorage.removeItem("bt_session");   // the run is over
   const kindLabel = s.kind === "lead" ? "הובלה" : "הכרזה";
-  // score trail; legacy in-flight sessions carry only a correct flag
+  // score trail; a legacy in-flight session carries only a correct flag —
+  // map its misses to the no-data fallback (40), not to 0 (= dead option)
   const items = (s.items || []).map((it, idx) => ({{...it, idx,
-    sc: typeof it.score === "number" ? it.score : (it.correct ? 100 : 0)}}));
+    sc: typeof it.score === "number" ? it.score : (it.correct ? 100 : 40)}}));
   const avg = items.length
     ? Math.round(items.reduce((t, i) => t + i.sc, 0) / items.length)
     : Math.round(100 * (s.right || 0) / s.count);

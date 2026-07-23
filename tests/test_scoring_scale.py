@@ -162,10 +162,17 @@ def test_attempt_fallback_matches_semantics():
         "btScoreOfAttempt({kind: 'lead', trainingMode: 'IMP', gradedCost: 2.0})",
         "btScoreOfAttempt({kind: 'lead', gradedCost: 0.6})",
         "btScoreOfAttempt(null)",
+        # legacy MISTAKE with no measured cost (old graders left cost 0 when
+        # the chosen option had no table row): the no-data fallback, never a
+        # free ride up the curve to 94
+        "btScoreOfAttempt({correct: false, outcomeClass: 'suboptimal'})",
+        "btScoreOfAttempt({correct: false, gradedCost: 0})",
     ])
-    stored, legacy_ok, legacy_dead, bid, lead_imp, lead_mp, none = rows
+    stored, legacy_ok, legacy_dead, bid, lead_imp, lead_mp, none, \
+        nocost1, nocost2 = rows
     assert stored == 73                      # stored score wins verbatim
     assert legacy_ok == 100 and legacy_dead == 0
+    assert nocost1 == 40 and nocost2 == 40
     # base curve at cost == tau crosses ~47 in every scenario
     assert 40 <= bid <= 55
     assert lead_imp < bid                    # tighter lead-IMP scale
