@@ -479,6 +479,62 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
   font-weight: 700; }
 .resultline { font-size: 14px; margin: 3px 0; }
 .resultline b { font-variant-numeric: tabular-nums; }
+
+/* ===== makeover layer (v3): Hebrew-first chrome, home cards, learn-first
+   verdicts, skeletons, dashboard tabs ===== */
+/* Hebrew text carries no uppercase tracking — zero the Latin-era spacing */
+.glabel, .typebadge, .tag, .modechip, table.bidding th small,
+.fdhand .lbl .role { letter-spacing: 0; text-transform: none; }
+/* home: two scenario cards replace the segmented control */
+.scengrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+            margin: 0 0 12px; align-items: stretch; }
+.scencard { background: var(--card); color: var(--fg);
+  border: 2px solid var(--line); border-radius: 14px; padding: 14px 12px;
+  cursor: pointer; display: flex; flex-direction: column; gap: 4px; }
+.scencard > b { font-size: 17px; }
+.scencard > small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.scencard .sccount { font-size: 12px; color: var(--muted); margin-top: 2px;
+                     font-variant-numeric: tabular-nums; }
+.scencard[aria-checked="true"] { border-color: var(--accent);
+                                 background: var(--accent-tint); }
+.scencard[aria-checked="true"] > b { color: var(--accent); }
+.modepills { display: flex; gap: 6px; margin-top: 8px; }
+.modepills button.modecard { flex: 1; min-height: 0; padding: 8px;
+  border-radius: 10px; }
+.modepills button.modecard b { font-size: 15px; }
+.scencard .modegoal { margin-top: 6px; direction: rtl; unicode-bidi: normal; }
+/* loading skeletons */
+.skl { height: 12px; border-radius: 6px; background: var(--line);
+       margin: 12px 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .skl { animation: shimmer 1.2s ease-in-out infinite; }
+  @keyframes shimmer { 50% { opacity: .45; } }
+}
+/* inline Hebrew jargon explainer */
+.infot { display: inline-block; margin-inline-start: 4px; color: var(--accent);
+         cursor: help; font-style: normal; font-size: 13px; }
+/* confirm sheet stays reachable above the bottom nav */
+#confirm .confirmbox { position: sticky; bottom: 92px; z-index: 60;
+                       box-shadow: 0 6px 24px #0004; }
+/* verdict entrance */
+@media (prefers-reduced-motion: no-preference) {
+  #verdict { animation: rise .25s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+}
+/* dashboard tabs */
+.tabs { display: flex; margin: 0 0 12px; width: 100%; background: var(--card); }
+.tabs button { flex: 1; padding: 10px 6px; }
+.tabs button[aria-selected="true"] { background: var(--accent); color: #fff; }
+.dtab[hidden] { display: none; }
+/* tappable recent-miss rows */
+ul.misslist { list-style: none; margin: 4px 0 0; padding: 0; }
+ul.misslist li { border-top: 1px solid var(--line); }
+ul.misslist li:first-child { border-top: 0; }
+a.missrow { display: block; color: inherit; text-decoration: none;
+            padding: 9px 2px; font-size: 13px; line-height: 1.45; }
+a.missrow .go { color: var(--accent); font-weight: 700; white-space: nowrap; }
+/* bottom-nav svg icons */
+.gnav .ico svg { display: block; }
 """
 
 _SHARED_JS = """
@@ -490,6 +546,94 @@ function saveStore(s) { /* no-op: attempts persist via BT.record */ }
 async function fetchIndex() {
   if (!window.BT) throw new Error("Firebase not ready");
   return window.BT.fetchIndex();
+}
+/* ===== central Hebrew string table: UI chrome strings live here, so new
+   features add a key instead of an inline literal ===== */
+const HE = {
+  brand: "מאמן הברידג'",
+  practice: "תרגול", progress: "התקדמות", account: "חשבון",
+  skip: "דלג לתוכן", mainNav: "ניווט ראשי", settings: "הגדרות",
+  theme: "ערכת נושא", themeSystem: "מערכת", themeLight: "בהיר",
+  themeDark: "כהה", textSize: "גודל טקסט", sizeS: "רגיל", sizeL: "גדול",
+  sizeXL: "ענק", guest: "אורח",
+  guestNote: "אורח — ההתקדמות נשמרת מקומית",
+  signIn: "התחבר עם Google", signOut: "התנתק", connected: "מחובר",
+  close: "סגור", selectAll: "בחר הכל", clear: "נקה", problems: "בעיות",
+  you: "אתה", partner: "שותף", leader: "מוביל", declarer: "מכריז",
+  dummy: "דומם", vul: "פגיע", notVul: "לא פגיע",
+  best: "הטוב", yours: "שלך", engine: "מנוע", wins: "זכייה",
+  correct: "נכונות", level: "רמה",
+  notFound: "הבעיה לא נמצאה.", backHome: "חזרה לתרגול",
+};
+/* role keys -> on-screen Hebrew (keys stay English: they drive styling) */
+const ROLE_HE = {you: HE.you, pard: HE.partner, lead: HE.leader,
+                 decl: HE.declarer, dummy: HE.dummy};
+const VUL_HE = {None: "אין", NS: "צפון־דרום", EW: "מזרח־מערב",
+                Both: "כולם", All: "כולם"};
+function vulLabel(v) {
+  return VUL_HE[String(v || "None").replace("-", "")] || VUL_HE.None;
+}
+/* Fixed engine footnotes (closed set) -> Hebrew */
+const NOTE_HE = {
+  "call meanings follow standard 2/1 game force":
+    "משמעויות ההכרזות לפי שיטת 2/1 Game Force סטנדרטית.",
+};
+/* GIB convention-name glossary: the (closed, small) name vocabulary the
+   engine emits. Unmapped names stay English and are logged, so the map
+   converges over real pool data. */
+const CONV_HE = {
+  "stayman": "סטיימן", "puppet stayman": "פאפט סטיימן",
+  "jacoby transfer": "העברה (טרנספר)", "transfer": "העברה (טרנספר)",
+  "texas transfer": "העברת טקסס",
+  "blackwood": "בלאקווד", "rkc blackwood": "בלאקווד RKC",
+  "roman key card blackwood": "בלאקווד RKC", "gerber": "גרבר",
+  "cue bid": "קיו־ביד", "cuebid": "קיו־ביד", "cue-bid": "קיו־ביד",
+  "michaels cuebid": "מייקלס", "michaels": "מייקלס",
+  "unusual notrump": "2NT הלא־רגיל", "unusual nt": "2NT הלא־רגיל",
+  "lebensohl": "לבנסוהל", "lebensohl after double": "לבנסוהל אחרי כפל",
+  "negative double": "כפל שלילי", "takeout double": "כפל מוציא",
+  "takeout": "מוציא", "penalty double": "כפל עונשין",
+  "penalty": "עונשין", "responsive double": "כפל מגיב",
+  "support double": "כפל תמיכה", "reopening double": "כפל חידוש",
+  "optional double": "כפל אופציונלי", "lead-directing double": "כפל מכוון הובלה",
+  "splinter": "ספלינטר", "jacoby 2nt": "ג'קובי 2NT",
+  "drury": "דרורי", "reverse drury": "דרורי",
+  "fourth suit forcing": "סדרה רביעית מחייבת",
+  "new minor forcing": "מיינור חדש מחייב",
+  "overcall": "אוברקול", "jump overcall": "אוברקול בקפיצה",
+  "weak jump overcall": "אוברקול חלש בקפיצה",
+  "preempt": "מנע", "preemptive": "מנע", "weak two": "שתיים חלש",
+  "weak": "חלש", "strong": "חזק", "intermediate": "בינוני",
+  "invitational": "מזמין", "invitational or better": "מזמין ומעלה",
+  "game forcing": "מחייב למשחק מלא", "game force": "מחייב למשחק מלא",
+  "natural": "טבעי", "balanced": "מאוזנת", "semi-balanced": "חצי־מאוזנת",
+  "semibalanced": "חצי־מאוזנת",
+  "minimum": "מינימום", "maximum": "מקסימום",
+  "sign-off": "עצירה", "signoff": "עצירה", "to play": "לשחק",
+  "raise": "תמיכה", "simple raise": "תמיכה פשוטה",
+  "jump raise": "תמיכה בקפיצה", "limit raise": "תמיכה מזמינה",
+  "single raise": "תמיכה פשוטה", "constructive raise": "תמיכה בונה",
+  "new suit": "סדרה חדשה", "reverse": "ריוורס",
+  "opening bid": "פתיחה", "opening": "פתיחה", "response": "תשובה",
+  "rebid": "הכרזה שנייה", "sacrifice": "הקרבה",
+  "negative free bid": "הכרזה חופשית שלילית",
+  "free bid": "הכרזה חופשית", "trap pass": "פאס אורב",
+};
+const CONV_KEYS = Object.keys(CONV_HE).sort((a, b) => b.length - a.length);
+function hebName(name) {
+  if (!name) return name;
+  const key = name.toLowerCase().replace(/\\s+/g, " ").trim();
+  if (CONV_HE[key]) return CONV_HE[key];
+  for (const k of CONV_KEYS)          // longest-prefix word match:
+    if (key.startsWith(k + " "))      // "weak 5+!S" -> "חלש 5+!S"
+      return CONV_HE[k] + key.slice(k.length);
+  console.info("bt: untranslated convention name:", name);
+  return name;
+}
+/* inline Hebrew explainer for statistical jargon */
+function infoHtml(text) {
+  return '<span class="infot" role="img" tabindex="0" aria-label="' + text +
+         '" title="' + text + '">&#9432;</span>';
 }
 /* Deal filters. Everything is selected by default: an absent key means
    "the whole pool", and selecting every option again clears the key so the
@@ -513,13 +657,14 @@ function routeFor(kind, id) {
 /* Opening-lead training modes: exactly two — MP (Matchpoints) and IMPs.
    Both modes show every metric; ONLY the ranking objective differs. */
 const LEAD_MODES = ["MP", "IMP"];
+/* MP / IMP stay Latin (universal scoring jargon); descriptions are Hebrew */
 const MODE_INFO = {
-  MP:  {title: "Matchpoints", banner: "MATCHPOINTS",
-        subtitle: "Prioritize maximum defensive tricks",
-        goal: "Goal: maximize expected defensive tricks."},
-  IMP: {title: "IMPs", banner: "IMPs",
-        subtitle: "Prioritize score swings",
-        goal: "Goal: maximize expected IMP value from the final score."},
+  MP:  {title: "MP", banner: "MATCHPOINTS",
+        subtitle: "עדיפות למקסימום לקיחות בהגנה",
+        goal: "המטרה: למקסם את מספר הלקיחות הצפוי בהגנה."},
+  IMP: {title: "IMP", banner: "IMPs",
+        subtitle: "עדיפות להפרשי תוצאה גדולים",
+        goal: "המטרה: למקסם את ערך ה־IMP הצפוי מהתוצאה הסופית."},
 };
 const LEAD_MODE_KEY = "bt_lead_mode";
 function leadMode() {
@@ -603,9 +748,9 @@ function glyphify(text) {
   return text.replace(/!([SHDC])/g, (_, st) => suitHtml(st));
 }
 function callHtml(tok) {
-  if (tok === "P") return "Pass";
-  if (tok === "X") return "Dbl";
-  if (tok === "XX") return "Rdbl";
+  if (tok === "P") return "פאס";
+  if (tok === "X") return "כפל";
+  if (tok === "XX") return "כפל כפליים";
   const denom = tok.slice(1);
   if (denom === "NT") return tok;
   return tok[0] + suitHtml(denom);
@@ -658,7 +803,7 @@ function terse(card, call) {
       if (name.endsWith(" to !" + st))
         name = name.slice(0, -(" to !" + st).length);
   const frags = [];
-  if (name) frags.push(glyphify(name));
+  if (name) frags.push(glyphify(hebName(name)));
   const maxlen = card.maxlen || {};
   for (const [st, v] of suits) {
     const mx = (maxlen[st] === undefined) ? 13 : maxlen[st];
@@ -706,7 +851,7 @@ function fullDealHtml(deal, roles) {
     const hero = role === "you" || role === "lead" ? " hero" : "";
     return `<div class="fd fd-${s.toLowerCase()}">` +
       `<div class="fdhand${hero}"><div class="lbl"><span>${s}</span>` +
-      `<span class="role">${role}</span></div>${rows}</div></div>`;
+      `<span class="role">${ROLE_HE[role] || ""}</span></div>${rows}</div></div>`;
   }
   const compass = `<div class="fdcompass" aria-hidden="true">` +
     `<span class="cn">N</span><span class="cw">W</span>` +
@@ -724,8 +869,8 @@ function auctionTableHtml(p, notes) {
   const vul = vulSeats(p.vul);
   const head = cols.map(s => {
     const cls = (vul.includes(s) ? "v" : "nv") + (s === hero ? " me" : "");
-    const who = s === hero ? "you" : (s === partner ? "pard" : "");
-    const vlab = vul.includes(s) ? "vulnerable" : "not vulnerable";
+    const who = s === hero ? HE.you : (s === partner ? HE.partner : "");
+    const vlab = vul.includes(s) ? HE.vul : HE.notVul;
     return `<th class="${cls}" title="${s} \\u2014 ${vlab}">${s}` +
            `${s === p.dealer ? '<sup class="d">D</sup>' : ""}` +
            `${who ? `<small>${who}</small>` : "<small>&nbsp;</small>"}</th>`;
@@ -761,9 +906,9 @@ function completeAuctionTableHtml(p, notes) {
   const vul = vulSeats(p.vul);
   const head = cols.map(s => {
     const cls = (vul.includes(s) ? "v" : "nv") + (s === hero ? " me" : "");
-    const who = s === hero ? "lead" : (s === decl ? "decl"
-              : (s === dummy ? "dummy" : ""));
-    const vlab = vul.includes(s) ? "vulnerable" : "not vulnerable";
+    const who = s === hero ? HE.leader : (s === decl ? HE.declarer
+              : (s === dummy ? HE.dummy : ""));
+    const vlab = vul.includes(s) ? HE.vul : HE.notVul;
     return `<th class="${cls}" title="${s} \\u2014 ${vlab}">${s}` +
            `${s === p.dealer ? '<sup class="d">D</sup>' : ""}` +
            `${who ? `<small>${who}</small>` : "<small>&nbsp;</small>"}</th>`;
@@ -775,7 +920,7 @@ function completeAuctionTableHtml(p, notes) {
   const cells = [];
   for (let i = 0; i < cols.indexOf(p.dealer); i++) cells.push("<td></td>");
   p.auction.forEach((tok, j) => {
-    const note = notes && notes[j] && notes[j].text;
+    const note = notes && notes[j] && (notes[j].card || notes[j].text);
     const fin = j === lastBid ? " fin" : "";
     cells.push(`<td><span class="call${note ? " expl" : ""}${fin}"` +
                ` data-i="${j}">${callHtml(tok)}</span></td>`);
@@ -794,49 +939,49 @@ function candOrder(c) {
 }
 /* classification display names (ids: engine/classify.py taxonomy) */
 const TYPE_NAMES = {
-  open_or_pass: ["\\u05d4\\u05d7\\u05dc\\u05d8\\u05ea \\u05e4\\u05ea\\u05d9\\u05d7\\u05d4",
-    "\\u05dc\\u05e4\\u05ea\\u05d5\\u05d7 \\u05d9\\u05d3 \\u05d2\\u05d1\\u05d5\\u05dc\\u05d9\\u05ea, \\u05d0\\u05d5 \\u05dc\\u05e4\\u05e1 \\u2014 \\u05d5\\u05d1\\u05d0\\u05d9\\u05d6\\u05d5 \\u05e4\\u05ea\\u05d9\\u05d7\\u05d4?"],
-  preempt_decision: ["\\u05d4\\u05db\\u05e8\\u05d6\\u05ea \\u05de\\u05e0\\u05e2",
-    "\\u05dc\\u05d4\\u05e4\\u05e8\\u05d9\\u05e2 \\u05d0\\u05d5 \\u05dc\\u05d0 \\u2014 \\u05d5\\u05e2\\u05d3 \\u05d0\\u05d9\\u05d6\\u05d5 \\u05e8\\u05de\\u05d4?"],
-  enter_auction: ["\\u05db\\u05e0\\u05d9\\u05e1\\u05d4 \\u05dc\\u05de\\u05db\\u05e8\\u05d6",
-    "\\u05d0\\u05d5\\u05d1\\u05e8\\u05e7\\u05d5\\u05dc, \\u05d3\\u05d0\\u05d1\\u05dc, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05d9\\u05e9\\u05d0\\u05e8 \\u05d1\\u05d7\\u05d5\\u05e5?"],
-  compete_or_sell: ["\\u05e7\\u05e8\\u05d1 \\u05d7\\u05d5\\u05d6\\u05d4 \\u05d7\\u05dc\\u05e7\\u05d9",
-    "\\u05dc\\u05d4\\u05db\\u05e8\\u05d9\\u05d6 \\u05e2\\u05d5\\u05d3 \\u05e4\\u05e2\\u05dd, \\u05dc\\u05e4\\u05e1, \\u05d0\\u05d5 \\u05dc\\u05d3\\u05d7\\u05d5\\u05e3 \\u05d0\\u05d5\\u05ea\\u05dd \\u05d2\\u05d1\\u05d5\\u05d4 \\u05d9\\u05d5\\u05ea\\u05e8?"],
-  invite_or_game: ["\\u05d4\\u05d6\\u05de\\u05e0\\u05d4 \\u05d0\\u05d5 \\u05de\\u05e9\\u05d7\\u05e7 \\u05de\\u05dc\\u05d0",
-    "\\u05dc\\u05e2\\u05e6\\u05d5\\u05e8, \\u05dc\\u05d4\\u05d6\\u05de\\u05d9\\u05df, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05db\\u05e8\\u05d9\\u05d6 \\u05d2\\u05e2\\u05d9\\u05dd?"],
-  slam_try: ["\\u05e0\\u05d9\\u05e1\\u05d9\\u05d5\\u05df \\u05e1\\u05dc\\u05dd",
-    "\\u05dc\\u05d4\\u05ea\\u05e7\\u05d3\\u05dd \\u05dc\\u05e1\\u05dc\\u05dd, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05e1\\u05ea\\u05e4\\u05e7 \\u05d1\\u05d2\\u05e2\\u05d9\\u05dd?"],
-  choice_of_strain: ["\\u05d1\\u05d7\\u05d9\\u05e8\\u05ea \\u05e9\\u05dc\\u05d9\\u05d8",
-    "\\u05d4\\u05e8\\u05de\\u05d4 \\u05e1\\u05d2\\u05d5\\u05e8\\u05d4 \\u2014 \\u05d0\\u05d1\\u05dc \\u05d4\\u05d9\\u05db\\u05df: \\u05d0\\u05d9\\u05d6\\u05d5 \\u05e1\\u05d3\\u05e8\\u05d4, \\u05d0\\u05d5 \\u05dc\\u05dc\\u05d0-\\u05e9\\u05dc\\u05d9\\u05d8?"],
-  double_or_bid: ["\\u05d4\\u05d7\\u05dc\\u05d8\\u05ea \\u05d3\\u05d0\\u05d1\\u05dc",
-    "\\u05d3\\u05d0\\u05d1\\u05dc, \\u05dc\\u05d4\\u05de\\u05e9\\u05d9\\u05da \\u05dc\\u05d4\\u05db\\u05e8\\u05d9\\u05d6, \\u05d0\\u05d5 \\u05dc\\u05e4\\u05e1?"],
-  sacrifice_decision: ["\\u05d4\\u05e7\\u05e8\\u05d1\\u05d4",
-    "\\u05dc\\u05d3\\u05e8\\u05d5\\u05e1 \\u05d0\\u05ea \\u05d4\\u05d7\\u05d5\\u05d6\\u05d4 \\u05e9\\u05dc\\u05d4\\u05dd \\u05d1\\u05de\\u05d7\\u05d9\\u05e8 \\u05de\\u05d9\\u05e0\\u05d5\\u05e1, \\u05d0\\u05d5 \\u05dc\\u05d4\\u05d2\\u05df?"],
-  describe_hand: ["\\u05ea\\u05d9\\u05d0\\u05d5\\u05e8 \\u05d4\\u05d9\\u05d3",
-    "\\u05d0\\u05d9\\u05d6\\u05d5 \\u05d4\\u05db\\u05e8\\u05d6\\u05d4 \\u05d1\\u05d5\\u05e0\\u05d4 \\u05de\\u05ea\\u05d0\\u05e8\\u05ea \\u05d4\\u05db\\u05d9 \\u05d8\\u05d5\\u05d1 \\u05d0\\u05ea \\u05d4\\u05db\\u05d5\\u05d7 \\u05d5\\u05d4\\u05e6\\u05d5\\u05e8\\u05d4?"],
+  open_or_pass: ["החלטת פתיחה",
+    "לפתוח יד גבולית, או לפאס — ובאיזו פתיחה?"],
+  preempt_decision: ["הכרזת מנע",
+    "להפריע או לא — ועד איזו רמה?"],
+  enter_auction: ["כניסה למכרז",
+    "אוברקול, כפל, או להישאר בחוץ?"],
+  compete_or_sell: ["קרב חוזה חלקי",
+    "להכריז עוד פעם, לפאס, או לדחוף אותם גבוה יותר?"],
+  invite_or_game: ["הזמנה או משחק מלא",
+    "לעצור, להזמין, או להכריז משחק מלא?"],
+  slam_try: ["ניסיון סלאם",
+    "להתקדם לסלאם, או להסתפק במשחק מלא?"],
+  choice_of_strain: ["בחירת שליט",
+    "הרמה סגורה — אבל היכן: איזו סדרה, או ללא־שליט?"],
+  double_or_bid: ["החלטת כפל",
+    "כפל, להמשיך להכריז, או לפאס?"],
+  sacrifice_decision: ["הקרבה",
+    "לדרוס את החוזה שלהם במחיר מינוס, או להגן?"],
+  describe_hand: ["תיאור היד",
+    "איזו הכרזה בונה מתארת הכי טוב את הכוח והצורה?"],
   // opening-lead categories (engine/lead_classify.py): one per problem, a
   // mechanical fact of the contract you lead against. lead_ prefix keeps them
   // disjoint from bidding types in the shared facet counts.
   lead_part_score: ["חוזה חלקי", "הובלה נגד חוזה חלקי (מתחת למשחק מלא)"],
   lead_3nt: ["3NT", "הובלה נגד משחק ללא שליט"],
   lead_suit_game: ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 בגבוה / 5 בנמוך)"],
-  lead_slam: ["סלם", "הובלה נגד סלם (רמה 6 או 7)"],
+  lead_slam: ["סלאם", "הובלה נגד סלאם (רמה 6 או 7)"],
   lead_doubled: ["חוזה מוכפל", "הובלה נגד חוזה מוכפל"],
 };
-const DIFF_NAMES = ["", "\\u05e7\\u05dc", "\\u05d1\\u05d9\\u05e0\\u05d5\\u05e0\\u05d9", "\\u05de\\u05d0\\u05ea\\u05d2\\u05e8", "\\u05e7\\u05e9\\u05d4", "\\u05de\\u05d5\\u05de\\u05d7\\u05d4"];
+const DIFF_NAMES = ["", "קל", "בינוני", "מאתגר", "קשה", "מומחה"];
 /* Hebrew suit + card names for screen-reader labels (glyphs stay four-color) */
-const SUIT_NAME_HE = {S: "\\u05e2\\u05dc\\u05d4", H: "\\u05dc\\u05d1", D: "\\u05d9\\u05d4\\u05dc\\u05d5\\u05dd", C: "\\u05ea\\u05dc\\u05ea\\u05df"};
-const RANK_NAME_HE = {A: "\\u05d0\\u05e1", K: "\\u05de\\u05dc\\u05da", Q: "\\u05de\\u05dc\\u05db\\u05d4", J: "\\u05e0\\u05e1\\u05d9\\u05da", T: "10"};
+const SUIT_NAME_HE = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
+const RANK_NAME_HE = {A: "אס", K: "מלך", Q: "מלכה", J: "נסיך", T: "10"};
 function cardLabel(tok) {
   const r = RANK_NAME_HE[tok[1]] || tok[1];
   return r + " " + (SUIT_NAME_HE[tok[0]] || "");
 }
 function callLabel(tok) {
-  if (tok === "P") return "\\u05e4\\u05e1";
-  if (tok === "X") return "\\u05d3\\u05d0\\u05d1\\u05dc";
-  if (tok === "XX") return "\\u05e8\\u05d3\\u05d0\\u05d1\\u05dc";
+  if (tok === "P") return "פאס";
+  if (tok === "X") return "כפל";
+  if (tok === "XX") return "כפל כפליים";
   const denom = tok.slice(1);
-  if (denom === "NT") return tok[0] + " \\u05dc\\u05dc\\u05d0 \\u05e9\\u05dc\\u05d9\\u05d8";
+  if (denom === "NT") return tok[0] + " ללא שליט";
   return tok[0] + " " + (SUIT_NAME_HE[denom] || denom);
 }
 function typeBadgeHtml(p) {
@@ -848,8 +993,8 @@ function typeBadgeHtml(p) {
 function diffLineHtml(p) {
   const lv = p.classification && p.classification.difficulty_level;
   if (!lv || lv < 1 || lv > 5) return "";
-  return `<span>\\u05e8\\u05de\\u05ea \\u05e7\\u05d5\\u05e9\\u05d9</span>` +
-    `<span class="stars" role="img" aria-label="\\u05e8\\u05de\\u05ea \\u05e7\\u05d5\\u05e9\\u05d9 ${lv} \\u05de\\u05ea\\u05d5\\u05da 5">` +
+  return `<span>רמת קושי</span>` +
+    `<span class="stars" role="img" aria-label="רמת קושי ${lv} מתוך 5">` +
     `<span class="on">${"\\u2605".repeat(lv)}</span>` +
     `<span class="off">${"\\u2605".repeat(5 - lv)}</span></span>` +
     `<b>${DIFF_NAMES[lv]} (${lv}/5)</b>`;
@@ -873,11 +1018,13 @@ function getSession() {
   try { return JSON.parse(localStorage.getItem("bt_session")); }
   catch (e) { return null; }
 }
-function bumpSession(correct) {
+function bumpSession(correct, id) {
   const s = getSession();
   if (!s) return;
   s.count = (s.count || 0) + 1;
   if (correct) s.right = (s.right || 0) + 1;
+  // per-problem trail so the end-of-run summary can link the misses
+  (s.items = s.items || []).push({id: id || null, correct: !!correct});
   localStorage.setItem("bt_session", JSON.stringify(s));
   renderSessRibbon();
 }
@@ -889,14 +1036,31 @@ function renderSessRibbon() {
   const done = Math.min(s.count || 0, s.size);
   el.hidden = false;
   el.innerHTML =
-    '<span>\\u05ea\\u05e8\\u05d2\\u05d5\\u05dc \\u00b7 ' + done + '/' + s.size + '</span>' +
+    '<span>תרגול \\u00b7 ' + done + '/' + s.size + '</span>' +
     '<span class="prog"><span style="width:' + Math.round(100 * done / s.size) +
     '%"></span></span>' +
-    '<span>' + (s.right || 0) + ' \\u05e0\\u05db\\u05d5\\u05e0\\u05d5\\u05ea</span>';
+    '<span>' + (s.right || 0) + ' ' + HE.correct + '</span>';
 }
+/* bottom-nav icons: inline SVG (glyph fonts render inconsistently) */
+const ICO = {
+  spade: '<svg viewBox="0 0 24 24" width="22" height="22"' +
+    ' fill="currentColor" aria-hidden="true"><path d="M12 2C9 7 4 9.5 4' +
+    ' 13.5 4 16 6 18 8.5 18c1 0 1.9-.3 2.6-.9-.3 1.6-1 2.9-2.1' +
+    ' 3.9h6c-1.1-1-1.8-2.3-2.1-3.9.7.6 1.6.9 2.6.9C18 18 20 16 20 13.5 20' +
+    ' 9.5 15 7 12 2z"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" width="22" height="22"' +
+    ' fill="currentColor" aria-hidden="true"><rect x="4" y="12" width="4"' +
+    ' height="8" rx="1"/><rect x="10" y="7" width="4" height="13" rx="1"/>' +
+    '<rect x="16" y="10" width="4" height="10" rx="1"/></svg>',
+  gear: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none"' +
+    ' stroke="currentColor" stroke-width="2" stroke-linecap="round"' +
+    ' aria-hidden="true"><circle cx="12" cy="12" r="3.2"/>' +
+    '<path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1' +
+    'M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1"/></svg>',
+};
 const NAV_ITEMS = [
-  {id: "practice", href: "index.html", ico: "\\u2660", label: "\\u05ea\\u05e8\\u05d2\\u05d5\\u05dc"},
-  {id: "progress", href: "dashboard.html", ico: "\\u25a4", label: "\\u05d4\\u05ea\\u05e7\\u05d3\\u05de\\u05d5\\u05ea"},
+  {id: "practice", href: "index.html", ico: ICO.spade, label: HE.practice},
+  {id: "progress", href: "dashboard.html", ico: ICO.chart, label: HE.progress},
 ];
 function initChrome() {
   if (document.getElementById("gnav")) return;
@@ -904,40 +1068,40 @@ function initChrome() {
   // skip link -> main
   const skip = document.createElement("a");
   skip.className = "skip"; skip.href = "#main";
-  skip.textContent = "\\u05d3\\u05dc\\u05d2 \\u05dc\\u05ea\\u05d5\\u05db\\u05df";
+  skip.textContent = HE.skip;
   document.body.insertBefore(skip, document.body.firstChild);
   // bottom nav
   const nav = document.createElement("nav");
   nav.className = "gnav"; nav.id = "gnav";
-  nav.setAttribute("aria-label", "\\u05e0\\u05d9\\u05d5\\u05d5\\u05d8 \\u05e8\\u05d0\\u05e9\\u05d9");
+  nav.setAttribute("aria-label", HE.mainNav);
   const links = NAV_ITEMS.map(it =>
     `<a href="${it.href}" ${it.id === active ? 'aria-current="page"' : ""}>` +
     `<span class="ico" aria-hidden="true">${it.ico}</span>${it.label}</a>`).join("");
   nav.innerHTML = `<div class="navwrap">${links}` +
     `<button type="button" class="navbtn" id="nav-account">` +
-    `<span class="ico" aria-hidden="true">\\u2699</span>` +
-    `<span id="nav-account-lbl">\\u05d7\\u05e9\\u05d1\\u05d5\\u05df</span></button></div>`;
+    `<span class="ico" aria-hidden="true">${ICO.gear}</span>` +
+    `<span id="nav-account-lbl">${HE.account}</span></button></div>`;
   document.body.appendChild(nav);
   // settings sheet
   const sheet = document.createElement("div");
   sheet.className = "sheet"; sheet.id = "settings"; sheet.setAttribute("role", "dialog");
-  sheet.setAttribute("aria-modal", "true"); sheet.setAttribute("aria-label", "\\u05d4\\u05d2\\u05d3\\u05e8\\u05d5\\u05ea");
+  sheet.setAttribute("aria-modal", "true"); sheet.setAttribute("aria-label", HE.settings);
   sheet.innerHTML =
     '<div class="panel">' +
-    '<h2>\\u05d4\\u05d2\\u05d3\\u05e8\\u05d5\\u05ea</h2>' +
-    '<div class="setrow"><span>\\u05e2\\u05e8\\u05db\\u05ea \\u05e0\\u05d5\\u05e9\\u05d0</span>' +
+    '<h2>' + HE.settings + '</h2>' +
+    '<div class="setrow"><span>' + HE.theme + '</span>' +
     '<span class="segctl" id="ctl-theme">' +
-    '<button type="button" data-v="system">\\u05de\\u05e2\\u05e8\\u05db\\u05ea</button>' +
-    '<button type="button" data-v="light">\\u05d1\\u05d4\\u05d9\\u05e8</button>' +
-    '<button type="button" data-v="dark">\\u05db\\u05d4\\u05d4</button></span></div>' +
-    '<div class="setrow"><span>\\u05d2\\u05d5\\u05d3\\u05dc \\u05d8\\u05e7\\u05e1\\u05d8</span>' +
+    '<button type="button" data-v="system">' + HE.themeSystem + '</button>' +
+    '<button type="button" data-v="light">' + HE.themeLight + '</button>' +
+    '<button type="button" data-v="dark">' + HE.themeDark + '</button></span></div>' +
+    '<div class="setrow"><span>' + HE.textSize + '</span>' +
     '<span class="segctl" id="ctl-scale">' +
-    '<button type="button" data-v="s">\\u05e8\\u05d2\\u05d9\\u05dc</button>' +
-    '<button type="button" data-v="l">\\u05d2\\u05d3\\u05d5\\u05dc</button>' +
-    '<button type="button" data-v="xl">\\u05e2\\u05e0\\u05e7</button></span></div>' +
-    '<div class="setrow" id="acct-row"><span id="acct-name">\\u05d0\\u05d5\\u05e8\\u05d7</span>' +
+    '<button type="button" data-v="s">' + HE.sizeS + '</button>' +
+    '<button type="button" data-v="l">' + HE.sizeL + '</button>' +
+    '<button type="button" data-v="xl">' + HE.sizeXL + '</button></span></div>' +
+    '<div class="setrow" id="acct-row"><span id="acct-name">' + HE.guest + '</span>' +
     '<button type="button" class="alllink" id="acct-btn"></button></div>' +
-    '<button type="button" class="closebtn" id="settings-close">\\u05e1\\u05d2\\u05d5\\u05e8</button>' +
+    '<button type="button" class="closebtn" id="settings-close">' + HE.close + '</button>' +
     '</div>';
   document.body.appendChild(sheet);
   function syncCtl(id, val) {
@@ -960,16 +1124,17 @@ function initChrome() {
     const btn = document.getElementById("acct-btn");
     const navLbl = document.getElementById("nav-account-lbl");
     if (guest) {
-      nameEl.textContent = "\\u05d0\\u05d5\\u05e8\\u05d7 \\u2014 \\u05d4\\u05d4\\u05ea\\u05e7\\u05d3\\u05de\\u05d5\\u05ea \\u05e0\\u05e9\\u05de\\u05e8\\u05ea \\u05de\\u05e7\\u05d5\\u05de\\u05d9\\u05ea";
-      btn.textContent = "\\u05d4\\u05ea\\u05d7\\u05d1\\u05e8 \\u05e2\\u05dd Google";
+      nameEl.textContent = HE.guestNote;
+      btn.textContent = HE.signIn;
       btn.onclick = () => window.BT && window.BT.signIn();
-      if (navLbl) navLbl.textContent = "\\u05d7\\u05e9\\u05d1\\u05d5\\u05df";
+      if (navLbl) navLbl.textContent = HE.account;
     } else {
       const u = window.BT.user();
-      nameEl.textContent = (u && (u.displayName || u.email)) || "\\u05de\\u05d7\\u05d5\\u05d1\\u05e8";
-      btn.textContent = "\\u05d4\\u05ea\\u05e0\\u05ea\\u05e7";
+      nameEl.textContent = (u && (u.displayName || u.email)) || HE.connected;
+      btn.textContent = HE.signOut;
       btn.onclick = () => window.BT.signOut();
-      if (navLbl) navLbl.textContent = (u && u.displayName ? u.displayName.split(" ")[0] : "\\u05d7\\u05e9\\u05d1\\u05d5\\u05df");
+      if (navLbl) navLbl.textContent =
+        (u && u.displayName ? u.displayName.split(" ")[0] : HE.account);
     }
   }
   refreshAcct();
@@ -990,26 +1155,30 @@ def _index_html() -> str:
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bridge Trainer — תרגול</title>
+<title>מאמן הברידג' — תרגול</title>
 <style>{_CSS}</style>
 <script type="module" src="bt-firebase.js"></script></head><body data-nav="practice">
 <main id="main" tabindex="-1">
-<h1><span style="opacity:.9">&spades;</span> Bridge Trainer</h1>
-<div class="scenaseg" id="scenario" role="group" aria-label="בחירת תרחיש תרגול">
-<button type="button" data-kind="bidding" aria-pressed="true">הכרזה
-<small>הקריאה שלך ליד השולחן</small></button>
-<button type="button" data-kind="lead" aria-pressed="false">הובלה
-<small>איזה קלף להוביל</small></button>
+<h1><span style="opacity:.9">&spades;</span> מאמן הברידג'</h1>
+<div class="scengrid" id="scenario" role="radiogroup"
+     aria-label="בחירת תרחיש תרגול">
+<div class="scencard" data-kind="bidding" role="radio" tabindex="0"
+     aria-checked="true">
+<b>תרגול הכרזה</b><small>ההכרזה שלך ליד השולחן</small>
+<span class="sccount" id="count-bidding"></span>
 </div>
-<div class="card" id="modes" hidden>
-<div class="grow"><span class="glabel">שיטת חישוב</span></div>
-<div class="modegrid" role="group" aria-label="בחירת שיטת חישוב">
+<div class="scencard" data-kind="lead" role="radio" tabindex="0"
+     aria-checked="false">
+<b>תרגול הובלה</b><small>איזה קלף להוביל נגד החוזה</small>
+<span class="sccount" id="count-lead"></span>
+<div class="modepills" id="modes" role="group" aria-label="שיטת חישוב" hidden>
 <button type="button" class="modecard" data-mode="MP" aria-pressed="true">
-<b>Matchpoints</b><small>Prioritize maximum defensive tricks</small></button>
+<b>MP</b><small>מקסימום לקיחות בהגנה</small></button>
 <button type="button" class="modecard" data-mode="IMP" aria-pressed="false">
-<b>IMPs</b><small>Prioritize score swings</small></button>
+<b>IMP</b><small>הפרשי תוצאה גדולים</small></button>
 </div>
-<div class="modegoal" id="modegoal" style="margin-top:8px"></div>
+<div class="modegoal" id="modegoal" hidden></div>
+</div>
 </div>
 <div class="card" id="filters">
 <button type="button" class="fbar" id="fbar" aria-expanded="false"
@@ -1032,7 +1201,11 @@ def _index_html() -> str:
 </div>
 </div>
 <a class="big" id="deal" href="#">התחל תרגול &larr;</a>
-<div class="card" id="stats">טוען את מאגר הבעיות&hellip;</div>
+<div class="card" id="stats" aria-label="טוען את מאגר הבעיות">
+<div class="skl" style="width:60%"></div>
+<div class="skl" style="width:85%"></div>
+<div class="skl" style="width:40%"></div>
+</div>
 </main>
 <script>{_SHARED_JS}
 let INDEX = null;
@@ -1049,21 +1222,23 @@ function saveCur(f) {{ localStorage.setItem(curKey(), JSON.stringify(f)); }}
 function setScenario(kind) {{
   SCEN = kind; localStorage.setItem(SCEN_KEY, kind);
   document.body.dataset.scenario = kind;
-  document.querySelectorAll("#scenario button").forEach(b =>
-    b.setAttribute("aria-pressed", b.dataset.kind === kind ? "true" : "false"));
+  document.querySelectorAll("#scenario .scencard").forEach(c =>
+    c.setAttribute("aria-checked", c.dataset.kind === kind ? "true" : "false"));
   document.getElementById("modes").hidden = kind !== "lead";
+  document.getElementById("modegoal").hidden = kind !== "lead";
   syncModeUi();
   FILTERS = resolveFilters(INDEX, loadCur(), kind);
   buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
 }}
-/* MP / IMP selection cards (lead scenario only) */
+/* MP / IMP selection pills (inside the lead scenario card) */
 function syncModeUi() {{
   const m = leadMode();
   document.querySelectorAll("#modes .modecard").forEach(b =>
     b.setAttribute("aria-pressed", b.dataset.mode === m ? "true" : "false"));
   document.getElementById("modegoal").textContent = MODE_INFO[m].goal;
 }}
-document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = () => {{
+document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = ev => {{
+  ev.stopPropagation();   // don't re-trigger the scenario card underneath
   setLeadMode(b.dataset.mode);
   syncModeUi();
   // each mode serves its own generator's pool, so the facet options and
@@ -1071,6 +1246,20 @@ document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = () => {{
   FILTERS = resolveFilters(INDEX, loadCur(), SCEN);
   buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
 }});
+/* per-scenario waiting counts shown on the cards themselves */
+function updateScenCounts() {{
+  if (!INDEX) return;
+  const s = store();
+  const nb = INDEX.problems.filter(p => kindOf(p) === "bidding");
+  const nl = INDEX.problems.filter(p =>
+    kindOf(p) === "lead" && targetModeOf(p) === leadMode());
+  const wb = nb.filter(p => !s[p.id]).length;
+  const wl = nl.filter(p => !s[p.id]).length;
+  document.getElementById("count-bidding").textContent =
+    nb.length ? `${{wb}} ממתינות מתוך ${{nb.length}}` : "אין בעיות עדיין";
+  document.getElementById("count-lead").textContent =
+    nl.length ? `${{wl}} ממתינות מתוך ${{nl.length}}` : "אין בעיות במצב זה עדיין";
+}}
 function toggleFilter(list, value) {{
   const i = list.indexOf(value);
   if (i === -1) list.push(value); else list.splice(i, 1);
@@ -1125,7 +1314,7 @@ function updateFacetCounts() {{
     b.querySelector(".tcount").textContent = n;
     b.querySelector(".tbar > span").style.width = Math.round(100 * n / max) + "%";
     b.setAttribute("aria-label",
-      `${{b.querySelector(".tname").textContent}}, ${{n}} problems`);
+      `${{b.querySelector(".tname").textContent}}, ${{n}} ${{HE.problems}}`);
   }});
 }}
 function applyFilterUi() {{
@@ -1136,9 +1325,9 @@ function applyFilterUi() {{
     b.setAttribute("aria-pressed",
       FILTERS.types.includes(b.dataset.type) ? "true" : "false"));
   document.getElementById("all-diff").textContent =
-    FILTERS.levels.length >= f.levels.length ? "Clear" : "Select all";
+    FILTERS.levels.length >= f.levels.length ? HE.clear : HE.selectAll;
   document.getElementById("all-type").textContent =
-    FILTERS.types.length >= f.types.length ? "Clear" : "Select all";
+    FILTERS.types.length >= f.types.length ? HE.clear : HE.selectAll;
 }}
 function persist() {{
   const f = poolFacets(INDEX, FILTERS.kind);
@@ -1192,10 +1381,10 @@ function renderStats() {{
     ? "בעיות הובלה (" + MODE_INFO[leadMode()].title + ")" : "בעיות הכרזה";
   if (FILTERS.kind === "lead" && !kindTotal) {{
     document.getElementById("stats").innerHTML =
-      '<div class="state"><div class="em">עוד אין בעיות ' +
+      '<div class="state"><div class="em">עוד אין בעיות במצב ' +
       MODE_INFO[leadMode()].title + ' במאגר</div>' +
-      '<div class="muted">המחולל של מצב זה טרם הריץ — ' +
-      'בעיות חדשות יופיעו כאן לאחר הרצתו.</div></div>';
+      '<div class="muted">בעיות חדשות יופיעו כאן לאחר ריצת המחולל.</div></div>';
+    updateScenCounts();
     document.getElementById("fbar-sub").textContent = "";
     document.getElementById("fbar").classList.remove("on");
     const dl = document.getElementById("deal");
@@ -1215,11 +1404,18 @@ function renderStats() {{
       `${{done}} נענו · <a href="dashboard.html">להתקדמות המלאה &larr;</a></div>` +
       `<div class="wpl" role="img" aria-label="${{pct}}% נכון">` +
       `<span class="w" style="width:${{pct}}%">${{pct}}%</span></div>`;
-  }} else {{
+  }} else if (Object.keys(s).length) {{
     h += `<div style="margin-top:8px" class="muted">` +
-      `עוד לא ענית על אף אחת.</div>`;
+      `עוד לא ענית על אף אחת בבחירה הזו.</div>`;
+  }} else {{
+    // first run: a short explainer instead of empty stats
+    h += `<div style="margin-top:8px" class="muted">ברוכים הבאים! ` +
+      `בכל בעיה מוצגים יד ומכרז אמיתיים; בוחרים פעולה, והמערכת משווה ` +
+      `אותה לאלפי חלוקות מדומות ומראה מה באמת עבד. ` +
+      `בחרו תרחיש למעלה ולחצו על "התחל תרגול".</div>`;
   }}
   document.getElementById("stats").innerHTML = h;
+  updateScenCounts();
   const fbar = document.getElementById("fbar");
   document.getElementById("fbar-sub").textContent =
     narrowed ? `${{matching.length}} מתוך ${{kindTotal}}` : "כל הבעיות";
@@ -1259,8 +1455,14 @@ async function init() {{
     document.getElementById("fbody").removeAttribute("hidden");
   }}
 }}
-document.querySelectorAll("#scenario button").forEach(b =>
-  b.onclick = () => setScenario(b.dataset.kind));
+document.querySelectorAll("#scenario .scencard").forEach(c => {{
+  c.addEventListener("click", () => setScenario(c.dataset.kind));
+  c.addEventListener("keydown", ev => {{
+    if (ev.key === "Enter" || ev.key === " ") {{
+      ev.preventDefault(); setScenario(c.dataset.kind);
+    }}
+  }});
+}});
 document.getElementById("fbar").onclick = () => {{
   const bar = document.getElementById("fbar");
   const body = document.getElementById("fbody");
@@ -1289,17 +1491,32 @@ function renderSessionSummary() {{
   let s = null;
   try {{ s = JSON.parse(localStorage.getItem("bt_session")); }} catch (e) {{}}
   if (!s || !s.count) return;
+  localStorage.removeItem("bt_session");   // the run is over
   const kindLabel = s.kind === "lead" ? "הובלה" : "הכרזה";
   const pct = Math.round(100 * s.right / s.count);
+  const misses = (s.items || []).map((it, idx) => ({{...it, idx}}))
+    .filter(i => !i.correct && i.id);
+  const missHtml = misses.length
+    ? `<div style="margin-top:10px;font-weight:700">לסקירת הטעויות</div>` +
+      `<ul class="notes">` + misses.map(i =>
+        `<li><a href="${{routeFor(s.kind || "bidding", i.id)}}">` +
+        `בעיה ${{i.idx + 1}} בסבב &larr;</a></li>`).join("") + `</ul>`
+    : `<div style="margin-top:8px">ללא טעויות — כל הכבוד!</div>`;
   const card = document.createElement("div");
   card.className = "card";
   card.innerHTML = `<h2>סיכום התרגול</h2>` +
     `<div style="margin-top:6px">ענית על <b>${{s.count}}</b> בעיות ${{kindLabel}} — ` +
     `<b>${{s.right}}</b> נכונות (${{pct}}%).</div>` +
     `<div class="wpl" role="img" aria-label="${{pct}}% נכון" style="margin-top:8px">` +
-    `<span class="w" style="width:${{pct}}%">${{pct}}%</span></div>`;
+    `<span class="w" style="width:${{pct}}%">${{pct}}%</span></div>` +
+    missHtml +
+    `<button type="button" class="big" id="again">עוד סבב &larr;</button>`;
   const main = document.getElementById("main");
   main.insertBefore(card, main.querySelector("#scenario"));
+  card.querySelector("#again").onclick = () => {{
+    card.remove();
+    document.getElementById("deal").click();
+  }};
 }}
 if (new URLSearchParams(location.search).get("summary")) {{
   if (document.readyState !== "loading") renderSessionSummary();
@@ -1324,7 +1541,11 @@ def _problem_html() -> str:
 <span id="meta"></span>
 </div>
 <div class="sessribbon" id="sessribbon" hidden></div>
-<div id="problem"></div>
+<div id="problem"><div class="card" aria-label="טוען את הבעיה">
+<div class="skl" style="width:35%"></div>
+<div class="skl" style="width:100%;height:120px"></div>
+<div class="skl" style="width:70%"></div>
+</div></div>
 <div class="candidates" id="cands"></div>
 <div id="confirm"></div>
 <div id="verdict" class="card" role="status" aria-live="polite">
@@ -1336,19 +1557,21 @@ def _problem_html() -> str:
 <i style="background:var(--push)"></i>שוויון
 <i style="background:var(--loss)"></i>הפסד</div>
 <div id="opts"></div>
+<details class="notes" id="more-box" style="display:none">
+<summary>כל האפשרויות שנבדקו</summary><div id="opts-more"></div></details>
 <div class="footnote" id="footnote"></div>
 <div class="footnote" id="source"></div>
 <button class="big" id="next">הבעיה הבאה &larr;</button>
 <details class="notes" id="deal-box"><summary>החלוקה המלאה</summary>
 <div id="fulldeal"></div></details>
 <details class="notes" id="review-box" style="display:none">
-<summary>המכרז, הכרזה־הכרזה</summary><ul id="review"></ul></details>
+<summary>סקירת המכרז, הכרזה אחר הכרזה</summary><ul id="review"></ul></details>
+<details class="notes" id="meanings-box"><summary>משמעויות ההכרזות
+במכרז</summary><ul id="meanings"></ul></details>
 <details class="notes" id="prose-box" style="display:none">
 <summary>ניתוח מלא</summary><div id="explanation"
 style="white-space:pre-line;font-size:13px"></div></details>
-<details class="notes" id="meanings-box"><summary>משמעויות ההכרזות
-במכרז</summary><ul id="meanings"></ul></details>
-<details class="notes" id="raw-box"><summary>תצוגת double-dummy גולמית</summary>
+<details class="notes" id="raw-box"><summary>נתוני double-dummy גולמיים</summary>
 <table id="rtable" class="plain"></table></details>
 </div>
 </main>
@@ -1383,8 +1606,8 @@ function chipsHtml(row) {{
               `${{contractHtml(tok)}} ${{Math.round(share * 100)}}%</span>`);
   }}
   if (row.policy !== undefined)
-    bits.push(`<span>engine ${{Math.round(row.policy * 100)}}%</span>`);
-  bits.push(`<span>wins ${{Math.round(row.p_gain * 100)}}%</span>`);
+    bits.push(`<span>${{HE.engine}} ${{Math.round(row.policy * 100)}}%</span>`);
+  bits.push(`<span>${{HE.wins}} ${{Math.round(row.p_gain * 100)}}%</span>`);
   return `<div class="chips">${{bits.join("")}}</div>`;
 }}
 function optRowHtml(row, i, chosen, accepted) {{
@@ -1439,15 +1662,26 @@ function reveal(chosen) {{
   document.getElementById("headline").innerHTML = head;
   const n = (P.quality && P.quality.n_samples) ||
             (P.generator && P.generator.n_deals) || 0;
-  document.getElementById("subline").textContent =
-    `IMP \\u00b7 תצוגת single-dummy מתוקנת` +
-    (n ? ` \\u00b7 ${{n}} חלוקות מדומות` : "");
+  document.getElementById("subline").innerHTML =
+    `IMP \\u00b7 תוצאה מתוקנת` +
+    (n ? ` \\u00b7 ${{n}} חלוקות מדומות` : "") +
+    infoHtml("כל אפשרות נבדקה על אותן חלוקות מדומות התואמות את המכרז; " +
+      "\\u201cתיקון single-dummy\\u201d מקרב את פתרון המחשב למשחק אנושי.");
   document.getElementById("diffline").innerHTML = diffLineHtml(P);
   if (v.fog) document.getElementById("fog").innerHTML =
-    '<div class="fog">\\u26a0 ערפל DD: התצוגה הגולמית והמתוקנת חלוקות \\u2014 ' +
-    'ודאות נמוכה יותר.</div>';
+    '<div class="fog">\\u26a0 שתי שיטות ההערכה חלוקות כאן (\\u201cערפל ' +
+    'double-dummy\\u201d) \\u2014 הוודאות נמוכה יותר.</div>';
+  // learn-first: the best option and YOUR option up front, the rest folded
+  const idx = rows.map((r, i) => ({{r, i}}));
+  const main = idx.filter(x => x.i === 0 || x.r.bid === chosen);
+  const rest = idx.filter(x => x.i !== 0 && x.r.bid !== chosen);
   document.getElementById("opts").innerHTML =
-    rows.map((r, i) => optRowHtml(r, i, chosen, v.accepted)).join("");
+    main.map(x => optRowHtml(x.r, x.i, chosen, v.accepted)).join("");
+  if (rest.length) {{
+    document.getElementById("opts-more").innerHTML =
+      rest.map(x => optRowHtml(x.r, x.i, chosen, v.accepted)).join("");
+    document.getElementById("more-box").style.display = "block";
+  }}
   const feet = [];
   if ((v.dead_options || []).length)
     feet.push("\\u2020 לא ניצחה באף חלוקה מדומה.");
@@ -1456,7 +1690,8 @@ function reveal(chosen) {{
               "התייחס למספר המדויק בזהירות.");
   if (P.explanations && P.explanations.note) {{
     const note = P.explanations.note;
-    feet.push(note[0].toUpperCase() + note.slice(1) + ".");
+    feet.push(NOTE_HE[note.toLowerCase().trim()] ||
+              note[0].toUpperCase() + note.slice(1) + ".");
   }}
   document.getElementById("footnote").textContent = feet.join(" ");
   if (P.source) {{
@@ -1519,7 +1754,7 @@ function choose(action) {{
   reveal(action);
   const rec = window.BT.gradeBidding(P, action);
   window.BT.record(P.id, rec);
-  bumpSession(rec.correct);
+  bumpSession(rec.correct, P.id);
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
 }}
@@ -1617,8 +1852,7 @@ async function init() {{
     '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }}
   normalize();
   document.getElementById("meta").textContent =
-    `IMP \\u00b7 מחלק ${{P.dealer}} \\u00b7 אתה ${{P.seat}}` +
-    (P.category && P.category !== "other" ? ` \\u00b7 ${{P.category}}` : "");
+    `IMP \\u00b7 מחלק ${{P.dealer}} \\u00b7 אתה ${{P.seat}}`;
   document.getElementById("problem").innerHTML =
     `<div class="card">${{typeBadgeHtml(P)}}${{auctionTableHtml(P, NOTES)}}` +
     `<div id="bidnote"></div>` +
@@ -1648,7 +1882,7 @@ async function init() {{
     box.innerHTML = `<div class="bidnote"><b>` +
       `${{callHtml(P.auction[openNote])}} (${{seat}})</b> ` +
       `${{NOTES[openNote]}}` +
-      `<button class="x" aria-label="dismiss">\\u2715</button></div>`;
+      `<button class="x" aria-label="${{HE.close}}">\\u2715</button></div>`;
     box.querySelector(".x").onclick = () => {{
       openNote = -1; box.innerHTML = "";
       document.querySelectorAll(".call.open")
@@ -1716,7 +1950,7 @@ function fmtPrimary(v, mode) {
   if (v === undefined || v === null) return "—";
   return mode === "IMP"
     ? (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2) + " IMP"
-    : (+v).toFixed(2) + " טר'";
+    : (+v).toFixed(2) + " לק'";
 }
 /* the mode's ranked rows, best first (stored ranks; legacy rows fall back
    to the tricks order — legacy records are MP-only by construction) */
@@ -1828,10 +2062,10 @@ function reveal(chosen) {
     }
     const a = r.avg_def_tricks.toFixed(2);
     if (acc.includes(c))
-      return "ההובלה המיטבית — ההגנה לוקחת בממוצע " + a +
-             " טריקים, יותר מכל קלף אחר.";
+      return "ההובלה המיטבית — ההגנה זוכה בממוצע ב־" + a +
+             " לקיחות, יותר מכל קלף אחר.";
     const vs = (r.vs_best >= 0 ? "+" : "") + (r.vs_best || 0).toFixed(2);
-    return "בממוצע " + a + " טריקים הגנתיים (" + vs +
+    return "בממוצע " + a + " לקיחות בהגנה (" + vs +
            " מול ההובלה המיטבית · מדורג " + (i + 1) + " מתוך " +
            rows.length + ").";
   };
@@ -1846,7 +2080,7 @@ function reveal(chosen) {
   const mpEm = MODE === "MP" ? ' class="emph"' : "";
   const impEm = MODE === "IMP" ? ' class="emph"' : "";
   let rt = "<tr><th>#</th><th>קלף</th><th>המדד המוביל</th>" +
-    "<th" + mpEm + ">טריקים צפויים</th><th" + impEm + ">IMP צפוי</th>" +
+    "<th" + mpEm + ">לקיחות צפויות</th><th" + impEm + ">IMP צפוי</th>" +
     "<th>סיכוי הכשלה</th></tr>";
   rows.forEach((r, i) => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
@@ -1878,7 +2112,7 @@ function commit(a) {
   reveal(a);
   const rec = window.BT.gradeLead(P, a, MODE);
   window.BT.record(P.id, rec);
-  bumpSession(rec.correct);
+  bumpSession(rec.correct, P.id);
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
 }
@@ -1930,24 +2164,25 @@ async function init() {
   // strip the declarer seat AND any double marker, then show a doubled tag.
   const cm = /^(\d(?:NT|[CDHS]))[NESW](x{0,2})$/.exec(P.contract);
   const callPart = cm ? cm[1] : P.contract.slice(0, -1);
-  const dblTag = cm && cm[2] === "xx" ? " XX" : cm && cm[2] === "x" ? " X" : "";
-  const dblText = cm && cm[2] === "xx" ? "מוכפל כפול (XX)"
-                : cm && cm[2] === "x" ? "מוכפל (X)" : "לא מוכפל";
+  const dblTag = cm && cm[2] === "xx" ? " כפל כפליים"
+               : cm && cm[2] === "x" ? " כפל" : "";
+  const dblText = cm && cm[2] === "xx" ? "מוכפל כפליים"
+                : cm && cm[2] === "x" ? "מוכפל" : "לא מוכפל";
   document.getElementById("meta").innerHTML =
-    'חוזה <span class="ltr">' + callHtml(callPart) + dblTag +
-    '</span> ע"י ' + P.declarer + " · אתה מוביל (" + P.leader + ")";
+    'חוזה <span class="ltr">' + callHtml(callPart) + '</span>' + dblTag +
+    ' ע"י ' + P.declarer + " · אתה מוביל (" + P.leader + ")";
   // mode banner: the active mode, its objective, and the deal facts
   // (contract, declarer, vulnerability, doubling status) — always visible.
   const info = MODE_INFO[MODE];
   document.getElementById("modebanner").innerHTML =
     '<div class="modebanner"><span class="modechip">' + info.banner +
     '</span><span class="modegoal">' + info.goal + '</span></div>' +
-    '<div class="ctline">חוזה <b class="ltr">' + callHtml(callPart) + dblTag +
-    '</b> ע"י <b>' + P.declarer + '</b> · פגיעות: <b class="ltr">' +
-    (P.vul || "None") + '</b> · ' + dblText + '</div>' +
+    '<div class="ctline">חוזה <b class="ltr">' + callHtml(callPart) +
+    '</b>' + dblTag + ' ע"י <b>' + P.declarer + '</b> · פגיעות: <b>' +
+    vulLabel(P.vul) + '</b> · ' + dblText + '</div>' +
     (MODE_FALLBACK
       ? '<div class="fog">מדדי IMP אינם זמינים לבעיה זו (רשומה מדור ' +
-        'קודם) — מוצג מצב Matchpoints.</div>' : "");
+        'קודם) — מוצג מצב MP.</div>' : "");
   document.getElementById("problem").innerHTML =
     '<div class="card">' + typeBadgeHtml(P) +
     completeAuctionTableHtml(P, meanings) +
@@ -1969,9 +2204,12 @@ async function init() {
     openNote = +el.dataset.i;
     el.classList.add("open");
     const a = meanings[openNote] || {};
+    // prefer the terse Hebrew grammar (convention names glossed) over the
+    // raw English GIB prose, matching the bidding page
+    const note = a.card ? terse(a.card, a.call) : (a.text || "");
     box.innerHTML = '<div class="bidnote"><b>' + cardHtml_or_call(a.call) +
-      ' (' + (a.seat || "") + ')</b> ' + (a.text || "") +
-      '<button class="x" aria-label="dismiss">✕</button></div>';
+      ' (' + (a.seat || "") + ')</b> ' + note +
+      '<button class="x" aria-label="' + HE.close + '">✕</button></div>';
     box.querySelector(".x").onclick = () => {
       openNote = -1; box.innerHTML = "";
       document.querySelectorAll(".call.open").forEach(c => c.classList.remove("open"));
@@ -2032,13 +2270,12 @@ def _lead_html() -> str:
         '<p id="lead-expl" style="white-space:pre-line"></p>\n'
         '<div class="muted" id="difficulty"></div>\n'
         '<button class="big" id="next">ההובלה הבאה &larr;</button>\n'
-        '<details open><summary>כל 13 ההובלות, מדורגות</summary>'
+        '<details><summary>כל 13 ההובלות, מדורגות</summary>'
         '<table class="plain" id="ltable"></table>'
         '<p class="footnote">קלפים שווים במדד המוביל — כולם נכונים.</p>'
         '</details>\n'
-        '<p class="footnote ltr">Recommendations are based on sampled '
-        'hidden-hand deals and double-dummy analysis. The active scoring '
-        'mode determines how leads are ranked.</p>\n'
+        '<p class="footnote">ההמלצות מבוססות על הגרלת ידיים נסתרות '
+        'וניתוח double-dummy; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>\n'
         '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
         '</div>\n</main>\n<script>' + _SHARED_JS + _LEAD_JS + '</script>\n</body></html>'
@@ -2084,7 +2321,7 @@ _DASHBOARD_JS = r"""
 const MIN_N = 5, MIN_TREND = 8;
 // distribution-band thresholds; units differ by scenario AND, for leads, by
 // training mode (MP costs are tricks below best; IMP costs are IMPs below best)
-const COST = { bidding: {unit: "IMP", near: 2.0}, lead: {unit: "טריק", near: 1.0},
+const COST = { bidding: {unit: "IMP", near: 2.0}, lead: {unit: "לקיחה", near: 1.0},
                leadIMP: {unit: "IMP", near: 2.0} };
 const SUIT_NAME = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
 const RANKS = "AKQJT98765432";
@@ -2178,7 +2415,7 @@ function scenarioCard(title, list, kind, costKey) {
   const cfg = COST[costKey || kind] || COST.bidding;
   let html = '<div class="card scen"><b>' + title + '</b> ' +
     '<span class="muted">' + (kind === "lead" && cfg.unit !== "IMP"
-      ? "טריקים" : "IMP") +
+      ? "לקיחות" : "IMP") +
     ' · n=' + list.length + '</span>' +
     costBand(list, costKey || kind) +
     '<div class="subh">לפי דרגת קושי</div>' + diffRows(list);
@@ -2247,23 +2484,47 @@ function render(attempts) {
     const path = pts.map((y, i) =>
       `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
     const last = Math.round(pts[pts.length - 1]);
+    // cumulative accuracy plus a rolling window: the cumulative line flattens
+    // and hides recent change, so overlay a last-min(20, n/2) moving average
+    const win = Math.max(MIN_TREND, Math.min(20, Math.round(chrono.length / 2)));
+    const roll = chrono.map((a, i) => {
+      const lo = Math.max(0, i - win + 1);
+      let s = 0; for (let j = lo; j <= i; j++) s += chrono[j].correct ? 1 : 0;
+      return s / (i - lo + 1) * 100;
+    });
+    const rpath = roll.map((y, i) =>
+      `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
     trend = '<div class="card"><b>דיוק לאורך זמן</b> ' +
-      '<span class="muted">(מצטבר, ניסיון ראשון)</span><br>' +
-      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="דיוק מצטבר לאורך זמן, כעת ${last}%" style="width:100%;height:auto;margin-top:6px">` +
+      '<span class="muted">(ניסיון ראשון)</span><br>' +
+      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="דיוק לאורך זמן, כעת ${last}%" style="width:100%;height:auto;margin-top:6px">` +
       `<line x1="0" y1="${H - 30}" x2="${W}" y2="${H - 30}" stroke="#8884" ` +
       'stroke-dasharray="3"></line>' +
+      `<path d="${rpath}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 3"></path>` +
       `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"></path>` +
-      '</svg><div class="muted">קו מקווקו = 50% · כעת ' + last + '%</div></div>';
+      '</svg><div class="muted">' +
+      '<span style="color:var(--accent)">■</span> מצטבר · ' +
+      '<span>▨</span> חלון אחרון (' + win + ') · קו מקווקו = 50% · כעת ' +
+      last + '%</div></div>';
   }
+  const badge = m => {
+    const t = TYPE_NAMES[m.type];
+    const d = m.difficultyLevel;
+    return (t ? `<span class="typebadge" style="margin:0">${t[0]}</span> ` : "") +
+      (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
+        `${"★".repeat(d)}</span><span class="off">${"★".repeat(5 - d)}</span></span>` : "");
+  };
   const misses = recent.filter(a => !a.correct).slice(0, 10);
   const missList = misses.length
-    ? '<div class="card"><b>טעויות אחרונות</b> <span class="muted">(לחזרה)</span>' +
-      '<ul class="notes">' + misses.map(m =>
-        `<li>בחרת <b class="ltr">${m.chosenCall}</b> — ${OUTCOME_HE[m.outcomeClass] || m.outcomeClass}` +
+    ? '<div class="card"><b>טעויות אחרונות</b> <span class="muted">(הקש לחזרה)</span>' +
+      '<ul class="misslist">' + misses.map(m =>
+        `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId)}">` +
+        `<div>${badge(m)}</div>` +
+        `<div style="margin-top:4px">בחרת <b class="ltr">${m.chosenCall}</b> — ` +
+        `${OUTCOME_HE[m.outcomeClass] || m.outcomeClass}` +
         (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
         (m.acceptedSet && m.acceptedSet.length
           ? `. מיטבי: <span class="ltr">${m.acceptedSet.join(", ")}</span>` : "") +
-        ` <a href="${routeFor(m.kind || "bidding", m.problemId)}">חזור לתרגל &larr;</a></li>`
+        ` <span class="go">חזור לתרגל &larr;</span></div></a></li>`
       ).join("") + "</ul></div>"
     : "";
   const weak = weakArea(scen);
@@ -2272,27 +2533,51 @@ function render(attempts) {
       `<div style="margin:6px 0 8px">הנקודה החלשה שלך: <b>${weak.label}</b> (${pct(weak.r)}).</div>` +
       `<a class="big" href="${weak.href}">תרגל 10 כאלה &larr;</a></div>`
     : "";
-  el.innerHTML =
+  const statCard =
     '<div class="card"><div class="statgrid">' +
     `<div class="stat"><b>${n < MIN_N ? "—" : pct(w.p)}</b>` +
     `<span class="muted">דיוק ניסיון ראשון</span></div>` +
     `<div class="stat"><b>${streak}</b><span class="muted">רצף נוכחי</span></div>` +
     `<div class="stat"><b>${n}</b><span class="muted">בעיות שנענו</span></div>` +
     `<div class="stat"><b>${attempts.length}</b><span class="muted">סה"כ ניסיונות</span></div>` +
-    '</div></div>' + weakCard + trend +
-    '<div class="card"><b>לפי תרחיש</b>' +
+    '</div></div>';
+  const byKindCard = '<div class="card"><b>לפי תרחיש</b>' +
     Object.keys(byKind).map(kd =>
       row(kd === "lead" ? "הובלה" : "הכרזה", byKind[kd].k, byKind[kd].n)).join("") +
-    '</div>' +
-    scenarioCard("הכרזה", scen.bidding, "bidding") +
-    scenarioCard("הובלה · Matchpoints", leadMP, "lead") +
-    scenarioCard("הובלה · IMPs", leadIMP, "lead", "leadIMP") +
-    missList +
+    '</div>';
+  const footnote =
     '<p class="footnote">ניסיון ראשון בלבד. אחוזים מוסתרים עד ' +
     'לפחות ' + MIN_N + ' ניסיונות; הטווחים הם רווחי־סמך Wilson 95%. ' +
-    '“מתחת למיטבי” = ממוצע ה-IMP (הכרזה, או הובלה במצב IMPs) או ' +
-    'הטריקים (הובלה במצב Matchpoints) שאבדו ' +
+    '“מתחת למיטבי” = ממוצע ה-IMP (הכרזה, או הובלה במצב IMP) או ' +
+    'הלקיחות (הובלה במצב MP) שאבדו ' +
     'מול הפעולה המיטבית; תשובה נכונה נספרת כאפס.</p>';
+  // three tabbed panels: overview / bidding / leads
+  const tabs = [
+    ["overview", "סקירה"], ["bidding", "הכרזה"], ["lead", "הובלה"],
+  ];
+  el.innerHTML =
+    '<div class="segctl tabs" role="tablist">' + tabs.map(([id, lbl], i) =>
+      `<button role="tab" data-tab="${id}" aria-selected="${i === 0}">${lbl}` +
+      `</button>`).join("") + '</div>' +
+    `<div class="dtab" data-panel="overview">` +
+      statCard + weakCard + trend + byKindCard + missList + footnote + '</div>' +
+    `<div class="dtab" data-panel="bidding" hidden>` +
+      (scenarioCard("הכרזה", scen.bidding, "bidding") ||
+       '<div class="card muted">עוד אין נתוני הכרזה.</div>') + '</div>' +
+    `<div class="dtab" data-panel="lead" hidden>` +
+      (scenarioCard("הובלה · MP", leadMP, "lead") +
+       scenarioCard("הובלה · IMP", leadIMP, "lead", "leadIMP") ||
+       "") +
+      (leadMP.length || leadIMP.length ? ""
+        : '<div class="card muted">עוד אין נתוני הובלה.</div>') + '</div>';
+  el.querySelector(".tabs").addEventListener("click", ev => {
+    const b = ev.target.closest("button[data-tab]");
+    if (!b) return;
+    el.querySelectorAll(".tabs button").forEach(x =>
+      x.setAttribute("aria-selected", x === b ? "true" : "false"));
+    el.querySelectorAll(".dtab").forEach(p =>
+      p.hidden = p.dataset.panel !== b.dataset.tab);
+  });
 }
 async function init() {
   try { render(await window.BT.allAttempts()); }

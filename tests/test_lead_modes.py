@@ -241,17 +241,18 @@ def test_attempts_persist_training_mode():
 
 def test_home_page_has_mp_and_imp_cards():
     html = _index_html()
-    assert "<b>Matchpoints</b>" in html
-    assert "Prioritize maximum defensive tricks" in html
-    assert "<b>IMPs</b>" in html
-    assert "Prioritize score swings" in html
+    # MP / IMP stay Latin (universal scoring jargon); descriptions are Hebrew
+    assert "<b>MP</b>" in html
+    assert "מקסימום לקיחות בהגנה" in html
+    assert "<b>IMP</b>" in html
+    assert "הפרשי תוצאה גדולים" in html
     assert "bt_lead_mode" in html          # the persisted selection
 
 
 def test_mode_goals_shown():
     for page in (_index_html(), _lead_html()):
-        assert "Goal: maximize expected defensive tricks." in page
-        assert "Goal: maximize expected IMP value from the final score." in page
+        assert "המטרה: למקסם את מספר הלקיחות הצפוי בהגנה." in page
+        assert "המטרה: למקסם את ערך ה־IMP הצפוי מהתוצאה הסופית." in page
 
 
 def test_lead_page_mode_banner_and_results():
@@ -261,7 +262,7 @@ def test_lead_page_mode_banner_and_results():
     assert 'id="resid"' in html            # your lead / recommended / rank
     # ranked table shows both metrics + set probability in BOTH modes,
     # with the active mode's metric emphasized
-    assert "טריקים צפויים" in html
+    assert "לקיחות צפויות" in html
     assert "IMP צפוי" in html
     assert "סיכוי הכשלה" in html
     assert "emph" in html
@@ -271,9 +272,8 @@ def test_lead_page_mode_banner_and_results():
 
 
 def test_methodology_note_exact():
-    note = ("Recommendations are based on sampled hidden-hand deals and "
-            "double-dummy analysis. The active scoring mode determines how "
-            "leads are ranked.")
+    note = ("ההמלצות מבוססות על הגרלת ידיים נסתרות "
+            "וניתוח double-dummy; שיטת החישוב הפעילה קובעת את דירוג ההובלות.")
     assert note in _lead_html()
 
 
