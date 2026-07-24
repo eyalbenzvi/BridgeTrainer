@@ -1960,6 +1960,8 @@ function resetForRetry() {{
   ARMED = null;
   document.getElementById("cands").scrollIntoView(
     {{block: "center", behavior: "smooth"}});
+  const first = document.querySelector("button.cand");
+  if (first) first.focus();   // move focus off the now-hidden verdict
 }}
 function stripNoise(t) {{
   return (t || "").replace(/Next call is usually[^]*?%\\)\\.\\s*/g, "")
@@ -2189,7 +2191,10 @@ function reveal(chosen) {{
       "border:1px solid var(--accent)";
     rb.textContent = "נסה שוב (לא ישפיע על הציון)";
     rb.onclick = resetForRetry;
-    document.getElementById("verdict").appendChild(rb);
+    const vd = document.getElementById("verdict");
+    const nx = document.getElementById("next");
+    if (nx && nx.parentNode === vd) vd.insertBefore(rb, nx);
+    else vd.appendChild(rb);
   }}
 }}
 function choose(action) {{
@@ -2401,6 +2406,10 @@ function resetForRetry() {
   const cf = document.getElementById("confirm");
   if (cf) cf.innerHTML = "";
   ARMED = null;
+  document.getElementById("problem").scrollIntoView(
+    {block: "center", behavior: "smooth"});
+  const first = document.querySelector("button.cardbtn");
+  if (first) first.focus();   // move focus off the now-hidden verdict
 }
 const RANKS = "23456789TJQKA";
 /* ---- training-mode helpers: MP ranks by expected defensive tricks, IMP by
@@ -2605,7 +2614,10 @@ function reveal(chosen) {
       "border:1px solid var(--accent)";
     rb.textContent = "נסה שוב (לא ישפיע על הציון)";
     rb.onclick = resetForRetry;
-    document.getElementById("verdict").appendChild(rb);
+    const vd = document.getElementById("verdict");
+    const nx = document.getElementById("next");
+    if (nx && nx.parentNode === vd) vd.insertBefore(rb, nx);
+    else vd.appendChild(rb);
   }
 }
 function commit(a) {
