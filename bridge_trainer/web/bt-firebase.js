@@ -169,12 +169,19 @@ function gate(mode) {
 }
 function ungate() { const g = document.getElementById("bt-gate"); if (g) g.remove(); }
 
-async function preloadAttempts(uid) {
+// Synchronous, no network: make the cached attempts + pending queue available
+// instantly so the page can render before the authoritative sync runs (T4).
+function loadCacheState(uid) {
   const cache = loadCache(uid);
   ATTEMPTS = cache.byId || {};
   LAST_TS = cache.lastTs || 0;
   LAST_FULL_SYNC = cache.lastFullSync || 0;
   PENDING = loadPending(uid);
+}
+
+// The authoritative background sync (full reconcile or incremental) + pending
+// flush. Runs AFTER the page has already rendered from cache.
+async function syncAttempts(uid) {
   const coll = collection(db, "users", uid, "attempts");
 
   // Full reconcile: read the WHOLE collection and REPLACE the cache, so docs
@@ -409,17 +416,25 @@ const BT = {
   start(ready) {
     if (!isConfigured) { gate("setup"); return; }
     let handedOff = false;
-    onAuthStateChanged(auth, async (u) => {
+    onAuthStateChanged(auth, (u) => {
       if (!u) {
-        USER = null; ATTEMPTS = {}; LAST_TS = 0;
+        USER = null; ATTEMPTS = {}; LAST_TS = 0; PENDING = {};
         window.dispatchEvent(new Event("bt-user-changed"));
         gate("signin");
         return;
       }
       USER = u; ungate();
-      try { await preloadAttempts(u.uid); } catch (e) { console.error(e); }
+      // Render NOW from the local cache; do the authoritative sync in the
+      // background so the first problem/stats don't wait on a network round
+      // trip (T4). Pages listen for `bt-attempts-synced` to refresh once the
+      // server state (incl. answers from another device) has landed.
+      loadCacheState(u.uid);
       window.dispatchEvent(new Event("bt-user-changed"));
       if (!handedOff) { handedOff = true; ready(u); }
+      const ric = window.requestIdleCallback || ((f) => setTimeout(f, 1));
+      ric(() => syncAttempts(u.uid)
+        .catch((e) => console.error(e))
+        .finally(() => window.dispatchEvent(new Event("bt-attempts-synced"))));
     });
   },
 };

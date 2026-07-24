@@ -1874,6 +1874,11 @@ if (new URLSearchParams(location.search).get("summary")) {{
   if (document.readyState !== "loading") renderSessionSummary();
   else addEventListener("DOMContentLoaded", renderSessionSummary);
 }}
+// the page rendered from cache; refresh the counts once the background sync
+// lands (T4) — e.g. answers from another device change the waiting counts.
+window.addEventListener("bt-attempts-synced", () => {{
+  if (INDEX) {{ updateScenCounts(); renderStats(); }}
+}});
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 </script>
@@ -2384,6 +2389,16 @@ async function init() {{
   if (prev && !retryParam) reveal(prev.answer);
   else if (prev && retryParam) RETRYING = true;
 }}
+// if the background sync (T4) brings in an answer (e.g. from another device)
+// after we've already rendered, reveal it — unless the user is mid-retry or
+// the verdict is already showing.
+window.addEventListener("bt-attempts-synced", () => {{
+  if (!P) return;
+  const prev = store()[P.id];
+  const vd = document.getElementById("verdict");
+  if (prev && !RETRYING && (!vd || vd.style.display === "none"))
+    reveal(prev.answer);
+}});
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 </script>
@@ -2774,6 +2789,13 @@ async function init() {
   else if (prev && retryParam) RETRYING = true;
 }
 function cardHtml_or_call(tok) { return tok ? callHtml(tok) : ""; }
+window.addEventListener("bt-attempts-synced", () => {
+  if (!P) return;
+  const prev = store()[P.id];
+  const vd = document.getElementById("verdict");
+  if (prev && !RETRYING && (!vd || vd.style.display === "none"))
+    reveal(prev.answer);
+});
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 """
@@ -3138,6 +3160,10 @@ async function init() {
     el.querySelector(".en").textContent = e.message;
   }
 }
+// refresh the dashboard once the background sync (T4) lands
+window.addEventListener("bt-attempts-synced", async () => {
+  try { render(await window.BT.allAttempts()); } catch (e) { /* keep prior */ }
+});
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 """
