@@ -76,6 +76,23 @@ TYPE_IDS = [t[0] for t in TAXONOMY]
 LABELS_HE = {t[0]: t[2] for t in TAXONOMY}
 LABELS_EN = {t[0]: t[1] for t in TAXONOMY}
 
+# Hebrew one-line tooltip per bidding type — the question shown under the type
+# badge in the web UI. Kept here (not duplicated in webapp.py) so the labels and
+# tooltips have a single source of truth; webapp._taxonomy_he_json() injects
+# them as window.TAXONOMY_HE (ARCH-5).
+TOOLTIPS_HE = {
+    "open_or_pass": "לפתוח יד גבולית, או לפאס — ובאיזו פתיחה?",
+    "preempt_decision": "להפריע או לא — ועד איזו רמה?",
+    "enter_auction": "אוברקול, כפל, או להישאר בחוץ?",
+    "compete_or_sell": "להכריז עוד פעם, לפאס, או לדחוף אותם גבוה יותר?",
+    "invite_or_game": "לעצור, להזמין, או להכריז משחק מלא?",
+    "slam_try": "להתקדם לסלאם, או להסתפק במשחק מלא?",
+    "choice_of_strain": "הרמה סגורה — אבל היכן: איזו סדרה, או ללא־שליט?",
+    "double_or_bid": "כפל, להמשיך להכריז, או לפאס?",
+    "sacrifice_decision": "לדרוס את החוזה שלהם במחיר מינוס, או להגן?",
+    "describe_hand": "איזו הכרזה בונה מתארת הכי טוב את הכוח והצורה?",
+}
+
 TIE_BREAK = """\
 - If a double (X) is among the candidates and is the winning call or the \
 main foil, prefer double_or_bid.

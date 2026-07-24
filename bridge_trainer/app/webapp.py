@@ -21,6 +21,7 @@ place of prose.
 """
 from __future__ import annotations
 
+import json
 import re
 from importlib import resources
 from pathlib import Path
@@ -1359,36 +1360,7 @@ function candOrder(c) {
   return +c[0] * 10 + ["C", "D", "H", "S", "NT"].indexOf(c.slice(1));
 }
 /* classification display names (ids: engine/classify.py taxonomy) */
-const TYPE_NAMES = {
-  open_or_pass: ["החלטת פתיחה",
-    "לפתוח יד גבולית, או לפאס — ובאיזו פתיחה?"],
-  preempt_decision: ["הכרזת מנע",
-    "להפריע או לא — ועד איזו רמה?"],
-  enter_auction: ["כניסה למכרז",
-    "אוברקול, כפל, או להישאר בחוץ?"],
-  compete_or_sell: ["קרב חוזה חלקי",
-    "להכריז עוד פעם, לפאס, או לדחוף אותם גבוה יותר?"],
-  invite_or_game: ["הזמנה או משחק מלא",
-    "לעצור, להזמין, או להכריז משחק מלא?"],
-  slam_try: ["ניסיון סלאם",
-    "להתקדם לסלאם, או להסתפק במשחק מלא?"],
-  choice_of_strain: ["בחירת שליט",
-    "הרמה סגורה — אבל היכן: איזו סדרה, או ללא־שליט?"],
-  double_or_bid: ["החלטת כפל",
-    "כפל, להמשיך להכריז, או לפאס?"],
-  sacrifice_decision: ["הקרבה",
-    "לדרוס את החוזה שלהם במחיר מינוס, או להגן?"],
-  describe_hand: ["תיאור היד",
-    "איזו הכרזה בונה מתארת הכי טוב את הכוח והצורה?"],
-  // opening-lead categories (engine/lead_classify.py): one per problem, a
-  // mechanical fact of the contract you lead against. lead_ prefix keeps them
-  // disjoint from bidding types in the shared facet counts.
-  lead_part_score: ["חוזה חלקי", "הובלה נגד חוזה חלקי (מתחת למשחק מלא)"],
-  lead_3nt: ["3NT", "הובלה נגד משחק ללא שליט"],
-  lead_suit_game: ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 במייג'ור / 5 במיינור)"],
-  lead_slam: ["סלאם", "הובלה נגד סלאם (רמה 6 או 7)"],
-  lead_doubled: ["חוזה מוכפל", "הובלה נגד חוזה מוכפל"],
-};
+const TYPE_NAMES = (typeof window !== "undefined" && window.TAXONOMY_HE) || {};
 const DIFF_NAMES = ["", "קל", "בינוני", "מאתגר", "קשה", "מומחה"];
 /* Hebrew suit + card names for screen-reader labels (glyphs stay four-color) */
 const SUIT_NAME_HE = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
@@ -1587,6 +1559,30 @@ else addEventListener("DOMContentLoaded", initChrome);
 """
 
 
+def _taxonomy_he_json() -> str:
+    """The Hebrew {type_id: [label, tooltip]} map, built from the taxonomy
+    modules (the single source of truth) — bidding types from classify.py,
+    opening-lead types from lead_classify.py."""
+    from ..engine.classify import LABELS_HE, TOOLTIPS_HE
+    from ..engine.lead_classify import LEAD_LABELS_HE, LEAD_TOOLTIPS_HE
+    data = {}
+    for tid, label in LABELS_HE.items():
+        data[tid] = [label, TOOLTIPS_HE.get(tid, "")]
+    for tid, label in LEAD_LABELS_HE.items():
+        data[tid] = [label, LEAD_TOOLTIPS_HE.get(tid, "")]
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _taxonomy_script() -> str:
+    """Inline <script> that sets window.TAXONOMY_HE before bt-shared.js loads.
+    _SHARED_JS derives TYPE_NAMES from it, so the Hebrew type labels/tooltips
+    live in one place (the taxonomy modules) instead of a JS literal that had
+    already drifted from them (ARCH-5). </ is escaped so a label could never
+    close the script tag early."""
+    return ('<script>window.TAXONOMY_HE = '
+            + _taxonomy_he_json().replace('</', '<\\/') + ';</script>')
+
+
 def _index_html() -> str:
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
@@ -1645,6 +1641,7 @@ def _index_html() -> str:
 <div class="skl" style="width:40%"></div>
 </div>
 </main>
+{_taxonomy_script()}
 <script src="bt-shared.js"></script>
 <script>
 let INDEX = null;
@@ -2051,6 +2048,7 @@ style="white-space:pre-line;font-size:13px"></div></details>
 <table id="rtable" class="plain"></table></details>
 </div>
 </main>
+{_taxonomy_script()}
 <script src="bt-shared.js"></script>
 <script>
 let P = null, INDEX = null, NOTES = [], OPTSHOWS = {{}};
@@ -2990,7 +2988,7 @@ def _lead_html() -> str:
         'double-dummy</button>; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>\n'
         '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
-        '</div>\n</main>\n<script src="bt-shared.js"></script>\n<script>'
+        '</div>\n</main>\n' + _taxonomy_script() + '\n<script src="bt-shared.js"></script>\n<script>'
         + _LEAD_JS + '</script>\n</body></html>'
     )
 
@@ -3344,7 +3342,7 @@ def _dashboard_html() -> str:
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted">ההתקדמות שלי</span></div>\n'
         '<h1>ההתקדמות שלי</h1>\n<div id="dash" class="muted">טוען&hellip;</div>\n'
-        '</main>\n<script src="bt-shared.js"></script>\n<script>'
+        + _taxonomy_script() + '\n<script src="bt-shared.js"></script>\n<script>'
         + _DASHBOARD_JS + '</script>\n</body></html>'
     )
 
