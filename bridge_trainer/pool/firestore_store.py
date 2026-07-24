@@ -39,6 +39,12 @@ SHARD_MAX_ENTRIES = 3000            # ~150-200 B/entry -> well under 1 MiB
 # outgrows this — by which point the sharded-aware client must be deployed.
 SINGLE_DOC_MAX_ENTRIES = 4000       # ~4000 * 200 B ~= 0.8 MiB, safe under 1 MiB
 _MAX_TRANSIENT_RETRIES = 4
+_MAX_INDEX_CAS_RETRIES = 5
+
+
+class IndexConflict(RuntimeError):
+    """The meta/index generation changed under us between read and write.
+    The caller should re-read the index, re-apply its changes, and retry."""
 
 
 def _firestore_safe(value):
@@ -172,6 +178,7 @@ class FirestorePool:
         if not ptr.exists:
             return None
         data = ptr.to_dict() or {}
+        data.setdefault("generation", 0)   # optimistic-lock counter (T11)
         if "problems" in data:            # legacy single-doc index
             return data
         problems = []
@@ -181,12 +188,47 @@ class FirestorePool:
                 problems.extend((snap.to_dict() or {}).get("problems", []))
         return {**data, "problems": problems}
 
-    def write_index(self, index: dict) -> None:
+    def _cas_pointer(self, ptr_fields: dict,
+                     expect_generation: int | None) -> int:
+        """Write the index pointer inside a transaction that reads the current
+        ``generation`` and, when *expect_generation* is given, refuses the write
+        (raising IndexConflict) if it changed — optimistic locking so concurrent
+        producers can't silently drop each other's index entries. The new
+        pointer's generation is the current one + 1. Returns the new generation.
+        """
+        from google.cloud import firestore  # provided by firebase-admin
+
+        ref = self._meta.document(INDEX_DOC)
+
+        @firestore.transactional
+        def _txn(transaction):
+            snap = ref.get(transaction=transaction)
+            cur = (snap.to_dict() or {}).get("generation", 0) \
+                if snap.exists else 0
+            if expect_generation is not None and cur != expect_generation:
+                raise IndexConflict(
+                    f"index generation {cur} != expected {expect_generation}")
+            doc = dict(ptr_fields)
+            doc["generation"] = cur + 1
+            transaction.set(ref, _firestore_safe(doc))
+            return cur + 1
+
+        return _txn(self._db.transaction())
+
+    def write_index(self, index: dict,
+                    expect_generation: int | None = None) -> int:
         """Store the pool index. While it fits one document it is written in the
         LEGACY single-doc form (inline ``problems``), which every client — old
         or sharded-aware — can read. Once it outgrows SINGLE_DOC_MAX_ENTRIES it
         is SHARDED (pointer ``meta/index`` lists shard ids; each shard holds up
-        to SHARD_MAX_ENTRIES rows) so no doc nears the 1 MiB limit."""
+        to SHARD_MAX_ENTRIES rows) so no doc nears the 1 MiB limit.
+
+        The pointer is written via a generation-checked transaction (T11): pass
+        *expect_generation* (the generation from the read used to build *index*)
+        and the write is refused with IndexConflict if another producer bumped
+        it meanwhile. Shards are written first (fixed ids, idempotent); the
+        pointer — written last and atomically — is what makes the new rows
+        visible. Returns the new generation."""
         entries = list(index.get("problems", []))
 
         # learn the previous shard set (1 read) so we can delete stale shards
@@ -196,28 +238,44 @@ class FirestorePool:
                          if prev.exists else [])
 
         if len(entries) <= SINGLE_DOC_MAX_ENTRIES:
-            doc = {k: v for k, v in index.items() if k != "shards"}
+            doc = {k: v for k, v in index.items()
+                   if k not in ("shards", "generation")}
             doc["count"] = len(entries)
-            _retry_transient(lambda: self._meta.document(INDEX_DOC).set(
-                _firestore_safe(doc)))
+            new_gen = self._cas_pointer(doc, expect_generation)
             for sid in old_shards:                 # drop any old shards
                 _retry_transient(self._meta.document(sid).delete)
-            return
+            return new_gen
 
         shards = [entries[i:i + SHARD_MAX_ENTRIES]
                   for i in range(0, len(entries), SHARD_MAX_ENTRIES)]
-        shard_ids = [f"{SHARD_PREFIX}{i}" for i in range(len(shards))]
+        # Version the shard ids per write (unique token) instead of reusing
+        # fixed index_shard_<i> in place. Fixed ids let a concurrent reader load
+        # the OLD pointer but the NEW shard content (torn read), and a lost CAS
+        # left the winner's pointer over our shard bodies. With unique ids: new
+        # shards are written first, the pointer CAS publishes them atomically,
+        # and the OLD shards are deleted only after the CAS commits — so a
+        # reader's pointer and shards always agree. A lost CAS cleans up its own
+        # just-written shards so they don't orphan.
+        token = f"{time.time_ns():x}"
+        shard_ids = [f"{SHARD_PREFIX}{token}_{i}" for i in range(len(shards))]
         batch = self._db.batch()
         for sid, chunk in zip(shard_ids, shards):
             batch.set(self._meta.document(sid),
                       _firestore_safe({"problems": chunk}))
-        ptr = {k: v for k, v in index.items() if k != "problems"}
+        _retry_transient(batch.commit)             # new shards first
+        ptr = {k: v for k, v in index.items()
+               if k not in ("problems", "generation")}
         ptr["shards"] = shard_ids
         ptr["count"] = len(entries)
-        batch.set(self._meta.document(INDEX_DOC), _firestore_safe(ptr))
-        _retry_transient(batch.commit)
-        for sid in old_shards - set(shard_ids):
+        try:
+            new_gen = self._cas_pointer(ptr, expect_generation)   # pointer last
+        except IndexConflict:
+            for sid in shard_ids:      # we lost the race; don't orphan our shards
+                _retry_transient(self._meta.document(sid).delete)
+            raise
+        for sid in old_shards:         # pointer now references the new shards
             _retry_transient(self._meta.document(sid).delete)
+        return new_gen
 
     def rebuild_index(self) -> dict:
         """Repair path: rebuild the index by streaming the WHOLE collection
@@ -232,40 +290,66 @@ class FirestorePool:
 
 
 def push_local_pool(local_dir: str | Path, key_path: str | None = None,
-                    overwrite: bool = False) -> dict:
+                    overwrite: bool = False, remote: "FirestorePool | None" = None
+                    ) -> dict:
     """Upload every problem in a local JSON pool to Firestore.
 
     Cost: ONE index read (pointer + shards) regardless of pool size, plus one
     write per newly uploaded problem and the index write — never a full
-    collection scan. The index is updated by unioning the existing index with
-    the freshly uploaded rows, so a producer that holds only a subset of the
-    pool locally never drops other producers' entries.
+    collection scan.
 
-    Returns {uploaded, skipped, total}.
+    The index update is an optimistic-locked read-union-write (T11): the docs
+    are uploaded once (idempotent set), then the pointer is re-read and rewritten
+    under a generation check; if a concurrent producer bumped the generation
+    meanwhile, we re-read, re-union (so no one's entries are dropped) and retry.
+
+    Returns {uploaded, skipped, total}. *remote* is injectable for testing.
     """
     from .store import ProblemPool, index_entry, index_from_entries
 
     local = ProblemPool(local_dir)
-    remote = FirestorePool(key_path)
-    idx = remote.read_index() or {"problems": []}
-    by_id = {e["id"]: e for e in idx.get("problems", [])}
+    remote = remote or FirestorePool(key_path)
+    idx = remote.read_index() or {"problems": [], "generation": 0}
+    have = {e["id"] for e in idx.get("problems", [])}
 
-    writer = remote._db.bulk_writer()   # batches + retries writes internally
+    # 1. upload the docs that are new to the current index (idempotent set).
+    writer = remote._db.bulk_writer()
+    new_entries = {}
     uploaded = skipped = 0
     try:
         for pid in local.ids():
-            if pid in by_id and not overwrite:
+            if pid in have and not overwrite:
                 skipped += 1
                 continue
             rec = local.get(pid)
             writer.set(remote._col.document(pid), _firestore_safe(rec))
-            by_id[pid] = index_entry(rec)
+            new_entries[pid] = index_entry(rec)
             uploaded += 1
     finally:
         writer.close()      # flush all buffered writes
 
-    if uploaded:
-        remote.write_index(index_from_entries(by_id.values()))
+    # 2. fold the new rows into the index under an optimistic lock, retrying on
+    #    a concurrent write so no producer's entries are lost.
+    if uploaded or overwrite:
+        for attempt in range(_MAX_INDEX_CAS_RETRIES):
+            cur = remote.read_index() or {"problems": [], "generation": 0}
+            gen = cur.get("generation", 0)
+            by_id = {e["id"]: e for e in cur.get("problems", [])}
+            by_id.update(new_entries)
+            try:
+                remote.write_index(index_from_entries(by_id.values()),
+                                   expect_generation=gen)
+                break
+            except IndexConflict:
+                if attempt == _MAX_INDEX_CAS_RETRIES - 1:
+                    # docs are uploaded but the index write kept losing the
+                    # race; surface it so the operator can re-run (a re-push or
+                    # rebuild_index reconciles — the set() writes are idempotent).
+                    raise IndexConflict(
+                        f"index update lost the race {_MAX_INDEX_CAS_RETRIES}x; "
+                        f"{uploaded} docs uploaded but not yet indexed — re-run "
+                        f"push (idempotent) or rebuild_index")
+                time.sleep(0.5 * (attempt + 1))
     return {"uploaded": uploaded, "skipped": skipped, "total": len(local.ids())}
 
 
@@ -283,6 +367,10 @@ def backfill_lead_training(key_path: str | None = None,
     app's IMP tab filters on. Bidding docs are read but never written.
 
     Returns {lead_total, updated, total}. ``dry_run`` reports without writing.
+
+    Rebuilds the index from a full snapshot (unconditional write), so run
+    it when no producer is actively pushing — a concurrent push committed
+    after this read would be dropped from the rebuilt index (T11).
     """
     from ..scoring.lead_metrics import legacy_training_block
     from .store import build_index
@@ -321,6 +409,10 @@ def backfill_lead_types(key_path: str | None = None,
     scan). Bidding docs are read but never written.
 
     Returns {lead_total, updated, total}. ``dry_run`` reports without writing.
+
+    Rebuilds the index from a full snapshot (unconditional write), so run
+    it when no producer is actively pushing — a concurrent push committed
+    after this read would be dropped from the rebuilt index (T11).
     """
     from ..engine.lead_classify import classify_lead_record
     from .store import build_index

@@ -18,7 +18,7 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import _index_html
+from bridge_trainer.app.webapp import _index_html, _SHARED_JS
 
 
 def _extract_resolve_filters(js: str) -> str:
@@ -38,7 +38,7 @@ def _extract_resolve_filters(js: str) -> str:
 
 def _run_resolve(stored) -> dict:
     """Evaluate resolveFilters with a stub pool (levels 1-5, three types)."""
-    fn = _extract_resolve_filters(_index_html())
+    fn = _extract_resolve_filters(_SHARED_JS)
     harness = (
         fn
         + """
@@ -92,5 +92,5 @@ def test_stale_values_are_dropped_and_real_selection_kept():
 
 
 def test_source_carries_sanitization():
-    js = _index_html()
+    js = _SHARED_JS
     assert "kept.length ? kept : all.slice()" in js

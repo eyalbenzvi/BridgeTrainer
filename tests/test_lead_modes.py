@@ -16,7 +16,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bridge_trainer.app.webapp import (_dashboard_html, _index_html,
+from bridge_trainer.app.webapp import (_SHARED_JS,
+    _dashboard_html, _index_html,
                                        _lead_html, _problem_html)
 from bridge_trainer.engine.lead_maker import LEAD_SCHEMA, build_lead_record
 from bridge_trainer.engine.lead_verdict import LeadEvaluation, judge_lead
@@ -240,7 +241,7 @@ def test_attempts_persist_training_mode():
 # --------------------------------------------------------------------------
 
 def test_home_page_has_mp_and_imp_cards():
-    html = _index_html()
+    html = _index_html() + _SHARED_JS
     # MP / IMP stay Latin (universal scoring jargon); descriptions are Hebrew
     assert "<b>MP</b>" in html
     assert "מקסימום לקיחות בהגנה" in html
@@ -250,13 +251,13 @@ def test_home_page_has_mp_and_imp_cards():
 
 
 def test_mode_goals_shown():
-    for page in (_index_html(), _lead_html()):
+    for page in (_index_html() + _SHARED_JS, _lead_html() + _SHARED_JS):
         assert "המטרה: למקסם את מספר הלקיחות הצפוי בהגנה." in page
         assert "המטרה: למקסם את ערך ה־IMP הצפוי מהתוצאה הסופית." in page
 
 
 def test_lead_page_mode_banner_and_results():
-    html = _lead_html()
+    html = _lead_html() + _SHARED_JS
     assert 'id="modebanner"' in html
     assert "MATCHPOINTS" in html           # prominent current-mode label
     assert 'id="resid"' in html            # your lead / recommended / rank

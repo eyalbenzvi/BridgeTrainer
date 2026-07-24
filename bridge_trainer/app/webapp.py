@@ -21,7 +21,36 @@ place of prose.
 """
 from __future__ import annotations
 
+import re
+from importlib import resources
 from pathlib import Path
+
+
+def _sdk_module_urls() -> list[str]:
+    """The gstatic Firebase SDK module URLs, read from bt-firebase.js so the
+    preload hints can never drift from the modules actually imported."""
+    src = (resources.files("bridge_trainer") / "web"
+           / "bt-firebase.js").read_text(encoding="utf-8")
+    return re.findall(r"https://www\.gstatic\.com/firebasejs/\S+?\.js", src)
+
+
+def _head_preloads() -> str:
+    """<link> hints for the Firebase critical path, shared by every page:
+    preconnect to the SDK CDN and the Firestore API, and modulepreload the SDK
+    modules (crossorigin — module fetches are CORS) plus the same-origin module
+    graph bt-firebase.js pulls in. Kept in one place and derived from
+    bt-firebase.js to avoid drift with the real imports."""
+    links = [
+        '<link rel="preconnect" href="https://www.gstatic.com" crossorigin>',
+        '<link rel="preconnect" href="https://firestore.googleapis.com"'
+        ' crossorigin>',
+    ]
+    for url in _sdk_module_urls():
+        links.append(f'<link rel="modulepreload" href="{url}" crossorigin>')
+    for local in ("bt-logic.js", "firebase-config.js"):
+        links.append(f'<link rel="modulepreload" href="{local}">')
+    return "\n".join(links)
+
 
 _CSS = """
 :root { color-scheme: light dark; }
@@ -29,12 +58,13 @@ _CSS = """
 body {
   /* light theme tokens */
   --felt: #2E6B4F; --felt-deep: #24573F;
-  --on-felt: #ffffff; --on-felt-muted: #C9DCD1;
+  --on-felt: #ffffff; --on-felt-muted: #D9E7DE;
   --card: #ffffff; --fg: #1C2B24; --muted: #5C6B62; --line: #D9E0DA;
   --accent: #2B6CB0; --accent-tint: #2B6CB014;
   --vul: #B3252F; --nonvul: #E6F4EA; --on-nonvul: #1C5C34;
-  --sp: #2838C8; --he: #C8102E; --di: #E07000; --cl: #1A7A1A;
-  --win: #1E8E4E; --loss: #C8102E; --push: #A9B3AC;
+  --sp: #2838C8; --he: #C8102E; --di: #BC5A00; --cl: #1A7A1A;
+  --win: #1A7A43; --loss: #C8102E; --push: #A9B3AC;
+  --on-accent: #ffffff; --on-win: #ffffff; --on-loss: #ffffff;
   --gold: #EAB84C; --on-gold: #2A2410;
   --warn-bg: #FDF3DF; --warn-fg: #7A5312; --warn-line: #E3C87F;
   font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
@@ -53,6 +83,7 @@ body {
     --vul: #A62630; --nonvul: #2E4A38; --on-nonvul: #BFE3CC;
     --sp: #8C96FF; --he: #FF7B72; --di: #FFAB40; --cl: #57C957;
     --win: #3BB273; --loss: #E5665F; --push: #5B6961;
+  --on-accent: #0B1A13; --on-win: #0B1A13; --on-loss: #0B1A13;
     --gold: #D9A93E; --on-gold: #241F0C;
     --warn-bg: #2E2612; --warn-fg: #E7C97E; --warn-line: #6B5A2A;
   }
@@ -107,7 +138,8 @@ button.typerow { display: flex; align-items: center; gap: 10px; width: 100%;
                  border-radius: 10px; padding: 9px 12px; cursor: pointer; }
 button.typerow .tick { flex: 0 0 auto; width: 18px; height: 18px;
                        border-radius: 5px; border: 1.5px solid var(--accent);
-                       background: var(--accent); color: #fff; display: grid;
+                       background: var(--accent); color: var(--on-accent);
+                       display: grid;
                        place-items: center; font-size: 11px; }
 button.typerow .tick::after { content: "\\2713"; }
 button.typerow .tname { flex: 0 0 auto; font-size: 14px; font-weight: 600; }
@@ -121,7 +153,7 @@ button.typerow[aria-pressed="false"] { color: var(--muted); }
 button.typerow[aria-pressed="false"] .tick { background: transparent;
                        border-color: var(--line); color: transparent; }
 button.typerow[aria-pressed="false"] .tbar > span { background: var(--push); }
-a.big.off { background: var(--push); color: var(--card); cursor: not-allowed; }
+a.big.off { background: var(--push); color: var(--fg); cursor: not-allowed; }
 /* collapsible filter: a tap bar that folds the two groups away by default */
 .fbar { display: flex; align-items: center; gap: 10px; width: 100%;
         background: none; border: 0; font: inherit; color: var(--fg);
@@ -260,9 +292,9 @@ button.cand.near::after { position: absolute; top: 2px; right: 6px;
   justify-content: center; min-width: 46px; height: 34px;
   border-radius: 10px; padding: 0 9px; font-size: 20px; font-weight: 800;
   color: #fff; vertical-align: middle; font-variant-numeric: tabular-nums; }
-.scorechip.tone-win { background: var(--win); }
+.scorechip.tone-win { background: var(--win); color: var(--on-win); }
 .scorechip.tone-gold { background: var(--gold); color: var(--on-gold); }
-.scorechip.tone-loss { background: var(--loss); }
+.scorechip.tone-loss { background: var(--loss); color: var(--on-loss); }
 .scorechip.sm { min-width: 36px; height: 24px; font-size: 14px;
                 border-radius: 7px; font-weight: 700; }
 .scoreline { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
@@ -280,7 +312,8 @@ table.plain tr.mine td { background: #C8102E0A; }
            padding: 0 6px; background: var(--card); }
 .tag { font-size: 10px; font-weight: 700; letter-spacing: .05em;
        color: #fff; border-radius: 999px; padding: 2px 7px; }
-.tag.best { background: var(--win); } .tag.you { background: var(--accent); }
+.tag.best { background: var(--win); color: var(--on-win); }
+.tag.you { background: var(--accent); color: var(--on-accent); }
 .opt .shows { color: var(--muted); font-size: 13px; flex: 1;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .opt .ev { font-size: 16px; font-weight: 700;
@@ -290,7 +323,8 @@ table.plain tr.mine td { background: #C8102E0A; }
 .wpl { display: flex; justify-content: space-between; height: 10px;
        border-radius: 5px; overflow: hidden; background: var(--push);
        margin: 8px 0 6px; }
-.wpl .w { background: var(--win); } .wpl .l { background: var(--loss); }
+.wpl .w { background: var(--win); color: var(--on-win); }
+.wpl .l { background: var(--loss); color: var(--on-loss); }
 .chips { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap;
          gap: 6px; align-items: center;
          font-variant-numeric: tabular-nums; }
@@ -369,11 +403,12 @@ h2 { font-size: 19px; font-weight: 700; color: var(--fg); margin: 0; }
 /* manual theme override (wins over prefers-color-scheme) */
 html[data-theme="light"] body {
   --felt: #2E6B4F; --felt-deep: #24573F; --on-felt: #ffffff;
-  --on-felt-muted: #C9DCD1; --card: #ffffff; --fg: #1C2B24; --muted: #5C6B62;
+  --on-felt-muted: #D9E7DE; --card: #ffffff; --fg: #1C2B24; --muted: #5C6B62;
   --line: #D9E0DA; --accent: #2B6CB0; --accent-tint: #2B6CB014;
   --vul: #B3252F; --nonvul: #E6F4EA; --on-nonvul: #1C5C34;
-  --sp: #2838C8; --he: #C8102E; --di: #E07000; --cl: #1A7A1A;
-  --win: #1E8E4E; --loss: #C8102E; --push: #A9B3AC;
+  --sp: #2838C8; --he: #C8102E; --di: #BC5A00; --cl: #1A7A1A;
+  --win: #1A7A43; --loss: #C8102E; --push: #A9B3AC;
+  --on-accent: #ffffff; --on-win: #ffffff; --on-loss: #ffffff;
   --gold: #EAB84C; --on-gold: #2A2410;
   --warn-bg: #FDF3DF; --warn-fg: #7A5312; --warn-line: #E3C87F; }
 html[data-theme="dark"] body {
@@ -383,6 +418,7 @@ html[data-theme="dark"] body {
   --vul: #A62630; --nonvul: #2E4A38; --on-nonvul: #BFE3CC;
   --sp: #8C96FF; --he: #FF7B72; --di: #FFAB40; --cl: #57C957;
   --win: #3BB273; --loss: #E5665F; --push: #5B6961;
+  --on-accent: #0B1A13; --on-win: #0B1A13; --on-loss: #0B1A13;
   --gold: #D9A93E; --on-gold: #241F0C;
   --warn-bg: #2E2612; --warn-fg: #E7C97E; --warn-line: #6B5A2A; }
 html[data-theme="dark"] .card { border: 1px solid var(--line); box-shadow: none; }
@@ -467,7 +503,8 @@ button.typerow .tcount { text-align: end; }
           color: var(--muted); padding: 8px 14px; cursor: pointer;
           border-inline-start: 1px solid var(--line); font-weight: 700; }
 .segctl button:first-child { border-inline-start: 0; }
-.segctl button[aria-pressed="true"] { background: var(--accent); color: #fff; }
+.segctl button[aria-pressed="true"] { background: var(--accent);
+  color: var(--on-accent); }
 .sheet .closebtn { width: 100%; margin-top: 16px; padding: 12px; border-radius: 10px;
           border: 1px solid var(--line); background: var(--card); color: var(--fg);
           font: inherit; font-weight: 700; cursor: pointer; }
@@ -496,7 +533,7 @@ button.modecard[aria-pressed="true"] { border-color: var(--accent);
 button.modecard[aria-pressed="true"] b { color: var(--accent); }
 .modebanner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .modechip { display: inline-block; font-size: 12px; font-weight: 800;
-  letter-spacing: .08em; color: #fff; background: var(--accent);
+  letter-spacing: .08em; color: var(--on-accent); background: var(--accent);
   border-radius: 999px; padding: 3px 10px; }
 /* the goal sentence is Hebrew with embedded Latin jargon (IMP/MP) — keep an
    RTL base direction and isolate it, or the whole sentence scrambles */
@@ -541,7 +578,7 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
 .modepills button.modecard[aria-pressed="true"] { opacity: 1;
   background: var(--accent); border-color: var(--accent); }
 .modepills button.modecard[aria-pressed="true"] b,
-.modepills button.modecard[aria-pressed="true"] small { color: #fff; }
+.modepills button.modecard[aria-pressed="true"] small { color: var(--on-accent); }
 .scencard .modegoal { margin-top: 6px; }
 /* loading skeletons */
 .skl { height: 12px; border-radius: 6px; background: var(--line);
@@ -586,7 +623,8 @@ button.modechip { border: 0; font: inherit; cursor: pointer;
 /* dashboard tabs */
 .tabs { display: flex; margin: 0 0 12px; width: 100%; background: var(--card); }
 .tabs button { flex: 1; padding: 10px 6px; }
-.tabs button[aria-selected="true"] { background: var(--accent); color: #fff; }
+.tabs button[aria-selected="true"] { background: var(--accent);
+  color: var(--on-accent); }
 .dtab[hidden] { display: none; }
 /* tappable recent-miss rows */
 ul.misslist { list-style: none; margin: 4px 0 0; padding: 0; }
@@ -776,6 +814,45 @@ async function fetchIndex() {
   if (!window.BT) throw new Error("Firebase not ready");
   return window.BT.fetchIndex();
 }
+/* Shared load-error panel: distinguishes an offline device from a genuine
+   failure and offers a retry (the caller wires #<retryId> to re-run init),
+   so a failed getProblem/fetchIndex never strands the user on a blank
+   skeleton with no way out. */
+function loadErrorHtml(retryId) {
+  var offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  var em = offline ? "אין חיבור לרשת" : "הטעינה נכשלה";
+  var sub = offline ? "בדוק את החיבור ונסה שוב."
+                    : "משהו השתבש. אפשר לנסות שוב או לחזור לתרגול.";
+  return '<div class="card state" role="alert"><div class="em">' + em +
+    '</div><div class="muted">' + sub + '</div>' +
+    '<button type="button" class="big" id="' + retryId + '">נסה שוב</button>' +
+    '<div style="margin-top:8px"><a href="index.html">חזרה לתרגול</a></div>' +
+    '</div>';
+}
+/* transient toast for a background failure (e.g. an attempt save that didn't
+   reach the server, dispatched as bt-save-failed by web/bt-firebase.js).
+   Non-blocking and auto-dismissing — the save is retried automatically. */
+function btToast(msg) {
+  let t = document.getElementById("bt-toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "bt-toast";
+    t.setAttribute("role", "status");
+    t.style.cssText = "position:fixed;bottom:16px;inset-inline:0;margin:auto;" +
+      "width:max-content;max-width:90%;z-index:9998;padding:10px 16px;" +
+      "border-radius:10px;font-size:14px;background:var(--fg,#222);" +
+      "color:var(--card,#fff);box-shadow:0 2px 10px rgba(0,0,0,.3);" +
+      "transition:opacity .3s;pointer-events:none";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = "1";
+  clearTimeout(btToast._t);
+  btToast._t = setTimeout(() => { t.style.opacity = "0"; }, 4000);
+}
+if (typeof window !== "undefined")
+  window.addEventListener("bt-save-failed",
+    () => btToast("השמירה נכשלה — ננסה שוב אוטומטית."));
 /* ===== central Hebrew string table: UI chrome strings live here, so new
    features add a key instead of an inline literal ===== */
 const HE = {
@@ -785,7 +862,7 @@ const HE = {
   theme: "ערכת נושא", themeSystem: "מערכת", themeLight: "בהיר",
   themeDark: "כהה", textSize: "גודל טקסט", sizeS: "רגיל", sizeL: "גדול",
   sizeXL: "ענק", guest: "אורח",
-  guestNote: "אורח — ההתקדמות נשמרת מקומית",
+  guestNote: "לא מחובר — התחבר כדי לשמור התקדמות",
   signIn: "התחבר עם Google", signOut: "התנתק", connected: "מחובר",
   close: "סגור", selectAll: "בחר הכל", clear: "נקה", problems: "בעיות",
   you: "אתה", partner: "שותף", leader: "מוביל", declarer: "מכריז",
@@ -898,10 +975,14 @@ function loadFilters() {
 function saveFilters(f) { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); }
 /* the site splits into two scenarios; kind routes each problem + page */
 function kindOf(p) { return p.kind || "bidding"; }
-function routeFor(kind, id) {
-  const base = (kind === "lead" ? "lead.html" : "p.html") + "?id=" +
-               encodeURIComponent(id);
-  return kind === "lead" ? base + "&mode=" + leadMode() : base;
+function routeFor(kind, id, opts) {
+  let base = (kind === "lead" ? "lead.html" : "p.html") + "?id=" +
+             encodeURIComponent(id);
+  if (kind === "lead") base += "&mode=" + leadMode();
+  // retry=1 deep-links into a clean re-attempt (skips the auto-reveal of the
+  // prior answer) so the dashboard's "review" links let you practice again.
+  if (opts && opts.retry) base += "&retry=1";
+  return base;
 }
 /* Opening-lead training modes: exactly two — MP (Matchpoints) and IMPs.
    Both modes show every metric; ONLY the ranking objective differs. */
@@ -998,6 +1079,29 @@ function pickUnseen(index, filters) {
   const unseen = index.problems.filter(p => !s[p.id] && matchesFilters(p, f));
   if (!unseen.length) return null;
   return unseen[Math.floor(Math.random() * unseen.length)].id;
+}
+/* Prefetch the NEXT problem after an answer so the "next" tap navigates
+   instantly: the chosen id + its doc are stashed in sessionStorage, and the
+   destination page consumes the doc (takePrefetch) instead of a fresh read. */
+const PREFETCH_KEY = "bt_prefetch";
+function readPrefetch() {
+  try { return JSON.parse(sessionStorage.getItem(PREFETCH_KEY)); }
+  catch (e) { return null; }
+}
+function takePrefetch(id) {
+  const pf = readPrefetch();
+  try { sessionStorage.removeItem(PREFETCH_KEY); } catch (e) { /* */ }
+  return (pf && pf.id === id && pf.doc) ? pf.doc : null;
+}
+async function prefetchNext(index, filters) {
+  try {
+    if (!index) return;
+    const nid = pickUnseen(index, filters);
+    if (!nid) { sessionStorage.removeItem(PREFETCH_KEY); return; }
+    const doc = await window.BT.getProblem(nid);
+    if (doc) sessionStorage.setItem(PREFETCH_KEY,
+      JSON.stringify({ id: nid, doc }));
+  } catch (e) { /* prefetch is best-effort */ }
 }
 /* BBO four-color deck */
 const SUITS = {S: ["ss", "\\u2660"], H: ["sh", "\\u2665"],
@@ -1398,7 +1502,12 @@ function initChrome() {
     if (guest) {
       nameEl.textContent = HE.guestNote;
       btn.textContent = HE.signIn;
-      btn.onclick = () => window.BT && window.BT.signIn();
+      // swallow the rejection doSignIn() now throws on a real failure so it
+      // isn't an unhandled rejection (the gate shows its own error UI).
+      btn.onclick = () => {
+        const p = window.BT && window.BT.signIn();
+        if (p && p.catch) p.catch(() => {});
+      };
       if (navLbl) navLbl.textContent = HE.account;
     } else {
       const u = window.BT.user();
@@ -1428,7 +1537,8 @@ def _index_html() -> str:
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>מאמן הברידג' — תרגול</title>
-<style>{_CSS}</style>
+<link rel="stylesheet" href="app.css">
+{_head_preloads()}
 <script type="module" src="bt-firebase.js"></script></head><body data-nav="practice">
 <main id="main" tabindex="-1">
 <h1><span style="opacity:.9">&spades;</span> מאמן הברידג'</h1>
@@ -1480,7 +1590,8 @@ def _index_html() -> str:
 <div class="skl" style="width:40%"></div>
 </div>
 </main>
-<script>{_SHARED_JS}
+<script src="bt-shared.js"></script>
+<script>
 let INDEX = null;
 const SCEN_KEY = "bt_scenario";
 const LEAD_FILTERS_KEY = "bt_lead_filters";
@@ -1504,6 +1615,12 @@ function setScenario(kind) {{
   document.getElementById("modes").style.visibility = vis;
   document.getElementById("modegoal").style.visibility = vis;
   syncModeUi();
+  // The choice above is already persisted (SCEN + localStorage) and reflected
+  // in the UI. The facet build below needs the pool index; if a click lands
+  // before it loads, stop here — init() calls setScenario(SCEN) once the index
+  // arrives and rebuilds from the persisted choice (guards against a null-INDEX
+  // crash in resolveFilters/poolFacets).
+  if (!INDEX) return;
   FILTERS = resolveFilters(INDEX, loadCur(), kind);
   buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
 }}
@@ -1518,6 +1635,9 @@ document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = ev => {{
   ev.stopPropagation();   // don't re-trigger the scenario card underneath
   setLeadMode(b.dataset.mode);
   syncModeUi();
+  // mode is persisted (setLeadMode); the facet rebuild needs the index. If the
+  // click lands before it loads, stop here — init() rebuilds once it arrives.
+  if (!INDEX) return;
   // each mode serves its own generator's pool, so the facet options and
   // counts are rebuilt from that pool
   FILTERS = resolveFilters(INDEX, loadCur(), SCEN);
@@ -1627,12 +1747,14 @@ document.getElementById("type-list").addEventListener("click", ev => {{
   persist();
 }});
 document.getElementById("all-diff").onclick = () => {{
+  if (!INDEX) return;   // facets need the pool index (see setScenario guard)
   const f = poolFacets(INDEX, FILTERS.kind);
   FILTERS.levels =
     FILTERS.levels.length >= f.levels.length ? [] : f.levels.slice();
   persist();
 }};
 document.getElementById("all-type").onclick = () => {{
+  if (!INDEX) return;   // facets need the pool index (see setScenario guard)
   const f = poolFacets(INDEX, FILTERS.kind);
   FILTERS.types =
     FILTERS.types.length >= f.types.length ? [] : f.types.slice();
@@ -1712,9 +1834,10 @@ function renderStats() {{
 async function init() {{
   try {{ INDEX = await fetchIndex(); }}
   catch (e) {{
-    document.getElementById("stats").innerHTML =
-      '<div class="state"><div class="em">המאגר עדיין נבנה</div>' +
-      '<div class="muted">חזור בעוד רגע.</div></div>';
+    const box = document.getElementById("stats");
+    box.removeAttribute("aria-label");   // was "loading…"; now an error
+    box.innerHTML = loadErrorHtml("retry-load");
+    box.querySelector("#retry-load").onclick = () => init();
     return;
   }}
   const q = new URLSearchParams(location.search);
@@ -1781,7 +1904,7 @@ function renderSessionSummary() {{
   const missHtml = misses.length
     ? `<div style="margin-top:10px;font-weight:700">לסקירה — החלטות מתחת ל־85</div>` +
       `<ul class="notes">` + misses.map(i =>
-        `<li><a href="${{routeFor(s.kind || "bidding", i.id)}}">` +
+        `<li><a href="${{routeFor(s.kind || "bidding", i.id, {{retry: true}})}}">` +
         `בעיה ${{i.idx + 1}} בסבב (ציון ${{i.sc}}) &larr;</a></li>`).join("") + `</ul>`
     : `<div style="margin-top:8px">הכול מיטבי או קרוב לכך — כל הכבוד!</div>`;
   const card = document.createElement("div");
@@ -1804,6 +1927,11 @@ if (new URLSearchParams(location.search).get("summary")) {{
   if (document.readyState !== "loading") renderSessionSummary();
   else addEventListener("DOMContentLoaded", renderSessionSummary);
 }}
+// the page rendered from cache; refresh the counts once the background sync
+// lands (T4) — e.g. answers from another device change the waiting counts.
+window.addEventListener("bt-attempts-synced", () => {{
+  if (INDEX) {{ updateScenCounts(); renderStats(); }}
+}});
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 </script>
@@ -1815,7 +1943,8 @@ def _problem_html() -> str:
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>בעיית הכרזה</title>
-<style>{_CSS}</style>
+<link rel="stylesheet" href="app.css">
+{_head_preloads()}
 <script type="module" src="bt-firebase.js"></script></head><body>
 <main id="main" tabindex="-1">
 <div class="topbar">
@@ -1867,8 +1996,32 @@ style="white-space:pre-line;font-size:13px"></div></details>
 <table id="rtable" class="plain"></table></details>
 </div>
 </main>
-<script>{_SHARED_JS}
+<script src="bt-shared.js"></script>
+<script>
 let P = null, INDEX = null, NOTES = [], OPTSHOWS = {{}};
+// true while re-attempting an already-answered problem: the re-answer is
+// recorded (attemptCount++) but keeps the first-attempt score and does NOT
+// count toward the practice session.
+let RETRYING = false;
+function resetForRetry() {{
+  RETRYING = true;
+  document.getElementById("verdict").style.display = "none";
+  const rb = document.getElementById("retry-answer");
+  if (rb) rb.remove();
+  document.querySelectorAll("button.cand").forEach(b => {{
+    b.disabled = false;
+    b.classList.remove("good", "near", "bad", "off", "chosen");
+  }});
+  const cf = document.getElementById("confirm");
+  if (cf) cf.innerHTML = "";
+  const turn = document.querySelector("table.bidding td.turn");
+  if (turn) turn.innerHTML = "?";
+  ARMED = null;
+  document.getElementById("cands").scrollIntoView(
+    {{block: "center", behavior: "smooth"}});
+  const first = document.querySelector("button.cand");
+  if (first) first.focus();   // move focus off the now-hidden verdict
+}}
 function stripNoise(t) {{
   return (t || "").replace(/Next call is usually[^]*?%\\)\\.\\s*/g, "")
                   .replace(/most common continuation:[^]*?%\\)\\.\\s*/g, "");
@@ -2088,21 +2241,47 @@ function reveal(chosen) {{
     rbox.innerHTML = h;
   }} else document.getElementById("raw-box").style.display = "none";
   document.getElementById("verdict").style.display = "block";
+  // let the user re-attempt an answered problem (the "review" loop). The
+  // re-answer keeps the first score and doesn't touch the session.
+  if (!document.getElementById("retry-answer")) {{
+    const rb = document.createElement("button");
+    rb.type = "button"; rb.className = "big"; rb.id = "retry-answer";
+    rb.style.cssText = "background:var(--card);color:var(--accent);" +
+      "border:1px solid var(--accent)";
+    rb.textContent = "נסה שוב (לא ישפיע על הציון)";
+    rb.onclick = resetForRetry;
+    const vd = document.getElementById("verdict");
+    const nx = document.getElementById("next");
+    if (nx && nx.parentNode === vd) vd.insertBefore(rb, nx);
+    else vd.appendChild(rb);
+  }}
 }}
 function choose(action) {{
-  if (store()[P.id]) return;
+  if (store()[P.id] && !RETRYING) return;
   reveal(action);
   const rec = window.BT.gradeBidding(P, action);
-  window.BT.record(P.id, rec);
-  bumpSession(rec.score, P.id);
+  window.BT.record(P.id, rec);   // updates the cache synchronously (excluded below)
+  if (!RETRYING) bumpSession(rec.score, P.id);
+  RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
+  // warm the next problem so the "next" tap navigates instantly (best-effort)
+  (async () => {{
+    const ses = getSession();
+    if (ses && (ses.count || 0) >= ses.size) return;   // session done -> no next
+    try {{ if (!INDEX) INDEX = await fetchIndex(); }} catch (e) {{ return; }}
+    const s = getSession();
+    const flt = (s && s.kind === "bidding")
+      ? {{kind: "bidding", levels: s.levels, types: s.types}}
+      : resolveFilters(INDEX, loadFilters(), "bidding");
+    prefetchNext(INDEX, flt);
+  }})();
 }}
 /* two-step selection: first tap shows what the bid means, a second
    (confirm) tap locks the answer in */
 let ARMED = null;
 function arm(btn) {{
-  if (store()[P.id]) return;
+  if (store()[P.id] && !RETRYING) return;
   const a = btn.dataset.action;
   const box = document.getElementById("confirm");
   document.querySelectorAll("button.cand")
@@ -2187,7 +2366,14 @@ function normalize() {{
 }}
 async function init() {{
   const id = new URLSearchParams(location.search).get("id");
-  P = await window.BT.getProblem(id);
+  try {{ P = takePrefetch(id) || await window.BT.getProblem(id); }}
+  catch (e) {{
+    const box = document.getElementById("problem");
+    box.removeAttribute("aria-label");   // was "loading…"; now an error
+    box.innerHTML = loadErrorHtml("retry-load");
+    box.querySelector("#retry-load").onclick = () => init();
+    return;
+  }}
   if (!P) {{ document.getElementById("problem").innerHTML =
     '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
     '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }}
@@ -2246,17 +2432,45 @@ async function init() {{
   document.getElementById("next").onclick = async () => {{
     const s = getSession();
     if (s && (s.count || 0) >= s.size) {{ location.href = "index.html?summary=1"; return; }}
-    if (!INDEX) INDEX = await fetchIndex();
+    try {{ if (!INDEX) INDEX = await fetchIndex(); }}
+    catch (e) {{
+      const box = document.getElementById("problem");
+      box.removeAttribute("aria-label");
+      box.innerHTML = loadErrorHtml("retry-load");
+      box.querySelector("#retry-load").onclick = () => init();
+      return;
+    }}
     const flt = (s && s.kind === "bidding")
       ? {{kind: "bidding", levels: s.levels, types: s.types}}
       : resolveFilters(INDEX, loadFilters(), "bidding");
-    const nid = pickUnseen(INDEX, flt);
+    // use the prefetched next id if it's still unseen; else pick fresh
+    const pf = readPrefetch();
+    // use the prefetched id only if it still exists, is unseen, and matches the
+    // active filter (it may have gone stale — seen elsewhere, or the filter/
+    // mode changed in another tab since the prefetch).
+    const pfp = pf && pf.id && INDEX.problems.find(p => p.id === pf.id);
+    const nid = (pfp && !store()[pf.id] && matchesFilters(pfp, flt))
+      ? pf.id : pickUnseen(INDEX, flt);
     if (!nid) {{ location.href = "index.html?summary=1"; return; }}
     location.href = "p.html?id=" + encodeURIComponent(nid);
   }};
   const prev = store()[P.id];
-  if (prev) reveal(prev.answer);
+  const retryParam = new URLSearchParams(location.search).get("retry") === "1";
+  // ?retry=1 (from the dashboard "review" links) lands on a clean, answerable
+  // problem instead of replaying the prior answer.
+  if (prev && !retryParam) reveal(prev.answer);
+  else if (prev && retryParam) RETRYING = true;
 }}
+// if the background sync (T4) brings in an answer (e.g. from another device)
+// after we've already rendered, reveal it — unless the user is mid-retry or
+// the verdict is already showing.
+window.addEventListener("bt-attempts-synced", () => {{
+  if (!P) return;
+  const prev = store()[P.id];
+  const vd = document.getElementById("verdict");
+  if (prev && !RETRYING && !ARMED && (!vd || vd.style.display === "none"))
+    reveal(prev.answer);
+}});
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 </script>
@@ -2265,6 +2479,25 @@ else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 
 _LEAD_JS = r"""
 let P = null, INDEX = null, MODE = "MP", MODE_FALLBACK = false;
+// true while re-attempting an already-answered problem (see the bidding page).
+let RETRYING = false;
+function resetForRetry() {
+  RETRYING = true;
+  document.getElementById("verdict").style.display = "none";
+  const rb = document.getElementById("retry-answer");
+  if (rb) rb.remove();
+  document.querySelectorAll("button.cardbtn").forEach(b => {
+    b.disabled = false;
+    b.classList.remove("good", "near", "bad", "chosen");
+  });
+  const cf = document.getElementById("confirm");
+  if (cf) cf.innerHTML = "";
+  ARMED = null;
+  document.getElementById("problem").scrollIntoView(
+    {block: "center", behavior: "smooth"});
+  const first = document.querySelector("button.cardbtn");
+  if (first) first.focus();   // move focus off the now-hidden verdict
+}
 const RANKS = "23456789TJQKA";
 /* ---- training-mode helpers: MP ranks by expected defensive tricks, IMP by
    expected IMP value. Every metric stays visible in both modes; only the
@@ -2461,21 +2694,46 @@ function reveal(chosen) {
       fullDealHtml(P.full_deal, roles);
   }
   document.getElementById("verdict").style.display = "block";
+  if (!document.getElementById("retry-answer")) {
+    const rb = document.createElement("button");
+    rb.type = "button"; rb.className = "big"; rb.id = "retry-answer";
+    rb.style.cssText = "background:var(--card);color:var(--accent);" +
+      "border:1px solid var(--accent)";
+    rb.textContent = "נסה שוב (לא ישפיע על הציון)";
+    rb.onclick = resetForRetry;
+    const vd = document.getElementById("verdict");
+    const nx = document.getElementById("next");
+    if (nx && nx.parentNode === vd) vd.insertBefore(rb, nx);
+    else vd.appendChild(rb);
+  }
 }
 function commit(a) {
-  if (store()[P.id]) return;
+  if (store()[P.id] && !RETRYING) return;
   reveal(a);
   const rec = window.BT.gradeLead(P, a, MODE);
-  window.BT.record(P.id, rec);
-  bumpSession(rec.score, P.id);
+  window.BT.record(P.id, rec);   // updates the cache synchronously
+  if (!RETRYING) bumpSession(rec.score, P.id);
+  RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
+  // warm the next problem so the "next" tap navigates instantly (best-effort)
+  (async () => {
+    const ses = getSession();
+    if (ses && (ses.count || 0) >= ses.size) return;   // session done -> no next
+    try { if (!INDEX) INDEX = await fetchIndex(); } catch (e) { return; }
+    const s = getSession();
+    const flt = (s && s.kind === "lead")
+      ? {kind: "lead", mode: s.mode || leadMode(),
+         levels: s.levels, types: s.types}
+      : resolveFilters(INDEX, loadLead(), "lead");
+    prefetchNext(INDEX, flt);
+  })();
 }
 /* two-step selection: first tap arms the card, a second (confirm) tap
    leads it \\u2014 so one stray tap never locks in a final answer */
 let ARMED = null;
 function arm(btn) {
-  if (store()[P.id]) return;
+  if (store()[P.id] && !RETRYING) return;
   const a = btn.dataset.action;
   const box = document.getElementById("confirm");
   document.querySelectorAll("button.cardbtn")
@@ -2499,7 +2757,14 @@ function loadLead() {
 async function init() {
   const q = new URLSearchParams(location.search);
   const id = q.get("id");
-  P = await window.BT.getProblem(id);
+  try { P = takePrefetch(id) || await window.BT.getProblem(id); }
+  catch (e) {
+    const box = document.getElementById("problem");
+    box.removeAttribute("aria-label");   // was "loading…"; now an error
+    box.innerHTML = loadErrorHtml("retry-load");
+    box.querySelector("#retry-load").onclick = () => init();
+    return;
+  }
   if (!P) { document.getElementById("problem").innerHTML =
     '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
     '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }
@@ -2586,19 +2851,41 @@ async function init() {
   document.getElementById("next").onclick = async () => {
     const s = getSession();
     if (s && (s.count || 0) >= s.size) { location.href = "index.html?summary=1"; return; }
-    if (!INDEX) INDEX = await fetchIndex();
+    try { if (!INDEX) INDEX = await fetchIndex(); }
+    catch (e) {
+      const box = document.getElementById("problem");
+      box.removeAttribute("aria-label");
+      box.innerHTML = loadErrorHtml("retry-load");
+      box.querySelector("#retry-load").onclick = () => init();
+      return;
+    }
     const flt = (s && s.kind === "lead")
       ? {kind: "lead", mode: s.mode || leadMode(),
          levels: s.levels, types: s.types}
       : resolveFilters(INDEX, loadLead(), "lead");
-    const nid = pickUnseen(INDEX, flt);
+    const pf = readPrefetch();
+    // use the prefetched id only if it still exists, is unseen, and matches the
+    // active filter (it may have gone stale — seen elsewhere, or the filter/
+    // mode changed in another tab since the prefetch).
+    const pfp = pf && pf.id && INDEX.problems.find(p => p.id === pf.id);
+    const nid = (pfp && !store()[pf.id] && matchesFilters(pfp, flt))
+      ? pf.id : pickUnseen(INDEX, flt);
     if (!nid) { location.href = "index.html?summary=1"; return; }
     location.href = routeFor("lead", nid);
   };
   const prev = store()[P.id];
-  if (prev) reveal(prev.answer);
+  const retryParam = new URLSearchParams(location.search).get("retry") === "1";
+  if (prev && !retryParam) reveal(prev.answer);
+  else if (prev && retryParam) RETRYING = true;
 }
 function cardHtml_or_call(tok) { return tok ? callHtml(tok) : ""; }
+window.addEventListener("bt-attempts-synced", () => {
+  if (!P) return;
+  const prev = store()[P.id];
+  const vd = document.getElementById("verdict");
+  if (prev && !RETRYING && !ARMED && (!vd || vd.style.display === "none"))
+    reveal(prev.answer);
+});
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 """
@@ -2608,7 +2895,8 @@ def _lead_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        '<title>בעיית הובלה</title>\n<style>' + _CSS + '</style>\n'
+        '<title>בעיית הובלה</title>\n<link rel="stylesheet" href="app.css">\n'
+        + _head_preloads() + '\n'
         '<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-scenario="lead">\n<main id="main" tabindex="-1">\n'
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
@@ -2637,7 +2925,8 @@ def _lead_html() -> str:
         'double-dummy</button>; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>\n'
         '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
-        '</div>\n</main>\n<script>' + _SHARED_JS + _LEAD_JS + '</script>\n</body></html>'
+        '</div>\n</main>\n<script src="bt-shared.js"></script>\n<script>'
+        + _LEAD_JS + '</script>\n</body></html>'
     )
 
 
@@ -2659,9 +2948,9 @@ _DASHBOARD_CSS = """
 .band .bseg { display: flex; align-items: center; justify-content: center;
               font-size: 11px; font-weight: 700; color: #fff; min-width: 0;
               box-shadow: inset -1px 0 0 rgba(0,0,0,.15); }
-.band .bseg.opt { background: var(--win); }
+.band .bseg.opt { background: var(--win); color: var(--on-win); }
 .band .bseg.near { background: var(--gold); color: var(--on-gold); }
-.band .bseg.bl { background: var(--loss); }
+.band .bseg.bl { background: var(--loss); color: var(--on-loss); }
 .blegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px;
            color: var(--muted); }
 .blegend i.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block;
@@ -2888,7 +3177,7 @@ function render(attempts) {
   const missList = misses.length
     ? '<div class="card"><b>לשיפור — החלטות מתחת ל־85</b> <span class="muted">(הקש לחזרה)</span>' +
       '<ul class="misslist">' + misses.map(m =>
-        `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId)}">` +
+        `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">` +
         `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
         `<div style="margin-top:4px">בחרת <b class="ltr">${m.chosenCall}</b> — ` +
         `${OUTCOME_HE[m.outcomeClass] || m.outcomeClass}` +
@@ -2962,6 +3251,10 @@ async function init() {
     el.querySelector(".en").textContent = e.message;
   }
 }
+// refresh the dashboard once the background sync (T4) lands
+window.addEventListener("bt-attempts-synced", async () => {
+  try { render(await window.BT.allAttempts()); } catch (e) { /* keep prior */ }
+});
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 """
@@ -2971,18 +3264,21 @@ def _dashboard_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        '<title>ההתקדמות שלי</title>\n<style>' + _CSS + _DASHBOARD_CSS +
-        '</style>\n<script type="module" src="bt-firebase.js"></script></head>'
+        '<title>ההתקדמות שלי</title>\n'
+        '<link rel="stylesheet" href="app.css">\n<style>' + _DASHBOARD_CSS +
+        '</style>\n' + _head_preloads() +
+        '\n<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-nav="progress">\n<main id="main" tabindex="-1">\n'
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted">ההתקדמות שלי</span></div>\n'
         '<h1>ההתקדמות שלי</h1>\n<div id="dash" class="muted">טוען&hellip;</div>\n'
-        '</main>\n<script>' + _SHARED_JS + _DASHBOARD_JS + '</script>\n</body></html>'
+        '</main>\n<script src="bt-shared.js"></script>\n<script>'
+        + _DASHBOARD_JS + '</script>\n</body></html>'
     )
 
 
 # Static ES-module assets copied verbatim next to the generated pages.
-_ASSET_FILES = ("firebase-config.js", "bt-firebase.js")
+_ASSET_FILES = ("firebase-config.js", "bt-logic.js", "bt-firebase.js")
 
 
 def write_app(out_dir: str | Path) -> None:
@@ -2993,6 +3289,20 @@ def write_app(out_dir: str | Path) -> None:
     (out / "p.html").write_text(_problem_html(), encoding="utf-8")
     (out / "lead.html").write_text(_lead_html(), encoding="utf-8")
     (out / "dashboard.html").write_text(_dashboard_html(), encoding="utf-8")
+    # Emit the shared CSS/JS as external files (T2/PERF-F-4): every page links
+    # them instead of inlining ~73 KB, so the browser caches them once and each
+    # page's HTML shrinks to a few KB. The Python constants stay the source of
+    # truth (keeps them lint/test-visible); this just writes them out. Loaded as
+    # a classic <script> before each page's inline bootstrap, so its top-level
+    # functions are defined when the page code runs.
+    # NOTE: the asset names are stable (not content-hashed). On GitHub Pages
+    # (max-age=600, no custom headers) a returning visitor can briefly hold a
+    # new page with a cached-stale bt-shared.js within the ~10-min window after
+    # a deploy — self-healing, low impact here. Content-hashed filenames
+    # (finding PERF-F-5, not in this scope) would eliminate it and enable
+    # long-lived caching.
+    (out / "app.css").write_text(_CSS, encoding="utf-8")
+    (out / "bt-shared.js").write_text(_SHARED_JS, encoding="utf-8")
     web = resources.files("bridge_trainer") / "web"
     for name in _ASSET_FILES:
         (out / name).write_text((web / name).read_text(encoding="utf-8"),

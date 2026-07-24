@@ -34,6 +34,8 @@ import {
   writeBatch, serverTimestamp, query, where, orderBy, increment,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, isConfigured } from "./firebase-config.js";
+import { classifySignInError, mergePending, prunePending,
+         indexStamp, sameStamp } from "./bt-logic.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -58,6 +60,11 @@ let USER = null;
 let ATTEMPTS = {};   // {problemId: record}, preloaded at sign-in
 let LAST_TS = 0;     // max attempt timestamp (ms) synced so far
 let LAST_FULL_SYNC = 0;   // ms wall-clock of the last full reconcile
+// first-attempt saves that failed (rules/quota/offline), keyed by problemId,
+// awaiting a retry. Persisted so they survive a page navigation. Stored WITHOUT
+// the serverTimestamp() sentinel (not JSON-serializable) — it is re-added on
+// flush. A full reconcile must not drop these (mergePending).
+let PENDING = {};
 
 // How stale the cache may get before we do a full authoritative reconcile
 // (which is the only thing that removes server-deleted docs from the cache).
@@ -87,10 +94,74 @@ function saveCache(uid) {
   } catch (e) { /* quota/private-mode: cache is best-effort */ }
 }
 
+// ---- pending (unsynced) first-attempt saves --------------------------
+function pendingKey(uid) { return "bt_pending_" + uid; }
+function loadPending(uid) {
+  try { return JSON.parse(localStorage.getItem(pendingKey(uid))) || {}; }
+  catch (e) { return {}; }
+}
+function savePending(uid) {
+  try { localStorage.setItem(pendingKey(uid), JSON.stringify(PENDING)); }
+  catch (e) { /* best-effort */ }
+}
+// Retry every queued save. On success the entry leaves the queue; a still-
+// failing entry stays for the next attempt. serverTimestamp() is re-added here.
+let FLUSHING = false;
+async function flushPending(uid) {
+  if (FLUSHING) return;   // guard against overlapping runs (T4 backgrounds sync)
+  FLUSHING = true;
+  try {
+    for (const pid of Object.keys(PENDING)) {
+      const ref = doc(db, "users", uid, "attempts", pid);
+      try {
+        await setDoc(ref, { ...PENDING[pid], ts: serverTimestamp() });
+        delete PENDING[pid];
+      } catch (e) { /* keep it queued */ }
+    }
+    savePending(uid);
+  } finally { FLUSHING = false; }
+}
+
+// ---- pool-index cache (shared pool, not per-user) --------------------
+// Caches the merged shard rows keyed by the pointer's version stamp so repeat
+// navigations don't re-download the whole index. Best-effort: if it exceeds the
+// localStorage quota the write is dropped and we simply re-fetch next time.
+const INDEX_CACHE_KEY = "bt_index_cache";
+function loadIndexCache() {
+  try { return JSON.parse(localStorage.getItem(INDEX_CACHE_KEY)); }
+  catch (e) { return null; }
+}
+// ~1.5 MB budget: a huge full-index cache would fight the ~5 MB localStorage
+// quota and could starve the more important bt_attempts_<uid> cache (and fail
+// setItem on every navigation, silently negating the win). If the index is
+// bigger, skip caching — we simply re-fetch, as before. T12's per-kind split
+// keeps the cached slice small.
+const INDEX_CACHE_MAX = 1500000;
+function saveIndexCache(stamp, problems) {
+  try {
+    const blob = JSON.stringify({ stamp, problems });
+    if (blob.length > INDEX_CACHE_MAX) {
+      localStorage.removeItem(INDEX_CACHE_KEY);   // don't keep a stale copy
+      return;
+    }
+    localStorage.setItem(INDEX_CACHE_KEY, blob);
+  } catch (e) { /* quota/private-mode: cache is best-effort */ }
+}
+
 function doSignIn() {
   return signInWithPopup(auth, provider).catch((e) => {
-    console.error("popup sign-in failed, falling back to redirect", e);
-    return signInWithRedirect(auth, provider);
+    const kind = classifySignInError(e && e.code);
+    if (kind === "redirect") {
+      // popup genuinely blocked (or unsupported here): full-page redirect.
+      return signInWithRedirect(auth, provider);
+    }
+    if (kind === "cancel") {
+      // user dismissed the popup — a normal cancellation, not a failure.
+      return null;
+    }
+    // a real error (network/config/internal): let the caller surface it.
+    console.error("sign-in failed", e);
+    throw e;
   });
 }
 
@@ -115,20 +186,55 @@ function gate(mode) {
     return;
   }
   g.innerHTML =
-    "<div><h1 style='color:inherit'>&spades; Bridge Trainer</h1>" +
-    "<p>התחבר כדי לשמור ולעקוב אחר ההתקדמות שלך.</p>" +
+    "<div style='max-width:30em;line-height:1.6'>" +
+    "<h1 style='color:inherit'>&spades; Bridge Trainer</h1>" +
+    "<p>מאמן הכרזה והובלה בברידג' — תרגול בעיות אמת עם משוב מיידי, " +
+    "ניקוד 0–100 ומעקב התקדמות.</p>" +
     "<button id='bt-signin' style='font-size:17px;font-weight:700;" +
     "padding:14px 22px;border:0;border-radius:12px;background:#EAB84C;" +
-    "color:#2A2410;cursor:pointer'>התחבר עם Google</button></div>";
-  document.getElementById("bt-signin").onclick = () => doSignIn();
+    "color:#2A2410;cursor:pointer'>התחבר עם Google</button>" +
+    "<p style='font-size:13px;opacity:.85;margin-top:10px'>" +
+    "ההתקדמות נשמרת לחשבון שלך ומסתנכרנת בין המכשירים.</p>" +
+    "<p id='bt-signin-err' role='alert' " +
+    "style='color:#FFB4A8;min-height:1.2em;margin-top:6px'></p></div>";
+  const btn = document.getElementById("bt-signin");
+  btn.onclick = () => {
+    const err = document.getElementById("bt-signin-err");
+    if (err) err.textContent = "";
+    btn.disabled = true;
+    // doSignIn resolves quietly on user-cancel and rejects only on a real
+    // failure (see classifySignInError); surface that instead of an
+    // unhandled rejection, and re-enable the button to retry.
+    doSignIn()
+      .catch(() => { if (err) err.textContent =
+        "ההתחברות נכשלה. בדוק את החיבור ונסה שוב."; })
+      .finally(() => { btn.disabled = false; });
+  };
 }
 function ungate() { const g = document.getElementById("bt-gate"); if (g) g.remove(); }
 
-async function preloadAttempts(uid) {
+// Synchronous, no network: make the cached attempts + pending queue available
+// instantly so the page can render before the authoritative sync runs (T4).
+function loadCacheState(uid) {
   const cache = loadCache(uid);
   ATTEMPTS = cache.byId || {};
   LAST_TS = cache.lastTs || 0;
   LAST_FULL_SYNC = cache.lastFullSync || 0;
+  PENDING = loadPending(uid);
+}
+
+// The authoritative background sync (full reconcile or incremental) + pending
+// flush. Runs AFTER the page has already rendered from cache. Guarded against
+// overlapping runs (onAuthStateChanged re-fires on token refresh).
+let SYNCING = false;
+async function syncAttempts(uid) {
+  if (SYNCING) return;
+  SYNCING = true;
+  try {
+    await _syncAttempts(uid);
+  } finally { SYNCING = false; }
+}
+async function _syncAttempts(uid) {
   const coll = collection(db, "users", uid, "attempts");
 
   // Full reconcile: read the WHOLE collection and REPLACE the cache, so docs
@@ -136,6 +242,7 @@ async function preloadAttempts(uid) {
   // been fully synced (e.g. first load after this logic shipped) or has gone
   // stale past FULL_SYNC_INTERVAL_MS.
   if (!LAST_FULL_SYNC || Date.now() - LAST_FULL_SYNC > FULL_SYNC_INTERVAL_MS) {
+    const before = new Set(Object.keys(ATTEMPTS));   // known before the read
     const snap = await getDocs(coll);
     const next = {};
     let maxTs = 0;
@@ -145,10 +252,22 @@ async function preloadAttempts(uid) {
       if (ms > maxTs) maxTs = ms;
       next[a.problemId || d.id] = a;   // one doc per problem
     }
-    ATTEMPTS = next;
+    // keep answers RECORDED LOCALLY during the in-flight getDocs: a key that
+    // wasn't known before the read and isn't in the snapshot is a fresh answer
+    // (its write may have succeeded — so it left PENDING — but landed after the
+    // snapshot). Distinguishing "new key" from "server-deleted key" is what
+    // makes reconcile safe here (T4 review).
+    for (const pid of Object.keys(ATTEMPTS))
+      if (!before.has(pid) && !(pid in next)) next[pid] = ATTEMPTS[pid];
+    // drop pendings the server already has, then keep the rest on top of the
+    // fresh snapshot so an unsynced local answer is never wiped by reconcile.
+    PENDING = prunePending(PENDING, next);
+    ATTEMPTS = mergePending(next, PENDING);
     LAST_TS = maxTs;
     LAST_FULL_SYNC = Date.now();
+    savePending(uid);
     saveCache(uid);
+    await flushPending(uid);
     return;
   }
 
@@ -168,9 +287,13 @@ async function preloadAttempts(uid) {
     const a = d.data();
     const ms = tsMillis(a);
     if (ms > LAST_TS) LAST_TS = ms;
-    ATTEMPTS[a.problemId || d.id] = a;   // one doc per problem
+    const pid = a.problemId || d.id;
+    ATTEMPTS[pid] = a;   // one doc per problem
+    delete PENDING[pid];  // it's on the server now
   }
+  savePending(uid);
   saveCache(uid);
+  await flushPending(uid);   // retry any saves still queued
 }
 
 // ---- grading (compute the stored measurement from the verdict) --------
@@ -257,22 +380,33 @@ const BT = {
   signIn: () => doSignIn(),
   signOut: () => signOut(auth).catch((e) => console.error(e)),
 
-  // Read the sharded pool index: a small pointer doc lists shard doc ids;
-  // each shard holds a slice of the problem rows. (Legacy single-doc indexes,
-  // which carry `problems` inline, still work.)
+  // Read the sharded pool index. `getDoc` is server-first when online, so the
+  // old code re-downloaded every shard on EVERY page navigation (multi-page
+  // site) — several MB and reads per visit. Now we read only the small pointer
+  // (1 read), and if its version stamp is unchanged we return the shard rows
+  // from a local cache; we re-download the shards (in PARALLEL) only when the
+  // stamp changes. Legacy single-doc indexes (inline `problems`) still work.
   async fetchIndex() {
     const ptr = await getDoc(doc(db, "meta", "index"));
     if (!ptr.exists()) throw new Error("no pool index");
     const data = ptr.data();
     if (Array.isArray(data.problems)) return data;   // legacy single-doc
+    const stamp = indexStamp(data);
+    const cached = loadIndexCache();
+    if (cached && sameStamp(cached.stamp, stamp)
+        && Array.isArray(cached.problems)) {
+      return { ...data, problems: cached.problems };   // no shard reads
+    }
+    const snaps = await Promise.all((data.shards || []).map(
+      (sid) => getDoc(doc(db, "meta", sid))));
     const problems = [];
-    for (const sid of (data.shards || [])) {
-      const s = await getDoc(doc(db, "meta", sid));
+    for (const s of snaps) {
       if (s.exists()) {
         const sd = s.data();
         if (Array.isArray(sd.problems)) problems.push(...sd.problems);
       }
     }
+    saveIndexCache(stamp, problems);
     return { ...data, problems };
   },
   async getProblem(id) {
@@ -286,27 +420,54 @@ const BT = {
   },
   async record(problemId, rec) {
     if (!USER) return;
-    const ref = doc(db, "users", USER.uid, "attempts", problemId);
+    const uid = USER.uid;
+    const ref = doc(db, "users", uid, "attempts", problemId);
     const existing = ATTEMPTS[problemId];
     if (!existing) {
       // first attempt: one doc per problem, keyed by problemId (bounds the
-      // collection size to distinct problems answered).
-      const stored = { ...rec, problemId, isFirstAttempt: true,
-                       attemptCount: 1, ts: serverTimestamp() };
-      ATTEMPTS[problemId] = { ...rec, problemId, isFirstAttempt: true,
-                             attemptCount: 1,
-                             ts: { seconds: Math.floor(Date.now() / 1000) } };
-      try { await setDoc(ref, stored); }
-      catch (e) { console.error("could not save attempt", e); }
+      // collection size to distinct problems answered). Reflect it locally
+      // immediately (optimistic UI), but if the write fails, QUEUE it so it is
+      // retried and a full reconcile won't silently drop it (BUG-2/DB-O-9).
+      // include a client ts so a reconcile overlay (and the dashboard's
+      // recent/streak sort) keeps a timestamp; flushPending/setDoc override it
+      // with serverTimestamp() on the actual write.
+      const payload = { ...rec, problemId, isFirstAttempt: true,
+                        attemptCount: 1,
+                        ts: { seconds: Math.floor(Date.now() / 1000) } };
+      ATTEMPTS[problemId] = payload;
+      saveCache(uid);
+      try {
+        await setDoc(ref, { ...payload, ts: serverTimestamp() });
+        delete PENDING[problemId];   // confirmed on the server
+        savePending(uid);
+      } catch (e) {
+        console.error("could not save attempt", e);
+        PENDING[problemId] = payload;   // retried on next load / flush
+        savePending(uid);
+        window.dispatchEvent(new Event("bt-save-failed"));
+      }
     } else {
       // re-answer: keep the first-attempt grading, just count it.
       ATTEMPTS[problemId].attemptCount = (existing.attemptCount || 1) + 1;
+      saveCache(uid);
+      if (PENDING[problemId]) {
+        // the first attempt hasn't reached the server yet — bump the QUEUED
+        // payload instead of a merge write, which would create a partial doc
+        // (no score) that a full reconcile could let win, losing the first
+        // attempt (T9 review). flushPending carries the full record.
+        PENDING[problemId].attemptCount =
+          (PENDING[problemId].attemptCount || 1) + 1;
+        savePending(uid);
+        return;
+      }
       try {
         await setDoc(ref, { attemptCount: increment(1),
                             lastTs: serverTimestamp() }, { merge: true });
-      } catch (e) { console.error("could not update attempt", e); }
+      } catch (e) {
+        console.error("could not update attempt", e);
+        window.dispatchEvent(new Event("bt-save-failed"));
+      }
     }
-    saveCache(USER.uid);
   },
   async resetAll() {
     if (!USER) return;
@@ -317,8 +478,9 @@ const BT = {
       if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
     }
     if (n) await batch.commit();
-    ATTEMPTS = {}; LAST_TS = 0;
+    ATTEMPTS = {}; LAST_TS = 0; PENDING = {};
     try { localStorage.removeItem(cacheKey(USER.uid)); } catch (e) { /* */ }
+    try { localStorage.removeItem(pendingKey(USER.uid)); } catch (e) { /* */ }
   },
 
   // Sign-in is required. Gate the whole app until authenticated; preload the
@@ -326,17 +488,25 @@ const BT = {
   start(ready) {
     if (!isConfigured) { gate("setup"); return; }
     let handedOff = false;
-    onAuthStateChanged(auth, async (u) => {
+    onAuthStateChanged(auth, (u) => {
       if (!u) {
-        USER = null; ATTEMPTS = {}; LAST_TS = 0;
+        USER = null; ATTEMPTS = {}; LAST_TS = 0; PENDING = {};
         window.dispatchEvent(new Event("bt-user-changed"));
         gate("signin");
         return;
       }
       USER = u; ungate();
-      try { await preloadAttempts(u.uid); } catch (e) { console.error(e); }
+      // Render NOW from the local cache; do the authoritative sync in the
+      // background so the first problem/stats don't wait on a network round
+      // trip (T4). Pages listen for `bt-attempts-synced` to refresh once the
+      // server state (incl. answers from another device) has landed.
+      loadCacheState(u.uid);
       window.dispatchEvent(new Event("bt-user-changed"));
       if (!handedOff) { handedOff = true; ready(u); }
+      const ric = window.requestIdleCallback || ((f) => setTimeout(f, 1));
+      ric(() => syncAttempts(u.uid)
+        .catch((e) => console.error(e))
+        .finally(() => window.dispatchEvent(new Event("bt-attempts-synced"))));
     });
   },
 };

@@ -1,4 +1,4 @@
-from bridge_trainer.app.webapp import _problem_html
+from bridge_trainer.app.webapp import _problem_html, _SHARED_JS
 from bridge_trainer.engine.classify import TYPE_IDS
 
 
@@ -8,6 +8,6 @@ def test_problem_page_carries_classification_ui():
     assert "typeBadgeHtml(P)" in html
     assert 'id="diffline"' in html
     assert "diffLineHtml(P)" in html
-    # every taxonomy id has a display name in the JS map
+    # every taxonomy id has a display name in the JS map (shared bundle)
     for tid in TYPE_IDS:
-        assert f"{tid}:" in html
+        assert f"{tid}:" in _SHARED_JS
