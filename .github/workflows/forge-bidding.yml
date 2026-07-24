@@ -11,10 +11,12 @@ name: Forge bidding problems
 # with GITHUB_TOKEN — which is why this job grants `permissions: models: read`.
 #
 # Two ways to run:
-#   * DAILY SCHEDULE — one batch (FORGE_COUNT problems, default 24) forges,
-#     classifies, and pushes. Tune via repository variables (Settings →
+#   * SCHEDULE — every 2 hours one batch (FORGE_COUNT problems, default 30)
+#     forges, classifies, and pushes. Tune via repository variables (Settings →
 #     Secrets and variables → Actions → Variables): FORGE_BIDDING_COUNT and
-#     FORGE_BIDDING_MAX_SECONDS.
+#     FORGE_BIDDING_MAX_SECONDS. At 30 problems / 2 hours that is 360 problems a
+#     day and ~72 GitHub Models requests (5 problems per request), well inside
+#     the free tier's ~150 requests/day for a low-tier model.
 #   * MANUAL — Actions tab → "Run workflow": pick count, seed, time budget.
 #
 # What a run needs (all available on ubuntu-latest):
@@ -32,16 +34,16 @@ name: Forge bidding problems
 
 on:
   schedule:
-    # daily at 03:17 UTC (off the hour so it doesn't contend with the hourly
-    # lead forge). A blank-seed run uses the script's time-based default, so
-    # each firing scans fresh boards.
-    - cron: "17 3 * * *"
+    # every 2 hours, at :17 past the hour (off the hour so it doesn't contend
+    # with the hourly lead forge at :00). A blank-seed run uses the script's
+    # time-based default, so each firing scans fresh boards.
+    - cron: "17 */2 * * *"
   workflow_dispatch:
     inputs:
       count:
         description: "Number of problems to generate"
         type: string
-        default: "24"
+        default: "30"
         required: true
       seed:
         description: "RNG seed (blank = unique per run, so re-runs add new boards)"
@@ -119,10 +121,10 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            # daily: one batch. Time-based seed default => fresh boards.
-            N="${FORGE_COUNT:-24}"
+            # every 2 hours: one batch. Time-based seed default => fresh boards.
+            N="${FORGE_COUNT:-30}"
             BUDGET="${FORGE_MAX_SECONDS:-6000}"
-            echo ">> daily batch: $N problems, ${BUDGET}s"
+            echo ">> scheduled batch: $N problems, ${BUDGET}s"
             MAX_SECONDS="$BUDGET" \
               scripts/generate_and_push_bidding.sh "$N" 2>&1 | tee forge.log
           else
@@ -140,7 +142,7 @@ jobs:
           FORGE_COUNT: ${{ vars.FORGE_BIDDING_COUNT }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            HEAD="daily, ${FORGE_COUNT:-24} problems"
+            HEAD="every 2h, ${FORGE_COUNT:-30} problems"
           else
             HEAD="requested $COUNT"
           fi
