@@ -23,7 +23,7 @@ EXPECTED = {
     "difficultyLevel", "answer", "chosenCall", "correct", "outcomeClass",
     "gradedCost", "score", "acceptedSet", "trainingMode", "rankingMetric",
     "chosenRank", "recommendedLead", "primaryValue", "isFirstAttempt",
-    "attemptCount", "ts", "lastTs",
+    "attemptCount", "ts", "firstTs", "lastTs",
 }
 
 
@@ -46,9 +46,11 @@ def _code() -> str:
 def test_broken_size_api_is_gone():
     code = _code()
     # request.resource.size() is not a valid rules API (it silently failed to
-    # evaluate); the field-count form must be used instead.
+    # evaluate); the field-count form must be used instead. attemptBounds(d) is
+    # called with request.resource.data and applies the count cap via d.size().
     assert "request.resource.size()" not in code
-    assert "request.resource.data.size()" in code
+    assert "let d = request.resource.data" in code
+    assert "d.size() < 25" in code
 
 
 def test_no_recursive_user_write_wildcard():
@@ -56,6 +58,16 @@ def test_no_recursive_user_write_wildcard():
     # subcollections; validation is now scoped to attempts.
     assert "/users/{uid}/{doc=**}" not in _rules()
     assert "match /attempts/{pid}" in _rules()
+
+
+def test_top_level_user_doc_is_not_writable():
+    """SEC-A-6/DB-M-9: the 'profile' doc is never written by any client, so the
+    only writable location is the attempts subtree. The /users/{uid} match must
+    grant read only — no `allow write` on the user doc itself."""
+    code = _code()
+    users = code[code.index("match /users/{uid}"):code.index("match /attempts")]
+    assert "allow read: if owner(uid)" in users
+    assert "allow write" not in users        # no profile write rule
 
 
 def test_allowlist_matches_the_contract():

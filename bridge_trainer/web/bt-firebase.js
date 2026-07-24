@@ -71,6 +71,9 @@ let PENDING = {};
 // How stale the cache may get before we do a full authoritative reconcile
 // (which is the only thing that removes server-deleted docs from the cache).
 const FULL_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6 hours
+// resetAll delete-batch size (BUG-9): under Firestore's 500-writes-per-batch
+// hard limit, with headroom.
+const RESET_BATCH_LIMIT = 400;
 
 function tsMillis(a) {
   if (!a || !a.ts) return 0;
@@ -95,6 +98,37 @@ function saveCache(uid) {
                        lastFullSync: LAST_FULL_SYNC }));
   } catch (e) { /* quota/private-mode: cache is best-effort */ }
 }
+// PERF-F-7: JSON.stringify-ing the whole ATTEMPTS map and writing it
+// synchronously blocks the main thread — and it ran on EVERY answer, right as
+// the verdict renders. Defer it to idle time and coalesce bursts. The answer is
+// already in ATTEMPTS (memory) and written to Firestore, so a dropped deferred
+// write only costs a cache refill on the next load; but a shared SYNCHRONOUS
+// flush on pagehide/visibilitychange guarantees the last answer is persisted
+// before this (multi-page) tab unloads on "next problem". NB: savePending stays
+// synchronous — a failed first-attempt save must never be lost to a deferred
+// write. `saveCache` itself stays available for the background sync paths.
+let CACHE_DIRTY_UID = null, CACHE_FLUSH_SCHEDULED = false;
+function flushCache() {
+  CACHE_FLUSH_SCHEDULED = false;
+  if (CACHE_DIRTY_UID) saveCache(CACHE_DIRTY_UID);
+}
+function scheduleSaveCache(uid) {
+  CACHE_DIRTY_UID = uid;
+  if (CACHE_FLUSH_SCHEDULED) return;
+  CACHE_FLUSH_SCHEDULED = true;
+  const ric = (typeof window !== "undefined" && window.requestIdleCallback)
+    || ((f) => setTimeout(f, 0));
+  ric(flushCache);
+}
+if (typeof window !== "undefined" && window.addEventListener) {
+  // pagehide fires on navigation/unload; visibilitychange->hidden covers the
+  // mobile "switch away" case. Both flush synchronously so nothing is lost.
+  window.addEventListener("pagehide", flushCache);
+  window.addEventListener("visibilitychange", () => {
+    if (typeof document !== "undefined"
+        && document.visibilityState === "hidden") flushCache();
+  });
+}
 
 // ---- pending (unsynced) first-attempt saves --------------------------
 function pendingKey(uid) { return "bt_pending_" + uid; }
@@ -116,7 +150,8 @@ async function flushPending(uid) {
     for (const pid of Object.keys(PENDING)) {
       const ref = doc(db, "users", uid, "attempts", pid);
       try {
-        await setDoc(ref, { ...PENDING[pid], ts: serverTimestamp() });
+        await setDoc(ref, { ...PENDING[pid], ts: serverTimestamp(),
+                            firstTs: serverTimestamp() });
         delete PENDING[pid];
       } catch (e) { /* keep it queued */ }
     }
@@ -400,7 +435,6 @@ function gradeLead(P, card, mode) {
 // ---- public API -------------------------------------------------------
 const BT = {
   user: () => USER,
-  isGuest: () => !USER,
   attempts: () => ATTEMPTS,
   gradeBidding, gradeLead,
   signIn: () => doSignIn(),
@@ -460,13 +494,18 @@ const BT = {
       // include a client ts so a reconcile overlay (and the dashboard's
       // recent/streak sort) keeps a timestamp; flushPending/setDoc override it
       // with serverTimestamp() on the actual write.
+      // firstTs is the immutable first-attempt time the dashboard orders by;
+      // ts also starts here but a re-answer bumps it so incremental sync
+      // notices cross-device attemptCount updates (DB-M-9). Both start equal.
+      const nowSec = Math.floor(Date.now() / 1000);
       const payload = { ...rec, problemId, isFirstAttempt: true,
-                        attemptCount: 1,
-                        ts: { seconds: Math.floor(Date.now() / 1000) } };
+                        attemptCount: 1, ts: { seconds: nowSec },
+                        firstTs: { seconds: nowSec } };
       ATTEMPTS[problemId] = payload;
-      saveCache(uid);
+      scheduleSaveCache(uid);   // deferred; flushed on pagehide (PERF-F-7)
       try {
-        await setDoc(ref, { ...payload, ts: serverTimestamp() });
+        await setDoc(ref, { ...payload, ts: serverTimestamp(),
+                            firstTs: serverTimestamp() });
         delete PENDING[problemId];   // confirmed on the server
         savePending(uid);
       } catch (e) {
@@ -478,7 +517,7 @@ const BT = {
     } else {
       // re-answer: keep the first-attempt grading, just count it.
       ATTEMPTS[problemId].attemptCount = (existing.attemptCount || 1) + 1;
-      saveCache(uid);
+      scheduleSaveCache(uid);   // deferred; flushed on pagehide (PERF-F-7)
       if (PENDING[problemId]) {
         // the first attempt hasn't reached the server yet — bump the QUEUED
         // payload instead of a merge write, which would create a partial doc
@@ -490,8 +529,16 @@ const BT = {
         return;
       }
       try {
-        await setDoc(ref, { attemptCount: increment(1),
-                            lastTs: serverTimestamp() }, { merge: true });
+        // bump ts (not just lastTs) so the incremental sync on ANOTHER device
+        // (which filters on ts) picks up this re-answer's attemptCount; firstTs
+        // preserves first-attempt ordering. LEGACY docs predate firstTs, so
+        // backfill it here from the existing (first-attempt) ts — otherwise the
+        // bumped ts would let firstMs reorder them on the dashboard (DB-M-9).
+        const patch = { attemptCount: increment(1),
+                        lastTs: serverTimestamp(), ts: serverTimestamp() };
+        if (!existing.firstTs && tsMillis(existing))
+          patch.firstTs = new Date(tsMillis(existing));
+        await setDoc(ref, patch, { merge: true });
       } catch (e) {
         console.error("could not update attempt", e);
         window.dispatchEvent(new Event("bt-save-failed"));
@@ -504,7 +551,9 @@ const BT = {
     let batch = writeBatch(db), n = 0;
     for (const d of snap.docs) {
       batch.delete(d.ref);
-      if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
+      if (++n >= RESET_BATCH_LIMIT) {
+        await batch.commit(); batch = writeBatch(db); n = 0;
+      }
     }
     if (n) await batch.commit();
     ATTEMPTS = {}; LAST_TS = 0; PENDING = {};
@@ -519,7 +568,18 @@ const BT = {
     let handedOff = false;
     onAuthStateChanged(auth, (u) => {
       if (!u) {
-        USER = null; ATTEMPTS = {}; LAST_TS = 0; PENDING = {};
+        const prevUid = USER && USER.uid;
+        USER = null; ATTEMPTS = {}; LAST_TS = 0; LAST_FULL_SYNC = 0; PENDING = {};
+        // SEC-C-8: on a shared computer, don't leave the signed-out user's
+        // attempt history + pending queue in localStorage for the next person.
+        // (The pool-index cache is shared, not per-user, so it's left alone.)
+        if (prevUid) {
+          try { localStorage.removeItem(cacheKey(prevUid)); } catch (e) { /* */ }
+          try { localStorage.removeItem(pendingKey(prevUid)); } catch (e) { /* */ }
+        }
+        // cancel any pending deferred cache write so a later pagehide flush
+        // can't re-create the just-removed per-user key (SEC-C-8).
+        CACHE_DIRTY_UID = null; CACHE_FLUSH_SCHEDULED = false;
         window.dispatchEvent(new Event("bt-user-changed"));
         gate("signin");
         return;

@@ -53,6 +53,19 @@ def _head_preloads() -> str:
     return "\n".join(links)
 
 
+def _theme_head_script() -> str:
+    """A tiny inline <head> script that applies the saved theme/scale to <html>
+    BEFORE the stylesheet paints, so a user whose choice differs from the OS
+    preference sees no flash of the wrong theme and no font-size reflow
+    (PERF-F-8). Mirrors applyTheme() in _SHARED_JS, which still runs later for
+    live changes from the settings sheet. Placed first in <head> so the
+    html[data-theme]/[data-scale] attributes exist before CSS is applied."""
+    return ("<script>(function(){try{var d=document.documentElement,"
+            "t=localStorage.getItem('bt_theme'),s=localStorage.getItem('bt_scale');"
+            "if(t&&t!=='system')d.setAttribute('data-theme',t);"
+            "if(s&&s!=='s')d.setAttribute('data-scale',s);}catch(e){}})();</script>")
+
+
 _CSS = """
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
@@ -117,8 +130,13 @@ a { color: var(--accent); }
           letter-spacing: .05em; color: var(--muted); }
 .alllink { background: none; border: 0; font: inherit; font-size: 12px;
            font-weight: 600; color: var(--accent); cursor: pointer;
-           padding: 2px 2px; }
+           /* >=24px tap target (WCAG 2.5.8) without growing the visual text */
+           display: inline-flex; align-items: center;
+           min-height: 24px; padding: 4px 6px; }
 .alllink:hover { text-decoration: underline; }
+/* in-panel guidance when a filter axis is emptied (UX-I-5): tells the user how
+   to leave the "0 problems" dead end instead of only greying the CTA */
+.fhint { font-size: 12px; font-weight: 600; color: var(--loss); margin-top: 6px; }
 /* segmented difficulty control (ordinal, so it reads as one scale) */
 .seg { display: grid; grid-template-columns: repeat(var(--n, 5), 1fr);
        border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -130,7 +148,10 @@ a { color: var(--accent); }
 .seg button .sname { font-size: 11px; font-weight: 600; }
 .seg button .scount { font-size: 13px; font-weight: 700;
                       font-variant-numeric: tabular-nums; }
-.seg button.active { background: var(--accent-tint); color: var(--accent); }
+.seg button.active { background: var(--accent-tint); color: var(--accent);
+  /* non-colour selection cue (UX-A-8): an inset underline, so the state
+     doesn't rely on the subtle tint/hue alone */
+  box-shadow: inset 0 -3px 0 var(--accent); font-weight: 700; }
 /* problem-type toggle rows: name + proportional volume bar + count */
 .typelist { display: flex; flex-direction: column; gap: 6px; }
 button.typerow { display: flex; align-items: center; gap: 10px; width: 100%;
@@ -185,6 +206,9 @@ a.big.off { background: var(--push); color: var(--fg); cursor: not-allowed; }
 /* four-color suits (BBO default deck) */
 .ss { color: var(--sp); } .sh { color: var(--he); }
 .sd { color: var(--di); } .sc { color: var(--cl); }
+/* belt-and-braces with the VS15 in SUITS: force text (not emoji) rendering so
+   the four-colour suit scheme's `color` always applies (UX-A-6) */
+.ss, .sh, .sd, .sc { font-variant-emoji: text; }
 /* ---- auction diagram: fixed W N E S, vul on the seat plates ---- */
 table.bidding { width: 100%; border-collapse: collapse; font-size: 17px;
                 border-radius: 10px; overflow: hidden; }
@@ -252,6 +276,21 @@ table.bidding td.turn { background: var(--accent-tint); color: var(--accent);
              place-items: center; font-size: 10px; font-weight: 700; }
 .fdcompass .cn { grid-area: cn; } .fdcompass .cw { grid-area: cw; }
 .fdcompass .ce { grid-area: ce; } .fdcompass .cs { grid-area: cs; }
+/* on phones, wide analysis tables scroll inside their own box so the page
+   itself doesn't scroll horizontally (UX-A-9); scoped to <=600px so desktop
+   keeps the normal full-width table layout (display:block would otherwise
+   shrink-wrap the columns) */
+@media (max-width: 600px) {
+  #ctable, #rtable, #ltable { display: block; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; }
+}
+/* narrow phones (<=380px): tighten table cells and stack the full-deal diagram
+   into two columns (W/E under N, compass below) so nothing overflows */
+@media (max-width: 380px) {
+  table.plain th, table.plain td { padding: 6px 5px; }
+  .fulldeal { grid-template-columns: 1fr 1fr;
+              grid-template-areas: "n n" "w e" "c c" "s s"; }
+}
 /* ---- bidding-box candidates ---- */
 .candidates { display: grid; gap: 8px; margin: 12px 0;
               grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
@@ -285,8 +324,6 @@ button.cand.near::after { position: absolute; top: 2px; right: 6px;
 }
 /* ---- verdict: outcome-first option rows ---- */
 #verdict { display: none; }
-.headline { font-size: 18px; font-weight: 700; margin: 0 0 2px; }
-.headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
 .subline { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
 /* panel-score chip (verdict headline, dashboard rows) + its breakdown line */
 .scorechip { display: inline-flex; align-items: center;
@@ -304,8 +341,12 @@ button.cand.near::after { position: absolute; top: 2px; right: 6px;
             border-radius: 2px; margin: 0 3px 0 10px; }
 .legend i:first-child { margin-left: 0; }
 .opt { padding: 12px 4px; border-top: 1px solid var(--line); }
-.opt.mine { background: #C8102E0A; border-radius: 8px; }
-table.plain tr.mine td { background: #C8102E0A; }
+/* "your pick" tint follows the --loss token in every theme (UX-A-10) instead
+   of a hardcoded light-theme red-with-alpha that stayed put in dark mode */
+.opt.mine { background: color-mix(in srgb, var(--loss) 4%, transparent);
+  border-radius: 8px; }
+table.plain tr.mine td {
+  background: color-mix(in srgb, var(--loss) 4%, transparent); }
 .opt .l1 { display: flex; align-items: center; gap: 8px; }
 .bidchip { min-width: 40px; height: 32px; border-radius: 6px;
            border: 1px solid var(--line); font-size: 16px; font-weight: 700;
@@ -318,7 +359,10 @@ table.plain tr.mine td { background: #C8102E0A; }
 .opt .shows { color: var(--muted); font-size: 13px; flex: 1;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .opt .ev { font-size: 16px; font-weight: 700;
-           font-variant-numeric: tabular-nums; white-space: nowrap; }
+           font-variant-numeric: tabular-nums; white-space: nowrap;
+           /* signed EV like "-1.2 +/-0.3": isolate LTR so the leading minus
+              (U+2212) doesn't reorder to the right in the RTL page (UX-A-5) */
+           direction: ltr; unicode-bidi: isolate; }
 .opt .ev small { font-size: 12px; font-weight: 400; color: var(--muted); }
 .opt .ev .best { color: var(--win); }
 .wpl { display: flex; justify-content: space-between; height: 10px;
@@ -384,13 +428,18 @@ button.cardbtn.near { border-color: var(--gold);
 .bartrack span { display: block; height: 100%; background: var(--accent); }
 .bartrack span.good { background: var(--win); }
 .barval { width: 6.2em; text-align: right; font-variant-numeric: tabular-nums;
-  color: var(--muted); font-size: 12px; }
+  color: var(--muted); font-size: 12px;
+  /* signed values like "-0.50 IMP": isolate LTR so the sign stays left (UX-A-5) */
+  direction: ltr; unicode-bidi: isolate; }
 /* fixed-width "(שלך)" slot on every row keeps all tracks the same length */
 .barrow .byou { flex: 0 0 auto; width: 2.9em; font-size: 12px;
   color: var(--muted); }
-.barrow.mine { background: #C8102E0A; border-radius: 8px; }
+.barrow.mine { background: color-mix(in srgb, var(--loss) 4%, transparent);
+  border-radius: 8px; }
 #bid-meaning { min-height: 1.2em; margin: 6px 0 0; }
-.headline { font-size: 22px; font-weight: 800; margin: 4px 0; }
+/* single source for the verdict headline (BUG-10: was defined 3x, the 24px v2
+   rule winning) */
+.headline { font-size: 24px; font-weight: 800; margin: 4px 0; }
 .headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
 
 /* ===== redesign layer (v2): type scale, theming, nav, a11y, RTL ===== */
@@ -399,7 +448,6 @@ body { font-size: 16px; line-height: 1.55; padding-bottom: 84px;
        padding-inline: 12px; }
 h1 { font-size: 26px; font-weight: 800; }
 h2 { font-size: 19px; font-weight: 700; color: var(--fg); margin: 0; }
-.headline { font-size: 24px; }
 
 /* manual theme override (wins over prefers-color-scheme) */
 html[data-theme="light"] body {
@@ -540,11 +588,10 @@ button.modecard[aria-pressed="true"] b { color: var(--accent); }
    RTL base direction and isolate it, or the whole sentence scrambles */
 .modegoal { font-size: 13px; color: var(--muted); direction: rtl;
   unicode-bidi: isolate; }
-/* the home lead-scenario card swaps this line between the MP and IMP goals,
-   whose different lengths wrapped to different heights and made the whole card
-   (and the layout below it) jump on every MP<->IMP toggle. Reserve a constant
-   two-line slot so switching modes never reflows. Scoped to the home div by id;
-   the problem page reuses .modegoal as an inline banner span, unaffected. */
+/* the MP and IMP goal strings differ in length and wrapped to different
+   heights, making the selector box jump on every MP<->IMP toggle. Reserve a
+   constant two-line slot so switching modes never reflows. Scoped to the home
+   div by id; the problem page reuses .modegoal as an inline banner, unaffected. */
 #modegoal { min-height: 2.9em; }
 .ctline { font-size: 14px; margin-top: 6px; }
 /* the active mode's primary metric is visually emphasized */
@@ -586,7 +633,10 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
   background: var(--accent); border-color: var(--accent); }
 .modepills button.modecard[aria-pressed="true"] b,
 .modepills button.modecard[aria-pressed="true"] small { color: var(--on-accent); }
-.scencard .modegoal { margin-top: 6px; }
+/* MP/IMP selector now sits below the scenario cards (UX-A-7); the reserved
+   #modegoal height keeps its own box from jumping on an MP<->IMP toggle */
+.modewrap { margin: 0 0 8px; }
+.modewrap .modegoal { margin-top: 6px; }
 /* loading skeletons */
 .skl { height: 12px; border-radius: 6px; background: var(--line);
        margin: 12px 0; }
@@ -596,14 +646,18 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
 }
 /* inline Hebrew jargon explainer */
 .infot { display: inline-block; margin-inline-start: 4px; color: var(--accent);
-         font-style: normal; font-size: 13px;
+         font-style: normal; font-size: 13px; position: relative;
          background: none; border: 0; padding: 0; cursor: pointer; }
+/* expand the tap target to ~24px without changing the glyph's size (UX-A-10) */
+.infot::after { content: ""; position: absolute; inset: -8px; }
 /* tap-to-explain: a dotted underline marks any term that opens a gloss
    card on tap — the same visual cue as tappable auction calls */
 button.gloss { background: none; border: 0; padding: 0; margin: 0;
-  font: inherit; color: inherit; cursor: pointer;
+  font: inherit; color: inherit; cursor: pointer; position: relative;
   text-decoration: underline dotted 1.5px; text-underline-offset: 3px;
   text-decoration-color: var(--accent); }
+/* taller tap target for the inline glossary term without shifting text layout */
+button.gloss::after { content: ""; position: absolute; inset: -8px -2px; }
 .scorechip[data-gloss] { cursor: pointer; }
 button.typebadge { font: inherit; cursor: pointer; }
 button.modechip { border: 0; font: inherit; cursor: pointer;
@@ -651,6 +705,15 @@ _SCORE_JS = r"""
    and bt-firebase.js can call it across the classic-script/module boundary
    (inline scripts execute before the deferred module). */
 const SCORE_CAP = 95;          // a non-accepted answer never quite ties best
+const SCORE_MAX_NONBEST = 94;  // rounded clamp ceiling (< SCORE_CAP, so a
+                               // non-accepted answer never rounds up to 95)
+// score-band thresholds (BUG-9): single source for btBandOf, the p/lead pages'
+// near/bad chip class, and the dashboard's review cut + distribution bins.
+const REVIEW_MIN = 85;         // "review below 85"; near band / opt bin floor
+const NEAR_MIN = 65;           // minor-deviation floor; p/lead "near" chip cut
+const ERROR_MIN = 40;          // error band floor; no-data fallback score
+const SESSION_SIZE = 10;       // problems per practice run (bt_session)
+const SESSION_TTL_MS = 6 * 60 * 60 * 1000;   // a run older than this is stale
 const SCORE_EXP = 1.6;         // soft shoulder, then a fast drop
 const SCORE_LENIENCY = 6;      // max field-leniency points (x policy weight)
 const SCORE_TAU = {bidding: 2.0, leadMP: 0.6, leadIMP: 1.75};
@@ -666,9 +729,9 @@ function btCurve(cost, tau) {
 function btBandOf(score) {
   if (typeof score !== "number") return null;
   if (score >= 100) return "best";
-  if (score >= 85) return "near";
-  if (score >= 65) return "minor";
-  if (score >= 40) return "error";
+  if (score >= REVIEW_MIN) return "near";
+  if (score >= NEAR_MIN) return "minor";
+  if (score >= ERROR_MIN) return "error";
   if (score >= 1) return "blunder";
   return "dead";
 }
@@ -697,7 +760,7 @@ function btScoreBidding(P, action) {
                   ci: t.ci};
   }
   if (!row || row.ev === undefined || row.ev === null) {
-    out.score = 40; out.fallback = true; return out;
+    out.score = ERROR_MIN; out.fallback = true; return out;
   }
   out.cost = Math.max(0, -(+row.ev));
   out.ci = +row.ci || 0;
@@ -711,7 +774,7 @@ function btScoreBidding(P, action) {
     if ((c.call || c) === action) out.policy = +c.policy || 0;
   out.base = btCurve(out.cEff, out.tau);
   out.leniency = SCORE_LENIENCY * out.policy;
-  out.score = Math.round(btClamp(out.base + out.leniency, 1, 94));
+  out.score = Math.round(btClamp(out.base + out.leniency, 1, SCORE_MAX_NONBEST));
   return out;
 }
 /* leads: MP grades tricks below best BLENDED with the matchpoint rank
@@ -741,7 +804,7 @@ function btScoreLead(P, card, mode) {
   if (accepted.includes(card)) { out.score = 100; return out; }
   const rows = v.table || [];
   const row = rows.find(r => r.card === card);
-  if (!row) { out.score = 40; out.fallback = true; return out; }
+  if (!row) { out.score = ERROR_MIN; out.fallback = true; return out; }
   const useImp = mode === "IMP" && row.exp_imps !== undefined;
   // the mode's leading metric at DISPLAY precision (2 decimals) — the tie key
   const keyOf = useImp
@@ -786,7 +849,7 @@ function btScoreLead(P, card, mode) {
   for (const r of rows)
     if (keyOf(r) === myKey) out.policy += +r.ben_softmax || 0;
   out.leniency = SCORE_LENIENCY * out.policy;
-  out.score = Math.round(btClamp(out.base + out.leniency, 1, 94));
+  out.score = Math.round(btClamp(out.base + out.leniency, 1, SCORE_MAX_NONBEST));
   return out;
 }
 /* stored attempts: new ones carry `score`; legacy ones are approximated from
@@ -801,11 +864,11 @@ function btScoreOfAttempt(a) {
   // a recorded MISTAKE with no measured cost (the old graders left cost 0
   // when the chosen option had no table row) gets the scorers' explicit
   // no-data fallback, not a free ride up the curve at cost 0
-  if (!(cost > 0)) return 40;
+  if (!(cost > 0)) return ERROR_MIN;
   const tau = a.kind === "lead"
     ? (a.trainingMode === "IMP" ? SCORE_TAU.leadIMP : SCORE_TAU.leadMP)
     : SCORE_TAU.bidding;
-  return Math.round(btClamp(btCurve(cost, tau), 1, 94));
+  return Math.round(btClamp(btCurve(cost, tau), 1, SCORE_MAX_NONBEST));
 }
 function btScoreChipHtml(score, small) {
   const band = btBandOf(score);
@@ -882,7 +945,6 @@ _SHARED_JS = _SCORE_JS + """
    store() returns the signed-in user's answered-problem cache synchronously
    (preloaded at sign-in); answers persist through BT.record. */
 function store() { return (window.BT && window.BT.attempts()) || {}; }
-function saveStore(s) { /* no-op: attempts persist via BT.record */ }
 async function fetchIndex() {
   if (!window.BT) throw new Error("Firebase not ready");
   return window.BT.fetchIndex();
@@ -934,7 +996,7 @@ const HE = {
   skip: "דלג לתוכן", mainNav: "ניווט ראשי", settings: "הגדרות",
   theme: "ערכת נושא", themeSystem: "מערכת", themeLight: "בהיר",
   themeDark: "כהה", textSize: "גודל טקסט", sizeS: "רגיל", sizeL: "גדול",
-  sizeXL: "ענק", guest: "אורח",
+  sizeXL: "ענק",
   guestNote: "לא מחובר — התחבר כדי לשמור התקדמות",
   signIn: "התחבר עם Google", signOut: "התנתק", connected: "מחובר",
   close: "סגור", selectAll: "בחר הכל", clear: "נקה", problems: "בעיות",
@@ -1111,6 +1173,67 @@ function poolFacets(index, kind) {
     levelCount, typeCount,
   };
 }
+/* PERF-F-6: precompute all pool counts in ONE pass so each filter interaction
+   derives its facets/tallies in O(levels x types) instead of re-scanning the
+   whole ~20k-row index 5-7 times. Keyed by scenario ("bidding" / "lead:MP" /
+   "lead:IMP") so leadMode() only selects a key at read time. Per key:
+     total       - problems in that scenario
+     levelTotal  - {level: count} regardless of type (matches poolFacets)
+     typeTotal   - {type: count} regardless of level (matches poolFacets)
+     matrix      - {level: {type: count}} (both set) for cross-faceted counts */
+function countsKey(kind, mode) {
+  return kind === "lead" ? "lead:" + (mode || leadMode()) : "bidding";
+}
+function buildCounts(index) {
+  const out = {};
+  for (const p of (index && index.problems) || []) {
+    const key = countsKey(kindOf(p), targetModeOf(p));
+    const c = out[key] || (out[key] =
+      {total: 0, levelTotal: {}, typeTotal: {}, matrix: {}});
+    c.total++;
+    const l = p.difficulty_level, t = p.type;
+    if (l) c.levelTotal[l] = (c.levelTotal[l] || 0) + 1;
+    if (t) c.typeTotal[t] = (c.typeTotal[t] || 0) + 1;
+    if (l && t) {
+      const m = c.matrix[l] || (c.matrix[l] = {});
+      m[t] = (m[t] || 0) + 1;
+    }
+  }
+  return out;
+}
+function emptyCount() {
+  return {total: 0, levelTotal: {}, typeTotal: {}, matrix: {}};
+}
+/* poolFacets(index, kind) equivalent, from the precomputed counts */
+function facetsFrom(counts, kind, mode) {
+  const c = (counts && counts[countsKey(kind, mode)]) || emptyCount();
+  return {
+    levels: ALL_LEVELS.filter(l => c.levelTotal[l]),
+    types: Object.keys(TYPE_NAMES).filter(t => c.typeTotal[t]),
+    levelCount: c.levelTotal, typeCount: c.typeTotal,
+  };
+}
+/* facetCounts(index, flt) equivalent (cross-faceted): a level counts only the
+   currently-selected types, a type only the currently-selected levels */
+function facetCountsFrom(counts, flt) {
+  const c = (counts && counts[countsKey(flt.kind, flt.mode)]) || emptyCount();
+  const selTypes = new Set(flt.types), selLevels = new Set(flt.levels);
+  const levelCount = {}, typeCount = {};
+  for (const l in c.matrix) {
+    const inLevel = selLevels.has(+l);
+    for (const t in c.matrix[l]) {
+      const n = c.matrix[l][t];
+      if (selTypes.has(t)) levelCount[l] = (levelCount[l] || 0) + n;
+      if (inLevel) typeCount[t] = (typeCount[t] || 0) + n;
+    }
+  }
+  return {levelCount, typeCount};
+}
+/* total problems in a scenario (poolFacets-free kindTotal / scen totals) */
+function scenTotal(counts, kind, mode) {
+  const c = counts && counts[countsKey(kind, mode)];
+  return c ? c.total : 0;
+}
 /* turn stored (or absent) filters into concrete selected sets. A stored
    selection is sanitized against the CURRENT pool: values that no longer
    exist are dropped, and an axis that ends up empty falls back to "all" (the
@@ -1177,8 +1300,11 @@ async function prefetchNext(index, filters) {
   } catch (e) { /* prefetch is best-effort */ }
 }
 /* BBO four-color deck */
-const SUITS = {S: ["ss", "\\u2660"], H: ["sh", "\\u2665"],
-               D: ["sd", "\\u2666"], C: ["sc", "\\u2663"]};
+// each glyph carries VS15 (U+FE0E) so Android/Samsung fonts render the TEXT
+// suit symbol, not a colour emoji — otherwise CSS `color` wouldn't apply and
+// the four-colour scheme would break (UX-A-6).
+const SUITS = {S: ["ss", "\\u2660\\uFE0E"], H: ["sh", "\\u2665\\uFE0E"],
+               D: ["sd", "\\u2666\\uFE0E"], C: ["sc", "\\u2663\\uFE0E"]};
 function suitHtml(st) {
   const [cls, g] = SUITS[st];
   return `<span class="${cls}">${g}</span>`;
@@ -1434,12 +1560,23 @@ function applyTheme() {
 applyTheme();
 /* practice-session progress (a 10-problem run started from the home page) */
 function getSession() {
-  try { return JSON.parse(localStorage.getItem("bt_session")); }
+  let s;
+  try { s = JSON.parse(localStorage.getItem("bt_session")); }
   catch (e) { return null; }
+  // expire a stale run (paused hours ago) so its counter/summary don't leak
+  // into a new day's answers (UX-I-6)
+  if (s && s.startedAt && Date.now() - s.startedAt > SESSION_TTL_MS) {
+    localStorage.removeItem("bt_session");
+    return null;
+  }
+  return s;
 }
-function bumpSession(score, id) {
+function bumpSession(score, id, kind) {
   const s = getSession();
   if (!s) return;
+  // only count answers from THIS run's scenario: a lead answered from a direct
+  // link must not be tallied into a paused bidding run (UX-I-6)
+  if (kind && s.kind && kind !== s.kind) return;
   s.count = (s.count || 0) + 1;
   const scored = typeof score === "number";
   if (scored) { s.sum = (s.sum || 0) + score;
@@ -1527,7 +1664,7 @@ function initChrome() {
     '<button type="button" data-v="s">' + HE.sizeS + '</button>' +
     '<button type="button" data-v="l">' + HE.sizeL + '</button>' +
     '<button type="button" data-v="xl">' + HE.sizeXL + '</button></span></div>' +
-    '<div class="setrow" id="acct-row"><span id="acct-name">' + HE.guest + '</span>' +
+    '<div class="setrow" id="acct-row"><span id="acct-name">' + HE.account + '</span>' +
     '<button type="button" class="alllink" id="acct-btn"></button></div>' +
     '<button type="button" class="closebtn" id="settings-close">' + HE.close + '</button>' +
     '</div>';
@@ -1547,27 +1684,30 @@ function initChrome() {
     localStorage.setItem("bt_scale", b.dataset.v); applyTheme(); syncCtl("ctl-scale", b.dataset.v);
   };
   function refreshAcct() {
-    const guest = !window.BT || window.BT.isGuest();
+    // sign-in is REQUIRED (no guest mode): when signed in, show the account;
+    // otherwise (only the brief pre-ready window or a transient sign-out, both
+    // behind the full-screen gate) offer a sign-in affordance — never a
+    // misleading "guest" claim (BUG-8).
+    const u = window.BT && window.BT.user();
     const nameEl = document.getElementById("acct-name");
     const btn = document.getElementById("acct-btn");
     const navLbl = document.getElementById("nav-account-lbl");
-    if (guest) {
-      nameEl.textContent = HE.guestNote;
+    if (u) {
+      nameEl.textContent = (u.displayName || u.email) || HE.connected;
+      btn.textContent = HE.signOut;
+      btn.onclick = () => window.BT.signOut();
+      if (navLbl) navLbl.textContent =
+        (u.displayName ? u.displayName.split(" ")[0] : HE.account);
+    } else {
+      nameEl.textContent = HE.guestNote;   // "not signed in — sign in to save"
       btn.textContent = HE.signIn;
-      // swallow the rejection doSignIn() now throws on a real failure so it
-      // isn't an unhandled rejection (the gate shows its own error UI).
+      // swallow the rejection doSignIn() throws on a real failure so it isn't
+      // an unhandled rejection (the gate shows its own error UI).
       btn.onclick = () => {
         const p = window.BT && window.BT.signIn();
         if (p && p.catch) p.catch(() => {});
       };
       if (navLbl) navLbl.textContent = HE.account;
-    } else {
-      const u = window.BT.user();
-      nameEl.textContent = (u && (u.displayName || u.email)) || HE.connected;
-      btn.textContent = HE.signOut;
-      btn.onclick = () => window.BT.signOut();
-      if (navLbl) navLbl.textContent =
-        (u && u.displayName ? u.displayName.split(" ")[0] : HE.account);
     }
   }
   refreshAcct();
@@ -1612,6 +1752,7 @@ def _index_html() -> str:
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{_theme_head_script()}
 <title>מאמן הברידג' — תרגול</title>
 <link rel="stylesheet" href="app.css">
 {_head_preloads()}
@@ -1625,19 +1766,20 @@ def _index_html() -> str:
 <b>תרגול הכרזה</b><small>ההכרזה שלך ליד השולחן</small>
 <span class="sccount" id="count-bidding"></span>
 </div>
-<div class="scencard" data-kind="lead" role="radio" tabindex="0"
+<div class="scencard" data-kind="lead" role="radio" tabindex="-1"
      aria-checked="false">
 <b>תרגול הובלה</b><small>איזה קלף להוביל נגד החוזה</small>
 <span class="sccount" id="count-lead"></span>
-<div class="modepills" id="modes" role="group" aria-label="שיטת חישוב"
-     style="visibility:hidden">
+</div>
+</div>
+<div class="modewrap" id="modewrap" hidden>
+<div class="modepills" id="modes" role="group" aria-label="שיטת חישוב">
 <button type="button" class="modecard" data-mode="MP" aria-pressed="true">
 <b>MP</b><small>מקסימום לקיחות בהגנה</small></button>
 <button type="button" class="modecard" data-mode="IMP" aria-pressed="false">
 <b>IMP</b><small>הפרשי תוצאה גדולים</small></button>
 </div>
-<div class="modegoal" id="modegoal" style="visibility:hidden"></div>
-</div>
+<div class="modegoal" id="modegoal"></div>
 </div>
 <div class="card" id="filters">
 <button type="button" class="fbar" id="fbar" aria-expanded="false"
@@ -1651,11 +1793,13 @@ def _index_html() -> str:
 <div class="grow"><span class="glabel">דרגת קושי</span>
 <button type="button" class="alllink" id="all-diff"></button></div>
 <div class="seg" id="diff-seg"></div>
+<div class="fhint" id="hint-diff" role="alert" hidden>בחר לפחות דרגת קושי אחת</div>
 </div>
 <div class="fgroup" id="type-group">
 <div class="grow"><span class="glabel">סוג בעיה</span>
 <button type="button" class="alllink" id="all-type"></button></div>
 <div class="typelist" id="type-list"></div>
+<div class="fhint" id="hint-type" role="alert" hidden>בחר לפחות סוג בעיה אחד</div>
 </div>
 </div>
 </div>
@@ -1670,6 +1814,7 @@ def _index_html() -> str:
 <script src="bt-shared.js"></script>
 <script>
 let INDEX = null;
+let COUNTS = {{}};   // precomputed pool counts (PERF-F-6); rebuilt when INDEX loads
 const SCEN_KEY = "bt_scenario";
 const LEAD_FILTERS_KEY = "bt_lead_filters";
 let SCEN = localStorage.getItem(SCEN_KEY) || "bidding";
@@ -1683,14 +1828,13 @@ function saveCur(f) {{ localStorage.setItem(curKey(), JSON.stringify(f)); }}
 function setScenario(kind) {{
   SCEN = kind; localStorage.setItem(SCEN_KEY, kind);
   document.body.dataset.scenario = kind;
-  document.querySelectorAll("#scenario .scencard").forEach(c =>
-    c.setAttribute("aria-checked", c.dataset.kind === kind ? "true" : "false"));
-  // reserve the pills' space in both scenarios (visibility, not display) so
-  // the two cards keep one constant, equal height — toggling never shifts the
-  // layout. The pills only *appear* for the lead scenario.
-  const vis = kind === "lead" ? "visible" : "hidden";
-  document.getElementById("modes").style.visibility = vis;
-  document.getElementById("modegoal").style.visibility = vis;
+  document.querySelectorAll("#scenario .scencard").forEach(c => {{
+    const on = c.dataset.kind === kind;
+    c.setAttribute("aria-checked", on ? "true" : "false");
+    c.tabIndex = on ? 0 : -1;   // roving tabindex for the radiogroup (UX-A-7)
+  }});
+  // the MP/IMP selector lives below the cards now, shown only for leads
+  document.getElementById("modewrap").hidden = kind !== "lead";
   syncModeUi();
   // The choice above is already persisted (SCEN + localStorage) and reflected
   // in the UI. The facet build below needs the pool index; if a click lands
@@ -1708,8 +1852,7 @@ function syncModeUi() {{
     b.setAttribute("aria-pressed", b.dataset.mode === m ? "true" : "false"));
   document.getElementById("modegoal").textContent = MODE_INFO[m].goal;
 }}
-document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = ev => {{
-  ev.stopPropagation();   // don't re-trigger the scenario card underneath
+document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = () => {{
   setLeadMode(b.dataset.mode);
   syncModeUi();
   // mode is persisted (setLeadMode); the facet rebuild needs the index. If the
@@ -1724,26 +1867,33 @@ document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = ev => {{
 function updateScenCounts() {{
   if (!INDEX) return;
   const s = store();
-  const nb = INDEX.problems.filter(p => kindOf(p) === "bidding");
-  const nl = INDEX.problems.filter(p =>
-    kindOf(p) === "lead" && targetModeOf(p) === leadMode());
-  const wb = nb.filter(p => !s[p.id]).length;
-  const wl = nl.filter(p => !s[p.id]).length;
+  const nb = scenTotal(COUNTS, "bidding");           // pool totals from COUNTS
+  const mode = leadMode();
+  const nl = scenTotal(COUNTS, "lead", mode);
+  // waiting = not-yet-answered; store-dependent, so one pass over the index
+  // (can't come from the precomputed COUNTS)
+  let wb = 0, wl = 0;
+  for (const p of INDEX.problems) {{
+    if (s[p.id]) continue;
+    const k = kindOf(p);
+    if (k === "bidding") wb++;
+    else if (k === "lead" && targetModeOf(p) === mode) wl++;
+  }}
   document.getElementById("count-bidding").textContent =
-    nb.length ? `${{wb}} ממתינות מתוך ${{nb.length}}` : "אין בעיות עדיין";
+    nb ? `${{wb}} ממתינות מתוך ${{nb}}` : "אין בעיות עדיין";
   document.getElementById("count-lead").textContent =
-    nl.length ? `${{wl}} ממתינות מתוך ${{nl.length}}` : "אין בעיות במצב זה עדיין";
+    nl ? `${{wl}} ממתינות מתוך ${{nl}}` : "אין בעיות במצב זה עדיין";
 }}
 function toggleFilter(list, value) {{
   const i = list.indexOf(value);
   if (i === -1) list.push(value); else list.splice(i, 1);
 }}
 function buildFilters() {{
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   const seg = document.getElementById("diff-seg");
   seg.style.setProperty("--n", f.levels.length || 1);
   seg.innerHTML = f.levels.map(lv =>
-    `<button type="button" data-level="${{lv}}">` +
+    `<button type="button" data-level="${{lv}}" aria-pressed="false">` +
     `<span class="sname">${{DIFF_NAMES[lv]}}</span>` +
     `<span class="scount">0</span></button>`).join("");
   document.getElementById("type-list").innerHTML = f.types.map(t => {{
@@ -1756,28 +1906,14 @@ function buildFilters() {{
       `<span class="tcount">0</span></button>`;
   }}).join("");
 }}
-/* Counts shown on each option are cross-filtered: a difficulty segment
-   counts only problems whose type is currently selected, and a type row
-   counts only problems whose difficulty is currently selected. So picking
-   "Hard" makes every type row show its Hard-only tally. Each axis ignores
-   its own selection (standard faceting) so you can still see what turning an
-   option back on would add. */
-function facetCounts(index, flt) {{
-  const levelCount = {{}}, typeCount = {{}};
-  for (const p of index.problems) {{
-    if (kindOf(p) !== flt.kind) continue;
-    if (flt.kind === "lead" &&
-        targetModeOf(p) !== (flt.mode || leadMode())) continue;
-    if (p.difficulty_level && flt.types.includes(p.type))
-      levelCount[p.difficulty_level] =
-        (levelCount[p.difficulty_level] || 0) + 1;
-    if (p.type && flt.levels.includes(p.difficulty_level))
-      typeCount[p.type] = (typeCount[p.type] || 0) + 1;
-  }}
-  return {{levelCount, typeCount}};
-}}
+/* Counts shown on each option are cross-filtered (facetCountsFrom, PERF-F-6):
+   a difficulty segment counts only problems whose type is currently selected,
+   and a type row counts only problems whose difficulty is currently selected.
+   So picking "Hard" makes every type row show its Hard-only tally. Each axis
+   ignores its own selection (standard faceting) so you can still see what
+   turning an option back on would add. */
 function updateFacetCounts() {{
-  const c = facetCounts(INDEX, FILTERS);
+  const c = facetCountsFrom(COUNTS, FILTERS);
   document.querySelectorAll("#diff-seg button").forEach(b => {{
     b.querySelector(".scount").textContent = c.levelCount[+b.dataset.level] || 0;
   }});
@@ -1792,9 +1928,12 @@ function updateFacetCounts() {{
   }});
 }}
 function applyFilterUi() {{
-  const f = poolFacets(INDEX, FILTERS.kind);
-  document.querySelectorAll("#diff-seg button").forEach(b =>
-    b.classList.toggle("active", FILTERS.levels.includes(+b.dataset.level)));
+  const f = facetsFrom(COUNTS, FILTERS.kind);
+  document.querySelectorAll("#diff-seg button").forEach(b => {{
+    const on = FILTERS.levels.includes(+b.dataset.level);
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");   // UX-A-8
+  }});
   document.querySelectorAll("#type-list .typerow").forEach(b =>
     b.setAttribute("aria-pressed",
       FILTERS.types.includes(b.dataset.type) ? "true" : "false"));
@@ -1802,9 +1941,13 @@ function applyFilterUi() {{
     FILTERS.levels.length >= f.levels.length ? HE.clear : HE.selectAll;
   document.getElementById("all-type").textContent =
     FILTERS.types.length >= f.types.length ? HE.clear : HE.selectAll;
+  // UX-I-5: an emptied axis shows an in-panel "choose at least one" hint so the
+  // 0-problems state is escapable, not a silent dead end
+  document.getElementById("hint-diff").hidden = FILTERS.levels.length > 0;
+  document.getElementById("hint-type").hidden = FILTERS.types.length > 0;
 }}
 function persist() {{
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   const full = FILTERS.levels.length >= f.levels.length &&
     FILTERS.types.length >= f.types.length;
   if (full) localStorage.removeItem(curKey());   // everything -> follow the pool
@@ -1825,14 +1968,14 @@ document.getElementById("type-list").addEventListener("click", ev => {{
 }});
 document.getElementById("all-diff").onclick = () => {{
   if (!INDEX) return;   // facets need the pool index (see setScenario guard)
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   FILTERS.levels =
     FILTERS.levels.length >= f.levels.length ? [] : f.levels.slice();
   persist();
 }};
 document.getElementById("all-type").onclick = () => {{
   if (!INDEX) return;   // facets need the pool index (see setScenario guard)
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   FILTERS.types =
     FILTERS.types.length >= f.types.length ? [] : f.types.slice();
   persist();
@@ -1846,11 +1989,8 @@ function renderStats() {{
     const rec = s[p.id];
     if (rec) {{ done++; scoreSum += btScoreOfAttempt(rec) || 0; }}
   }}
-  const f = poolFacets(INDEX, FILTERS.kind);
-  const kindTotal = INDEX.problems.filter(p =>
-    kindOf(p) === FILTERS.kind &&
-    (FILTERS.kind !== "lead" ||
-     targetModeOf(p) === (FILTERS.mode || leadMode()))).length;
+  const f = facetsFrom(COUNTS, FILTERS.kind);
+  const kindTotal = scenTotal(COUNTS, FILTERS.kind, FILTERS.mode);
   const narrowed = FILTERS.levels.length < f.levels.length ||
     FILTERS.types.length < f.types.length;
   const label = FILTERS.kind === "lead"
@@ -1899,6 +2039,10 @@ function renderStats() {{
   const deal = document.getElementById("deal");
   const none = !FILTERS.levels.length || !FILTERS.types.length;
   deal.classList.toggle("off", none);
+  // a dead CTA must not be a keyboard focus trap / activatable link (UX-I-5)
+  deal.setAttribute("aria-disabled", none ? "true" : "false");
+  if (none) deal.setAttribute("tabindex", "-1");
+  else deal.removeAttribute("tabindex");
   const dealLabel = FILTERS.kind === "lead"
     ? "התחל תרגול הובלה &larr;" : "התחל תרגול הכרזה &larr;";
   deal.innerHTML = none
@@ -1917,6 +2061,7 @@ async function init() {{
     box.querySelector("#retry-load").onclick = () => init();
     return;
   }}
+  COUNTS = buildCounts(INDEX);   // one pass; all facet tallies derive from this
   const q = new URLSearchParams(location.search);
   const qk = q.get("kind");
   if (qk === "lead" || qk === "bidding") SCEN = qk;
@@ -1932,11 +2077,24 @@ async function init() {{
     document.getElementById("fbody").removeAttribute("hidden");
   }}
 }}
-document.querySelectorAll("#scenario .scencard").forEach(c => {{
+// radiogroup keyboard model (UX-A-7/UX-I-9): arrows move selection AND focus
+// between the cards, Enter/Space selects; roving tabindex keeps one tab stop.
+const SCENCARDS = [...document.querySelectorAll("#scenario .scencard")];
+function moveScen(dir) {{
+  const cur = Math.max(0, SCENCARDS.findIndex(c => c.dataset.kind === SCEN));
+  const next = (cur + dir + SCENCARDS.length) % SCENCARDS.length;
+  setScenario(SCENCARDS[next].dataset.kind);
+  SCENCARDS[next].focus();
+}}
+SCENCARDS.forEach(c => {{
   c.addEventListener("click", () => setScenario(c.dataset.kind));
   c.addEventListener("keydown", ev => {{
     if (ev.key === "Enter" || ev.key === " ") {{
       ev.preventDefault(); setScenario(c.dataset.kind);
+    }} else if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {{
+      ev.preventDefault(); moveScen(1);
+    }} else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {{
+      ev.preventDefault(); moveScen(-1);
     }}
   }});
 }});
@@ -1958,28 +2116,33 @@ document.getElementById("deal").onclick = () => {{
     return false;
   }}
   localStorage.setItem("bt_session", JSON.stringify({{
-    kind: FILTERS.kind, size: 10, count: 0, right: 0, sum: 0, scored: 0,
+    kind: FILTERS.kind, size: SESSION_SIZE, count: 0, right: 0, sum: 0, scored: 0,
+    startedAt: Date.now(),   // for TTL expiry (UX-I-6)
     mode: FILTERS.kind === "lead" ? leadMode() : null,
     levels: FILTERS.levels.slice(), types: FILTERS.types.slice()}}));
   location.href = routeFor(FILTERS.kind, id);
   return false;
 }};
 function renderSessionSummary() {{
-  let s = null;
-  try {{ s = JSON.parse(localStorage.getItem("bt_session")); }} catch (e) {{}}
+  const explicit = new URLSearchParams(location.search).get("summary");
+  const s = getSession();   // TTL-aware
   if (!s || !s.count) return;
-  localStorage.removeItem("bt_session");   // the run is over
+  // show the summary once the run is COMPLETE, on any home entry (not only the
+  // ?summary=1 auto-redirect) so it isn't lost when returning via the nav; the
+  // blob is cleared only on an explicit action below, so a refresh keeps it
+  // (UX-I-6).
+  if (!explicit && (s.count || 0) < (s.size || SESSION_SIZE)) return;
   const kindLabel = s.kind === "lead" ? "הובלה" : "הכרזה";
-  // score trail; a legacy in-flight session carries only a correct flag —
-  // map its misses to the no-data fallback (40), not to 0 (= dead option)
+  // score trail; bumpSession only ever stores id + score, so a scoreless item
+  // (a legacy in-flight session) maps to the no-data fallback, not 0 (= dead)
   const items = (s.items || []).map((it, idx) => ({{...it, idx,
-    sc: typeof it.score === "number" ? it.score : (it.correct ? 100 : 40)}}));
+    sc: typeof it.score === "number" ? it.score : ERROR_MIN}}));
   const avg = items.length
     ? Math.round(items.reduce((t, i) => t + i.sc, 0) / items.length)
     : Math.round(100 * (s.right || 0) / s.count);
-  const misses = items.filter(i => i.sc < 85 && i.id);
+  const misses = items.filter(i => i.sc < REVIEW_MIN && i.id);
   const missHtml = misses.length
-    ? `<div style="margin-top:10px;font-weight:700">לסקירה — החלטות מתחת ל־85</div>` +
+    ? `<div style="margin-top:10px;font-weight:700">לסקירה — החלטות מתחת ל־${{REVIEW_MIN}}</div>` +
       `<ul class="notes">` + misses.map(i =>
         `<li><a href="${{routeFor(s.kind || "bidding", i.id, {{retry: true}})}}">` +
         `בעיה ${{i.idx + 1}} בסבב (ציון ${{i.sc}}) &larr;</a></li>`).join("") + `</ul>`
@@ -1992,18 +2155,24 @@ function renderSessionSummary() {{
     `<div class="wpl" role="img" aria-label="ציון ממוצע ${{avg}} מתוך 100" style="margin-top:8px">` +
     `<span class="w" style="width:${{avg}}%">${{avg}}</span></div>` +
     missHtml +
-    `<button type="button" class="big" id="again">עוד סבב &larr;</button>`;
+    `<div style="display:flex;gap:8px;margin-top:8px">` +
+    `<button type="button" class="big" id="again">עוד סבב &larr;</button>` +
+    `<button type="button" class="alllink" id="sum-close">סגור</button></div>`;
   const main = document.getElementById("main");
   main.insertBefore(card, main.querySelector("#scenario"));
+  // the run is cleared only when the user acts on the summary (not on render),
+  // so refreshing the page doesn't make it vanish (UX-I-6)
+  const endRun = () => localStorage.removeItem("bt_session");
   card.querySelector("#again").onclick = () => {{
-    card.remove();
+    endRun(); card.remove();
     document.getElementById("deal").click();
   }};
+  card.querySelector("#sum-close").onclick = () => {{
+    endRun(); card.remove(); renderSessRibbon();
+  }};
 }}
-if (new URLSearchParams(location.search).get("summary")) {{
-  if (document.readyState !== "loading") renderSessionSummary();
-  else addEventListener("DOMContentLoaded", renderSessionSummary);
-}}
+if (document.readyState !== "loading") renderSessionSummary();
+else addEventListener("DOMContentLoaded", renderSessionSummary);
 // the page rendered from cache; refresh the counts once the background sync
 // lands (T4) — e.g. answers from another device change the waiting counts.
 window.addEventListener("bt-attempts-synced", () => {{
@@ -2019,6 +2188,7 @@ def _problem_html() -> str:
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{_theme_head_script()}
 <title>בעיית הכרזה</title>
 <link rel="stylesheet" href="app.css">
 {_head_preloads()}
@@ -2164,7 +2334,7 @@ function reveal(chosen) {{
   document.querySelectorAll("button.cand").forEach(b => {{
     const a = b.dataset.action;
     if (v.accepted.includes(a)) b.classList.add("good");
-    else if (a === chosen) b.classList.add(sp.score >= 65 ? "near" : "bad");
+    else if (a === chosen) b.classList.add(sp.score >= NEAR_MIN ? "near" : "bad");
     else b.classList.add("off");
     if (a === chosen) b.classList.add("chosen");
     b.disabled = true;
@@ -2341,7 +2511,7 @@ function choose(action) {{
   reveal(action);
   const rec = window.BT.gradeBidding(P, action);
   window.BT.record(P.id, rec);   // updates the cache synchronously (excluded below)
-  if (!RETRYING) bumpSession(rec.score, P.id);
+  if (!RETRYING) bumpSession(rec.score, P.id, "bidding");
   RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
@@ -2468,6 +2638,10 @@ async function init() {{
   document.getElementById("problem").innerHTML =
     `<div class="card">${{typeBadgeHtml(P)}}${{auctionTableHtml(P, NOTES)}}` +
     `<div id="bidnote"></div>` +
+    // parity with the lead page's guidance (UX-I-4): tell new users the calls
+    // in the auction are tappable
+    `<p class="muted" style="margin:6px 0 0">הקש הכרזה במכרז כדי לראות ` +
+    `את משמעותה.</p>` +
     `<div class="hand">${{handHtml(P.hand)}}</div></div>`;
   // tap a bid -> alert-style explanation strip under the auction
   let openNote = -1;
@@ -2639,7 +2813,7 @@ function reveal(chosen) {
   document.querySelectorAll("button.cardbtn").forEach(b => {
     const a = b.dataset.action;
     if (acc.includes(a)) b.classList.add("good");
-    else if (a === chosen) b.classList.add(sp.score >= 65 ? "near" : "bad");
+    else if (a === chosen) b.classList.add(sp.score >= NEAR_MIN ? "near" : "bad");
     if (a === chosen) b.classList.add("chosen");
     b.disabled = true;
   });
@@ -2800,7 +2974,7 @@ function commit(a) {
   reveal(a);
   const rec = window.BT.gradeLead(P, a, MODE);
   window.BT.record(P.id, rec);   // updates the cache synchronously
-  if (!RETRYING) bumpSession(rec.score, P.id);
+  if (!RETRYING) bumpSession(rec.score, P.id, "lead");
   RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
@@ -2983,6 +3157,7 @@ def _lead_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        + _theme_head_script() + '\n'
         '<title>בעיית הובלה</title>\n<link rel="stylesheet" href="app.css">\n'
         + _head_preloads() + '\n'
         '<script type="module" src="bt-firebase.js"></script></head>'
@@ -2990,8 +3165,14 @@ def _lead_html() -> str:
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted" id="meta"></span></div>\n'
         '<div class="sessribbon" id="sessribbon" hidden></div>\n'
-        '<div class="card" id="modebanner"></div>\n'
-        '<div id="problem"></div>\n'
+        # loading skeletons (UX-I-4): match p.html so lead.html shows structure
+        # instead of an empty felt while auth+Firestore resolve
+        '<div class="card" id="modebanner">'
+        '<div class="skl" style="width:45%"></div></div>\n'
+        '<div id="problem">'
+        '<div class="skl" style="width:35%"></div>'
+        '<div class="skl" style="width:100%;height:120px"></div>'
+        '<div class="skl" style="width:70%"></div></div>\n'
         '<div class="leadgrid" id="grid"></div>\n'
         '<div id="confirm"></div>\n'
         '<div id="verdict" class="card" style="display:none" role="status" '
@@ -3094,6 +3275,16 @@ function tsMillis(a) {
   if (a.ts.seconds) return a.ts.seconds * 1000;
   return 0;
 }
+// Order first-attempts by their FIRST-attempt time. A re-answer now bumps `ts`
+// (so incremental cross-device sync notices attemptCount updates — DB-M-9), but
+// `firstTs` is written once at the first attempt and never moves. Fall back to
+// `ts` for legacy docs that predate firstTs — there `ts` is still the first
+// attempt's time, so ordering is unchanged for them.
+function firstMs(a) { return tsMillis(a && a.firstTs ? {ts: a.firstTs} : a); }
+// Ids still present in the pool index; attempts whose problem was deleted are
+// marked "removed" instead of linking to a dead page (DB-M-9). null = unknown
+// (index unavailable) -> treat every attempt as live, as before.
+let LIVE_IDS = null;
 function row(label, scores) {
   const n = scores.length;
   if (n < MIN_N)
@@ -3129,7 +3320,7 @@ function costBand(list, kind) {
   let opt = 0, near = 0, bl = 0; const costs = [];
   list.forEach(a => { costs.push(num(a.gradedCost));
     const sc = btScoreOfAttempt(a);
-    if (sc >= 85) opt++; else if (sc >= 40) near++; else bl++; });
+    if (sc >= REVIEW_MIN) opt++; else if (sc >= ERROR_MIN) near++; else bl++; });
   const mean = costs.reduce((s, c) => s + c, 0) / n, med = median(costs), u = cfg.unit;
   const seg = (cls, v) => v
     ? `<span class="bseg ${cls}" style="width:${(v / n * 100).toFixed(1)}%">` +
@@ -3218,7 +3409,7 @@ function render(attempts) {
   const n = first.length;
   const avgAll = n
     ? first.reduce((s, a) => s + btScoreOfAttempt(a), 0) / n : 0;
-  const recent = [...first].sort((a, b) => tsMillis(b) - tsMillis(a));
+  const recent = [...first].sort((a, b) => firstMs(b) - firstMs(a));
   let streak = 0;
   for (const a of recent) { if (btScoreOfAttempt(a) >= 100) streak++; else break; }
   // split first-attempts by scenario, and leads further by training mode
@@ -3230,7 +3421,7 @@ function render(attempts) {
   const byKind = {};
   for (const a of first) { const kd = a.kind || "bidding";
     (byKind[kd] ??= []).push(btScoreOfAttempt(a)); }
-  const chrono = [...first].sort((a, b) => tsMillis(a) - tsMillis(b));
+  const chrono = [...first].sort((a, b) => firstMs(a) - firstMs(b));
   let trend = "";
   if (chrono.length >= MIN_TREND) {
     let cum = 0; const pts = [];
@@ -3268,26 +3459,34 @@ function render(attempts) {
       (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
         `${"★".repeat(d)}</span><span class="off">${"★".repeat(5 - d)}</span></span>` : "");
   };
-  const misses = recent.filter(a => btScoreOfAttempt(a) < 85).slice(0, 10);
+  const misses = recent.filter(a => btScoreOfAttempt(a) < REVIEW_MIN).slice(0, 10);
   const missList = misses.length
-    ? '<div class="card"><b>לשיפור — החלטות מתחת ל־85</b> <span class="muted">(הקש לחזרה)</span>' +
-      '<ul class="misslist">' + misses.map(m =>
-        `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">` +
-        `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
-        `<div style="margin-top:4px">בחרת <b class="ltr">${m.chosenCall}</b> — ` +
-        `${OUTCOME_HE[m.outcomeClass] || m.outcomeClass}` +
-        (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
-        (m.acceptedSet && m.acceptedSet.length
-          ? `. מיטבי: <span class="ltr">${m.acceptedSet.join(", ")}</span>` : "") +
-        ` <span class="go">חזור לתרגל &larr;</span></div></a></li>`
-      ).join("") + "</ul></div>"
+    ? '<div class="card"><b>לשיפור — החלטות מתחת ל־' + REVIEW_MIN + '</b> <span class="muted">(הקש לחזרה)</span>' +
+      '<ul class="misslist">' + misses.map(m => {
+        // attempt fields are user-owned free text -> esc() before innerHTML
+        // (SEC-A-6). A problem deleted from the pool becomes a non-link
+        // "removed" row instead of a dead retry link (DB-M-9).
+        const gone = LIVE_IDS && !LIVE_IDS.has(m.problemId);
+        const body =
+          `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
+          `<div style="margin-top:4px">בחרת <b class="ltr">${esc(m.chosenCall)}</b> — ` +
+          `${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}` +
+          (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
+          (m.acceptedSet && m.acceptedSet.length
+            ? `. מיטבי: <span class="ltr">${esc(m.acceptedSet.join(", "))}</span>` : "") +
+          (gone ? ` <span class="go muted">בעיה שהוסרה</span></div>`
+                : ` <span class="go">חזור לתרגל &larr;</span></div>`);
+        return gone
+          ? `<li><div class="missrow">${body}</div></li>`
+          : `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">${body}</a></li>`;
+      }).join("") + "</ul></div>"
     : "";
   const weak = weakArea(scen);
   const weakCard = weak
     ? '<div class="card"><b>מה כדאי לתרגל</b>' +
       `<div style="margin:6px 0 8px">הנקודה החלשה שלך: <b>${weak.label}</b> ` +
       `(ציון ממוצע ${Math.round(weak.m)}).</div>` +
-      `<a class="big" href="${weak.href}">תרגל 10 כאלה &larr;</a></div>`
+      `<a class="big" href="${weak.href}">תרגל ${SESSION_SIZE} כאלה &larr;</a></div>`
     : "";
   const statCard =
     '<div class="card"><div class="statgrid">' +
@@ -3339,8 +3538,16 @@ function render(attempts) {
   });
 }
 async function init() {
-  try { render(await window.BT.allAttempts()); }
-  catch (e) {
+  try {
+    // Learn which problems still exist so deleted ones can be flagged in the
+    // miss list (DB-M-9). Cheap: the index is stamp-cached (T10). If it fails,
+    // LIVE_IDS stays null and every attempt is treated as live (prior behavior).
+    try {
+      const idx = await window.BT.fetchIndex();
+      LIVE_IDS = new Set((idx.problems || []).map(p => p.id));
+    } catch (e) { LIVE_IDS = null; }
+    render(await window.BT.allAttempts());
+  } catch (e) {
     const el = document.getElementById("dash");
     el.innerHTML = 'לא ניתן לטעון את הנתונים שלך: <span class="en"></span>';
     el.querySelector(".en").textContent = e.message;
@@ -3359,6 +3566,7 @@ def _dashboard_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        + _theme_head_script() + '\n'
         '<title>ההתקדמות שלי</title>\n'
         '<link rel="stylesheet" href="app.css">\n<style>' + _DASHBOARD_CSS +
         '</style>\n' + _head_preloads() +

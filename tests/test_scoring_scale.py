@@ -264,8 +264,9 @@ def test_pages_wire_the_score():
     assert "btScoreOfAttempt" in _SHARED_JS   # shared score module
     assert ".scorechip" in _CSS               # chip styling
     # the session trail and home stats aggregate scores, not correct counts
-    assert "bumpSession(rec.score, P.id)" in p
-    assert "bumpSession(rec.score, P.id)" in l
+    # (the kind arg is the UX-I-6 out-of-scenario guard)
+    assert 'bumpSession(rec.score, P.id, "bidding")' in p
+    assert 'bumpSession(rec.score, P.id, "lead")' in l
     assert "scoreSum += btScoreOfAttempt(rec)" in i
     # dashboard aggregates: mean-score rows + score-band distribution
     assert "meanCI" in d and "ציון ממוצע" in d

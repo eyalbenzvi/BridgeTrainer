@@ -62,9 +62,10 @@ your progress from Firestore at runtime.
 ## Data model
 ```
 problems/{id}                     generated problem docs (read-only to clients)
-users/{uid}                       profile
 users/{uid}/attempts/{attemptId}  one doc per answered deal (the raw metrics)
 ```
+(There is no `users/{uid}` profile document — the client only ever writes the
+`attempts` subtree, and the security rules allow nothing else, DB-M-9/SEC-A-6.)
 Per-user metrics on the dashboard are derived on read from `attempts` — no
 aggregation backend, no Cloud Functions, stays on the free tier.
 

@@ -77,6 +77,27 @@ class IndexConflict(RuntimeError):
     The caller should re-read the index, re-apply its changes, and retry."""
 
 
+def client_view(record: dict) -> dict:
+    """Slim a problem record to what the web client actually reads, before
+    upload (PERF-D-6).
+
+    Drops producer-internal dead weight the client never reads — ``policy_trail``
+    (a per-turn policy record) and ``engine_auction_complete`` (for lead docs, an
+    exact duplicate of ``auction``) — and trims ``quality`` to the two keys the
+    client does read (``quality.n_samples`` for the sample count, ``quality.stakes``
+    for the bidding score's stakes stretch). The FULL record stays in the local
+    JSON pool; only the uploaded copy is slimmed, so backfills/debug keep the
+    complete data locally. Pure and idempotent — applying it twice changes
+    nothing. ``generator`` is deliberately kept (the client reads
+    ``generator.n_deals``/``.samples``/``.engine``)."""
+    out = {k: v for k, v in record.items()
+           if k not in ("policy_trail", "engine_auction_complete")}
+    q = out.get("quality")
+    if isinstance(q, dict):
+        out["quality"] = {k: q[k] for k in ("n_samples", "stakes") if k in q}
+    return out
+
+
 def _firestore_safe(value):
     """Make a value storable in Firestore.
 
@@ -242,7 +263,13 @@ class FirestorePool:
     def read_index(self) -> dict | None:
         """Read the pool index. Returns a dict with a flat ``problems`` list
         (shards merged), or None if no index exists. Costs 1 read for the
-        pointer + one read per shard (2-8 total), never O(collection)."""
+        pointer + one read per shard (2-8 total), never O(collection).
+
+        The shards are fetched in ONE batched round-trip (``get_all``) rather
+        than a serial per-shard read, since they have no inter-dependency
+        (PERF-D-4) — this mirrors the client's ``Promise.all`` shard fetch in
+        bt-firebase.js. ``get_all`` does not guarantee response order, so the
+        snapshots are reassembled in the pointer's declared shard order."""
         ptr = self._meta.document(INDEX_DOC).get()
         if not ptr.exists:
             return None
@@ -250,11 +277,16 @@ class FirestorePool:
         data.setdefault("generation", 0)   # optimistic-lock counter (T11)
         if "problems" in data:            # legacy single-doc index
             return data
+        shards = data.get("shards", [])
         problems = []
-        for sid in data.get("shards", []):
-            snap = self._meta.document(sid).get()
-            if snap.exists:
-                problems.extend((snap.to_dict() or {}).get("problems", []))
+        if shards:
+            by_id = {snap.id: snap for snap in
+                     self._db.get_all([self._meta.document(sid)
+                                       for sid in shards])}
+            for sid in shards:            # preserve the pointer's shard order
+                snap = by_id.get(sid)
+                if snap is not None and snap.exists:
+                    problems.extend((snap.to_dict() or {}).get("problems", []))
         return {**data, "problems": problems}
 
     def _cas_pointer(self, ptr_fields: dict,
@@ -411,7 +443,12 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
                 continue
             rec = local.get(pid)
             _check_schema(rec)      # DB-M-7 defense-in-depth on the write path
-            writer.set(remote._col.document(pid), _firestore_safe(rec))
+            # PERF-D-6: upload the client-facing slice (drops policy_trail /
+            # engine_auction_complete / trims quality). _firestore_safe MUST
+            # still wrap the result — it makes nested arrays legal for Firestore
+            # and getProblem's unwrapFirestore is its exact inverse.
+            writer.set(remote._col.document(pid),
+                       _firestore_safe(client_view(rec)))
             staged[pid] = index_entry(rec)
     finally:
         writer.close()      # flush all buffered writes; on_write_error fires here

@@ -185,10 +185,10 @@ def cmd_lead_calibration(args: argparse.Namespace) -> int:
     if args.sampler == "uniform":
         sampler = UniformSampler()
     elif args.sampler == "constraint":
-        # derive constraints from the first family's auction (all boards in a
-        # family share it); per-family derivation would need a per-family
-        # sampler, so we build one keyed on each board's own auction lazily.
-        sampler = _PerBoardConstraintSampler()
+        # derive constraints from each board's own auction lazily (ARCH-10:
+        # the adapter now lives in engine/lead_samplers.py).
+        from ..engine.lead_samplers import PerBoardConstraintSampler
+        sampler = PerBoardConstraintSampler()
     else:
         print(f"unknown sampler {args.sampler!r} (use uniform|constraint)")
         return 2
@@ -207,92 +207,123 @@ def cmd_lead_calibration(args: argparse.Namespace) -> int:
     return 0
 
 
-class _PerBoardConstraintSampler:
-    """Adapter: derives auction constraints per board via the rule engine.
-
-    The calibration harness calls sample(problem, ...) with each board's public
-    state; this builds the matching ConstraintSampler on the fly so a whole
-    real-deal corpus can be calibrated with one --sampler constraint flag.
-    """
-    sampling_model = "auction_constraint_bands"
-
-    def sample(self, problem, requested, seed):
-        from ..engine.lead_samplers import ConstraintSampler
-        return ConstraintSampler.from_auction(problem).sample(
-            problem, requested, seed)
-
-
-def cmd_pool(args: argparse.Namespace) -> int:
+def cmd_pool_ls(args: argparse.Namespace) -> int:
     from ..pool.store import ProblemPool
-    # Firestore-only subcommands (push/backfill-leads) don't take --pool.
-    pool = ProblemPool(args.pool) if getattr(args, "pool", None) else None
-    if args.pool_cmd == "ls":
-        import json
-        for pid in pool.ids():
-            r = pool.get(pid)
-            print(f"{pid}  {r.get('seat')} after "
-                  f"{' '.join(r.get('auction', [])) or '(opening)'}  "
-                  f"verdict={r.get('verdict', {}).get('accepted', '?')}")
-        print(f"{len(pool.ids())} problems in {args.pool}")
+    pool = ProblemPool(args.pool)
+    for pid in pool.ids():
+        r = pool.get(pid)
+        print(f"{pid}  {r.get('seat')} after "
+              f"{' '.join(r.get('auction', [])) or '(opening)'}  "
+              f"verdict={r.get('verdict', {}).get('accepted', '?')}")
+    print(f"{len(pool.ids())} problems in {args.pool}")
+    return 0
+
+
+def cmd_pool_rm(args: argparse.Namespace) -> int:
+    from ..pool.store import ProblemPool
+    pool = ProblemPool(args.pool)
+    removed = 0
+    for pid in args.ids:
+        path = pool.problems_dir / f"{pid}.json"
+        if path.exists():
+            path.unlink()
+            removed += 1
+            print(f"removed {pid}")
+        else:
+            print(f"not found: {pid}")
+    pool.rebuild_index()
+    print(f"{removed} removed; index rebuilt "
+          f"({len(pool.ids())} problems remain)")
+    return 0
+
+
+def cmd_pool_add(args: argparse.Namespace) -> int:
+    from ..engine.maker import forge_batch
+    import time as _time
+    seed = args.seed if args.seed is not None else int(_time.time())
+    summary = forge_batch(pool_dir=args.pool, count=args.count,
+                          base_seed=seed, max_seconds=args.max_seconds,
+                          workers=args.workers)
+    return 0 if summary["count"] == args.count else 1
+
+
+def cmd_pool_push(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import push_local_pool
+    summary = push_local_pool(args.pool, key_path=args.key,
+                              overwrite=args.overwrite)
+    print(f"uploaded {summary['uploaded']}, skipped {summary['skipped']} "
+          f"(pool has {summary['total']}); meta/index refreshed")
+    failed = summary.get("failed") or []
+    if failed:
+        # DB-O-5: real write failures must fail the run (redden CI), not be
+        # reported as success; those docs were excluded from the index.
+        print(f"ERROR: {len(failed)} doc(s) failed to upload and were left "
+              f"out of the index: {', '.join(failed)}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_pool_backfill_training(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import backfill_lead_training
+    summary = backfill_lead_training(key_path=args.key, dry_run=args.dry_run)
+    verb = "would stamp" if args.dry_run else "stamped"
+    print(f"{verb} legacy training metadata on {summary['updated']} of "
+          f"{summary['lead_total']} lead problems in Firestore "
+          f"({summary['total']} total); meta/index "
+          f"{'unchanged (dry run)' if args.dry_run else 'refreshed with mode flags'}")
+    return 0
+
+
+def cmd_pool_backfill_leads(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import backfill_lead_types
+    summary = backfill_lead_types(key_path=args.key, dry_run=args.dry_run)
+    verb = "would update" if args.dry_run else "updated"
+    print(f"{verb} {summary['updated']} of {summary['lead_total']} lead "
+          f"problems in Firestore ({summary['total']} total); "
+          f"meta/index {'unchanged (dry run)' if args.dry_run else 'refreshed'}")
+    return 0
+
+
+def _run_pool_script(filename: str, argv: list[str]) -> int:
+    """Delegate a `trainer pool <cmd>` to a stable maintenance script under
+    scripts/ (ARCH-11). The script is executed as __main__ with *argv* so it
+    is discoverable through `trainer pool -h` — a single operational interface
+    for the whole pool lifecycle — without duplicating its (LLM/GIB/Firestore-
+    heavy) body here. The script's own arg parser handles *argv*."""
+    import runpy
+    root = Path(__file__).resolve().parents[2]
+    script = root / "scripts" / filename
+    if not script.exists():
+        print(f"error: maintenance script not found: {script}\n"
+              f"(run from a source checkout — scripts/ ships with the repo, "
+              f"not the installed wheel)", file=sys.stderr)
+        return 2
+    saved = sys.argv
+    sys.argv = [str(script), *argv]
+    try:
+        runpy.run_path(str(script), run_name="__main__")
         return 0
-    if args.pool_cmd == "rm":
-        removed = 0
-        for pid in args.ids:
-            path = pool.problems_dir / f"{pid}.json"
-            if path.exists():
-                path.unlink()
-                removed += 1
-                print(f"removed {pid}")
-            else:
-                print(f"not found: {pid}")
-        pool.rebuild_index()
-        print(f"{removed} removed; index rebuilt "
-              f"({len(pool.ids())} problems remain)")
-        return 0
-    if args.pool_cmd == "add":
-        from ..engine.maker import forge_batch
-        import time as _time
-        seed = args.seed if args.seed is not None else int(_time.time())
-        summary = forge_batch(pool_dir=args.pool, count=args.count,
-                              base_seed=seed, max_seconds=args.max_seconds,
-                              workers=args.workers)
-        return 0 if summary["count"] == args.count else 1
-    if args.pool_cmd == "push":
-        from ..pool.firestore_store import push_local_pool
-        summary = push_local_pool(args.pool, key_path=args.key,
-                                  overwrite=args.overwrite)
-        print(f"uploaded {summary['uploaded']}, skipped {summary['skipped']} "
-              f"(pool has {summary['total']}); meta/index refreshed")
-        failed = summary.get("failed") or []
-        if failed:
-            # DB-O-5: real write failures must fail the run (redden CI), not be
-            # reported as success; those docs were excluded from the index.
-            print(f"ERROR: {len(failed)} doc(s) failed to upload and were left "
-                  f"out of the index: {', '.join(failed)}", file=sys.stderr)
-            return 1
-        return 0
-    if args.pool_cmd == "backfill-training":
-        from ..pool.firestore_store import backfill_lead_training
-        summary = backfill_lead_training(key_path=args.key,
-                                         dry_run=args.dry_run)
-        verb = "would stamp" if args.dry_run else "stamped"
-        print(f"{verb} legacy training metadata on {summary['updated']} of "
-              f"{summary['lead_total']} lead problems in Firestore "
-              f"({summary['total']} total); meta/index "
-              f"{'unchanged (dry run)' if args.dry_run else 'refreshed with mode flags'}")
-        return 0
-    if args.pool_cmd == "backfill-leads":
-        from ..pool.firestore_store import backfill_lead_types
-        summary = backfill_lead_types(key_path=args.key, dry_run=args.dry_run)
-        verb = "would update" if args.dry_run else "updated"
-        print(f"{verb} {summary['updated']} of {summary['lead_total']} lead "
-              f"problems in Firestore ({summary['total']} total); "
-              f"meta/index {'unchanged (dry run)' if args.dry_run else 'refreshed'}")
-        return 0
-    return 2
+    except SystemExit as e:      # the script called sys.exit()/argparse error
+        return int(e.code) if isinstance(e.code, int) else (0 if not e.code else 1)
+    finally:
+        sys.argv = saved
+
+
+# ARCH-11: pool subcommands that forward their args verbatim to a stable
+# maintenance script under scripts/. Intercepted before argparse because
+# argparse.REMAINDER cannot reliably capture a leading option (bpo-17050).
+_POOL_SCRIPTS = {
+    "classify": "classify_pool.py",
+    "reexplain": "reexplain_pool.py",
+    "backfill-notes": "backfill_bot_notes.py",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if len(argv) >= 2 and argv[0] == "pool" and argv[1] in _POOL_SCRIPTS:
+        return _run_pool_script(_POOL_SCRIPTS[argv[1]], argv[2:])
+
     parser = argparse.ArgumentParser(
         prog="trainer",
         description="Bridge bidding trainer: simulate, DD-solve, compare.")
@@ -450,11 +481,11 @@ def main(argv: list[str] | None = None) -> int:
     pool_sub = pool_p.add_subparsers(dest="pool_cmd", required=True)
     pl = pool_sub.add_parser("ls", help="list problems")
     pl.add_argument("--pool", default="data")
-    pl.set_defaults(func=cmd_pool)
+    pl.set_defaults(func=cmd_pool_ls)
     pr = pool_sub.add_parser("rm", help="remove problems by id")
     pr.add_argument("ids", nargs="+")
     pr.add_argument("--pool", default="data")
-    pr.set_defaults(func=cmd_pool)
+    pr.set_defaults(func=cmd_pool_rm)
     pa = pool_sub.add_parser(
         "add", help="generate new problems into the pool (needs Ben env)")
     pa.add_argument("--count", type=int, default=1)
@@ -463,7 +494,7 @@ def main(argv: list[str] | None = None) -> int:
     pa.add_argument("--max-seconds", type=float, default=1800.0)
     pa.add_argument("--workers", type=int, default=1,
                     help="parallel forge workers; 0 = auto")
-    pa.set_defaults(func=cmd_pool)
+    pa.set_defaults(func=cmd_pool_add)
     pp = pool_sub.add_parser(
         "push", help="upload the local JSON pool + index to Firestore")
     pp.add_argument("--pool", default="data")
@@ -472,7 +503,7 @@ def main(argv: list[str] | None = None) -> int:
                          "GOOGLE_APPLICATION_CREDENTIALS)")
     pp.add_argument("--overwrite", action="store_true",
                     help="replace documents that already exist")
-    pp.set_defaults(func=cmd_pool)
+    pp.set_defaults(func=cmd_pool_push)
 
     pt = pool_sub.add_parser(
         "backfill-training",
@@ -483,7 +514,7 @@ def main(argv: list[str] | None = None) -> int:
                          "GOOGLE_APPLICATION_CREDENTIALS)")
     pt.add_argument("--dry-run", action="store_true",
                     help="report counts without writing")
-    pt.set_defaults(func=cmd_pool)
+    pt.set_defaults(func=cmd_pool_backfill_training)
 
     pb = pool_sub.add_parser(
         "backfill-leads",
@@ -493,7 +524,24 @@ def main(argv: list[str] | None = None) -> int:
                          "GOOGLE_APPLICATION_CREDENTIALS)")
     pb.add_argument("--dry-run", action="store_true",
                     help="report counts without writing")
-    pb.set_defaults(func=cmd_pool)
+    pb.set_defaults(func=cmd_pool_backfill_leads)
+
+    # ARCH-11: stable pool-maintenance scripts, surfaced as discoverable pool
+    # subcommands. The actual dispatch is intercepted in main() (before
+    # argparse), so these registrations exist only to document them under
+    # `trainer pool -h`; all args after the name are forwarded to the script.
+    _POOL_SCRIPT_HELP = {
+        "classify": "classify pool records (difficulty + type)",
+        "reexplain": "regenerate every problem's explanations from GIB",
+        "backfill-notes": "backfill engine notes on pool records",
+    }
+    for name, filename in _POOL_SCRIPTS.items():
+        pool_sub.add_parser(
+            name, help=_POOL_SCRIPT_HELP[name], add_help=False,
+            description=f"Delegates to scripts/{filename}; every argument after "
+                        f"'pool {name}' is forwarded to it (use "
+                        f"'trainer pool {name} -h' to see the script's own "
+                        f"options).")
 
     args = parser.parse_args(argv)
     return args.func(args)

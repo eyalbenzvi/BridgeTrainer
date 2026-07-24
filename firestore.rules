@@ -37,7 +37,7 @@ service cloud.firestore {
         'difficultyLevel', 'answer', 'chosenCall', 'correct', 'outcomeClass',
         'gradedCost', 'score', 'acceptedSet', 'trainingMode', 'rankingMetric',
         'chosenRank', 'recommendedLead', 'primaryValue', 'isFirstAttempt',
-        'attemptCount', 'ts', 'lastTs'];
+        'attemptCount', 'ts', 'firstTs', 'lastTs'];
     }
 
     // Structural bounds shared by create and update: a field-count cap and the
@@ -73,13 +73,13 @@ service cloud.firestore {
       return attemptBounds(request.resource.data);
     }
 
-    // Each user owns their own data: read/write only your own subtree. Only the
-    // top-level user doc (a future profile) and the attempts stream are
-    // writable; attempts are schema-validated. No recursive {doc=**} write
-    // rule, so a client can't create arbitrary subcollections.
+    // Each user owns their own data: read only your own subtree. The ONLY
+    // writable location is the schema-validated attempts stream — no client
+    // writes the top-level user doc (the "profile" was documented but never
+    // implemented, SEC-A-6/DB-M-9), and there is no recursive {doc=**} write
+    // rule, so a client cannot create arbitrary docs or subcollections.
     match /users/{uid} {
       allow read: if owner(uid);
-      allow write: if owner(uid) && request.resource.data.size() < 50;
 
       match /attempts/{pid} {
         allow read: if owner(uid);
