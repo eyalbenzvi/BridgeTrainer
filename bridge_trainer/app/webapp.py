@@ -780,9 +780,19 @@ function btScoreBidding(P, action) {
 /* leads: MP grades tricks below best BLENDED with the matchpoint rank
    (distinct trick values — the second-best lead still beats most of the
    room); IMP grades expected IMPs below the mode's best, pure magnitude.
-   Leniency by the lead's own softmax weight. No dead pin (leads have no
-   dead concept) and no CI haircut (per-card CIs aren't published; ties
-   already collapse into the accepted set at forge time). */
+   No dead pin (leads have no dead concept) and no CI haircut (per-card CIs
+   aren't published; ties already collapse into the accepted set at forge
+   time).
+
+   Tie invariant — "what the engine cannot distinguish, the score must not
+   distinguish": cards the active mode ranks identically (same leading metric
+   to display precision, i.e. interchangeable leads) MUST score the same. So
+   every score input is a property of the tie-GROUP, not the individual card:
+   the gap is charged on the rounded leading metric (equal-ranked cards share
+   a cost, hence a base), and field leniency uses the group's TOTAL policy
+   weight (the sum of the interchangeable cards' BEN softmax — the field's
+   probability of finding that one idea) instead of the per-card softmax,
+   which used to split otherwise-identical cards by a few points. */
 function btScoreLead(P, card, mode) {
   mode = mode === "IMP" ? "IMP" : "MP";
   const v = (P && P.verdict) || {};
@@ -795,26 +805,37 @@ function btScoreLead(P, card, mode) {
   const rows = v.table || [];
   const row = rows.find(r => r.card === card);
   if (!row) { out.score = ERROR_MIN; out.fallback = true; return out; }
-  if (mode === "IMP" && row.exp_imps !== undefined) {
+  const useImp = mode === "IMP" && row.exp_imps !== undefined;
+  // the mode's leading metric at DISPLAY precision (2 decimals) — the tie key
+  const keyOf = useImp
+    ? r => (r.exp_imps === undefined ? null : Math.round(+r.exp_imps * 100))
+    : r => (r.avg_def_tricks === undefined ? null
+                                           : Math.round(+r.avg_def_tricks * 100));
+  const myKey = keyOf(row);
+  if (useImp) {
     let best = -Infinity;
-    for (const r of rows)
-      if (r.exp_imps !== undefined && +r.exp_imps > best) best = +r.exp_imps;
-    out.cost = Math.max(0, best - +row.exp_imps);
+    for (const r of rows) {
+      const k = keyOf(r);
+      if (k !== null && k > best) best = k;
+    }
+    // charge the rounded gap so equal-ranked cards get an identical cost
+    out.cost = Math.max(0, (best - myKey) / 100);
     out.tau = SCORE_TAU.leadIMP;
     out.base = btCurve(out.cost, out.tau);
   } else {
     out.unit = "לקיחות";   // also the IMP-mode fallback for a row with no
                            // exp_imps: it is graded (and labeled) in tricks
-    out.cost = Math.max(0, -(+row.vs_best || 0));
+    // round the trick gap to the same precision as the rank grouping, so a
+    // tie-group shares one cost (and thus one base)
+    out.cost = Math.max(0, -Math.round((+row.vs_best || 0) * 100) / 100);
     out.tau = SCORE_TAU.leadMP;
     const vals = [];
     for (const r of rows) {
-      if (r.avg_def_tricks === undefined) continue;
-      const q = Math.round(+r.avg_def_tricks * 100);
-      if (!vals.includes(q)) vals.push(q);
+      const q = keyOf(r);
+      if (q !== null && !vals.includes(q)) vals.push(q);
     }
     vals.sort((a, b) => b - a);
-    const idx = vals.indexOf(Math.round(+row.avg_def_tricks * 100));
+    const idx = vals.indexOf(myKey);
     out.base = btCurve(out.cost, out.tau);
     if (vals.length > 1 && idx >= 0) {
       out.rank = idx + 1; out.groups = vals.length;
@@ -822,7 +843,11 @@ function btScoreLead(P, card, mode) {
       out.base = (1 - MP_RANK_WEIGHT) * out.base + MP_RANK_WEIGHT * rankScore;
     }
   }
-  out.policy = +row.ben_softmax || 0;
+  // field leniency: the tie-group's TOTAL policy weight, so interchangeable
+  // cards never split (see the tie invariant above)
+  out.policy = 0;
+  for (const r of rows)
+    if (keyOf(r) === myKey) out.policy += +r.ben_softmax || 0;
   out.leniency = SCORE_LENIENCY * out.policy;
   out.score = Math.round(btClamp(out.base + out.leniency, 1, SCORE_MAX_NONBEST));
   return out;
@@ -2208,7 +2233,7 @@ data-gloss="win">הפסד</button></div>
 <details class="notes" id="prose-box" style="display:none">
 <summary>ניתוח מלא</summary><div id="explanation"
 style="white-space:pre-line;font-size:13px"></div></details>
-<details class="notes" id="cmp-box" style="display:none">
+<details class="notes" id="cmp-box" style="display:none" open>
 <summary>טבלת השוואה: כל ההכרזות שנבדקו</summary>
 <table id="ctable" class="plain"></table>
 <p class="footnote">הציון בסולם הפאנל (0-100); עמודת ה־IMP היא הפער מול
