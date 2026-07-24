@@ -95,6 +95,37 @@ function saveCache(uid) {
                        lastFullSync: LAST_FULL_SYNC }));
   } catch (e) { /* quota/private-mode: cache is best-effort */ }
 }
+// PERF-F-7: JSON.stringify-ing the whole ATTEMPTS map and writing it
+// synchronously blocks the main thread — and it ran on EVERY answer, right as
+// the verdict renders. Defer it to idle time and coalesce bursts. The answer is
+// already in ATTEMPTS (memory) and written to Firestore, so a dropped deferred
+// write only costs a cache refill on the next load; but a shared SYNCHRONOUS
+// flush on pagehide/visibilitychange guarantees the last answer is persisted
+// before this (multi-page) tab unloads on "next problem". NB: savePending stays
+// synchronous — a failed first-attempt save must never be lost to a deferred
+// write. `saveCache` itself stays available for the background sync paths.
+let CACHE_DIRTY_UID = null, CACHE_FLUSH_SCHEDULED = false;
+function flushCache() {
+  CACHE_FLUSH_SCHEDULED = false;
+  if (CACHE_DIRTY_UID) saveCache(CACHE_DIRTY_UID);
+}
+function scheduleSaveCache(uid) {
+  CACHE_DIRTY_UID = uid;
+  if (CACHE_FLUSH_SCHEDULED) return;
+  CACHE_FLUSH_SCHEDULED = true;
+  const ric = (typeof window !== "undefined" && window.requestIdleCallback)
+    || ((f) => setTimeout(f, 0));
+  ric(flushCache);
+}
+if (typeof window !== "undefined" && window.addEventListener) {
+  // pagehide fires on navigation/unload; visibilitychange->hidden covers the
+  // mobile "switch away" case. Both flush synchronously so nothing is lost.
+  window.addEventListener("pagehide", flushCache);
+  window.addEventListener("visibilitychange", () => {
+    if (typeof document !== "undefined"
+        && document.visibilityState === "hidden") flushCache();
+  });
+}
 
 // ---- pending (unsynced) first-attempt saves --------------------------
 function pendingKey(uid) { return "bt_pending_" + uid; }
@@ -469,7 +500,7 @@ const BT = {
                         attemptCount: 1, ts: { seconds: nowSec },
                         firstTs: { seconds: nowSec } };
       ATTEMPTS[problemId] = payload;
-      saveCache(uid);
+      scheduleSaveCache(uid);   // deferred; flushed on pagehide (PERF-F-7)
       try {
         await setDoc(ref, { ...payload, ts: serverTimestamp(),
                             firstTs: serverTimestamp() });
@@ -484,7 +515,7 @@ const BT = {
     } else {
       // re-answer: keep the first-attempt grading, just count it.
       ATTEMPTS[problemId].attemptCount = (existing.attemptCount || 1) + 1;
-      saveCache(uid);
+      scheduleSaveCache(uid);   // deferred; flushed on pagehide (PERF-F-7)
       if (PENDING[problemId]) {
         // the first attempt hasn't reached the server yet — bump the QUEUED
         // payload instead of a merge write, which would create a partial doc
