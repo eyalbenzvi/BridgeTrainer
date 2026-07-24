@@ -1,0 +1,167 @@
+name: Forge bidding problems
+
+# Generates BIDDING problems on a GitHub-hosted runner, classifies them into
+# the 10-category taxonomy with the GitHub Models free inference tier, and
+# pushes them to Firestore — no local machine, no Claude Code session, and no
+# paid LLM tokens.
+#
+# This is the sibling of forge-leads.yml. The extra step is classification:
+# bidding categories are an LLM judgment (leads are a mechanical fact of the
+# contract). scripts/classify_pool.py does it via GitHub Models, authenticated
+# with GITHUB_TOKEN — which is why this job grants `permissions: models: read`.
+#
+# Two ways to run:
+#   * DAILY SCHEDULE — one batch (FORGE_COUNT problems, default 24) forges,
+#     classifies, and pushes. Tune via repository variables (Settings →
+#     Secrets and variables → Actions → Variables): FORGE_BIDDING_COUNT and
+#     FORGE_BIDDING_MAX_SECONDS.
+#   * MANUAL — Actions tab → "Run workflow": pick count, seed, time budget.
+#
+# What a run needs (all available on ubuntu-latest):
+#   * the Ben engine — cloned + built by scripts/setup_ben.sh (pinned commit,
+#     Python 3.12 venv with TensorFlow); cached between runs.
+#   * outbound HTTPS to BBO (gibrest.bridgebase.com) for bid explanations, and
+#     to models.github.ai for classification.
+#   * `permissions: models: read` — puts the GitHub Models scope on the
+#     job's GITHUB_TOKEN. If your org hasn't enabled GitHub Models for the
+#     Actions token, instead create a PAT with `models:read` and store it as
+#     the GITHUB_MODELS_TOKEN repository secret (read in preference below).
+#   * the FIREBASE_SERVICE_ACCOUNT repository secret — the Firebase
+#     service-account key JSON *content*. The push step fails clearly if it
+#     is missing.
+
+on:
+  schedule:
+    # daily at 03:17 UTC (off the hour so it doesn't contend with the hourly
+    # lead forge). A blank-seed run uses the script's time-based default, so
+    # each firing scans fresh boards.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "Number of problems to generate"
+        type: string
+        default: "24"
+        required: true
+      seed:
+        description: "RNG seed (blank = unique per run, so re-runs add new boards)"
+        type: string
+        default: ""
+        required: false
+      max_seconds:
+        description: "Generation time budget in seconds"
+        type: string
+        default: "6000"
+        required: false
+
+# Serialize runs: two concurrent pushes would race the Firestore index update
+# (read-union-write). Queued, never cancelled; GitHub keeps at most one pending
+# run per group, so scheduled firings can't pile into a backlog.
+concurrency:
+  group: forge-bidding
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  models: read      # lets the job's GITHUB_TOKEN call the GitHub Models API
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          COUNT: ${{ inputs.count }}
+        run: |
+          case "$COUNT" in
+            ''|*[!0-9]*) echo "count must be a positive integer"; exit 1 ;;
+          esac
+          [ "$COUNT" -ge 1 ]
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The Ben engine (~GBs of models + a TensorFlow venv) is expensive to
+      # build; cache it keyed on the setup script (which pins the Ben commit).
+      - name: Cache Ben engine and venvs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/ben
+            ~/benv
+            ~/fbenv
+          key: ben-${{ runner.os }}-${{ hashFiles('scripts/setup_ben.sh') }}
+
+      - name: Forge, classify, and push
+        # explicit bash => pipefail, so a forge failure isn't masked by tee
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          # Classification token: a PAT secret (models:read) if you set one,
+          # otherwise the job's GITHUB_TOKEN carrying the models:read scope
+          # granted by `permissions: models: read` above. run_github_models
+          # prefers GITHUB_MODELS_TOKEN and an unset secret expands to "",
+          # which it treats as absent.
+          GITHUB_MODELS_TOKEN: ${{ secrets.GITHUB_MODELS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COUNT: ${{ inputs.count }}
+          SEED: ${{ inputs.seed }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          FORGE_COUNT: ${{ vars.FORGE_BIDDING_COUNT }}
+          FORGE_MAX_SECONDS: ${{ vars.FORGE_BIDDING_MAX_SECONDS }}
+          PYTHON: python3.12
+          # stream forge output line-by-line into the live Actions log
+          PYTHONUNBUFFERED: "1"
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            # daily: one batch. Time-based seed default => fresh boards.
+            N="${FORGE_COUNT:-24}"
+            BUDGET="${FORGE_MAX_SECONDS:-6000}"
+            echo ">> daily batch: $N problems, ${BUDGET}s"
+            MAX_SECONDS="$BUDGET" \
+              scripts/generate_and_push_bidding.sh "$N" 2>&1 | tee forge.log
+          else
+            # manual dispatch: empty optional inputs fall back to the
+            # script's own defaults
+            [ -z "$SEED" ] && unset SEED
+            [ -z "$MAX_SECONDS" ] && unset MAX_SECONDS
+            scripts/generate_and_push_bidding.sh "$COUNT" 2>&1 | tee forge.log
+          fi
+
+      - name: Job summary
+        if: always()
+        env:
+          COUNT: ${{ inputs.count }}
+          FORGE_COUNT: ${{ vars.FORGE_BIDDING_COUNT }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            HEAD="daily, ${FORGE_COUNT:-24} problems"
+          else
+            HEAD="requested $COUNT"
+          fi
+          {
+            echo "## Bidding forge — $HEAD"
+            echo
+            echo '```'
+            grep -E "^>> |^Done:|progress: |type-classified|uploaded " \
+              forge.log | tail -60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The generated JSON documents, for traceability/debugging (they are
+      # also in Firestore by now; the pool push skips docs already present).
+      - name: Upload forged problems
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forged-bidding-${{ github.run_number }}
+          path: |
+            data/
+            forge.log
+          if-no-files-found: warn
+          retention-days: 30

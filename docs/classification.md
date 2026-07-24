@@ -78,11 +78,26 @@ Cohen's LOTT framing); BridgeWinners and the MSC publish no typology.
 | `sacrifice_decision` | הקרבה | deliberate minus vs defending their make |
 | `describe_hand` | תיאור היד | which constructive call describes the hand |
 
-Classifier: `claude-sonnet-5` via the headless `claude` CLI (generation
-runs inside Claude Code sessions at this stage). It sees the hero hand,
-auction with the engine's call meanings, vulnerability, candidates with
-policy, and the verdict winner; answers strict JSON (closed enum,
-validated, one retry) plus a one-sentence reason stored for audit.
+Classifier backend (`engine/classify.py`): the default is **GitHub Models**
+(`run_github_models`, model `openai/gpt-4.1-mini`) — an OpenAI-compatible
+chat-completions call on GitHub's free inference tier, authenticated with a
+`GITHUB_TOKEN`/`GITHUB_MODELS_TOKEN` carrying `models:read`. This is what lets
+classification run unattended in the `forge-bidding.yml` Actions workflow, with
+no paid tokens and no Claude Code session. `run_claude_cli` (model
+`claude-sonnet-5`, the original headless `claude` CLI) stays available via
+`--backend claude` for running the classifier by hand inside a Claude Code
+session. Either way the model sees the hero hand, auction with the engine's
+call meanings, vulnerability, candidates with policy, and the verdict winner;
+answers strict JSON (closed enum, validated, one retry) plus a one-sentence
+reason stored for audit.
+
+Chunking: problems are classified in small chunks (`DEFAULT_CHUNK_SIZE`).
+Large batches are a false economy — GitHub Models hard-caps output at 4,000
+tokens/request, so an over-long JSON array truncates mid-array (the same
+"hang" symptom the `claude` CLI once showed on whole-pool calls), and per-item
+accuracy drifts as one prompt juggles more problems. A chunk whose call fails
+is automatically halved and retried, and each record is written back the
+moment its chunk returns, so an interrupted run resumes losslessly.
 
 ## Type (leads, engine/lead_classify.py)
 
@@ -107,9 +122,18 @@ client-side facet counts).
 
 ```
 # after a forge batch (or as one-time backfill):
-python3 scripts/classify_pool.py data              # difficulty + type
+python3 scripts/classify_pool.py data              # difficulty + type (GitHub Models)
 python3 scripts/classify_pool.py data --difficulty-only
+python3 scripts/classify_pool.py data --backend claude   # in a Claude Code session
+
+# full unattended pipeline (forge + classify + push), also the daily workflow:
+scripts/generate_and_push_bidding.sh 24 --key sa-key.json
 
 # backfill lead categories directly onto the live Firestore pool:
 trainer pool backfill-leads --key sa-key.json      # --dry-run to preview
 ```
+
+The classification step (`--backend github`, the default) runs in the
+`forge-bidding.yml` GitHub Actions workflow on the free GitHub Models tier, so
+it needs no paid tokens and no Claude Code session — the workflow grants the
+job `permissions: models: read`, which puts the scope on its `GITHUB_TOKEN`.

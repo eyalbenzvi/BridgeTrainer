@@ -150,3 +150,119 @@ def test_classify_records_retries_only_missing_ids():
     out = classify_records([a, b], run=run, retries=1)
     assert len(calls) == 2
     assert set(out) == {"ben1-aaaa", "ben1-bbbb"}
+
+
+# --- GitHub Models backend (default; runs in the Actions workflow) ---------
+
+class _FakeResp:
+    def __init__(self, data: bytes):
+        self._data = data
+
+    def read(self):
+        return self._data
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_run_github_models_posts_openai_shape_and_returns_content(monkeypatch):
+    import urllib.request
+
+    from bridge_trainer.engine import classify
+
+    captured = {}
+
+    def fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["method"] = req.get_method()
+        captured["auth"] = req.headers["Authorization"]
+        captured["body"] = json.loads(req.data.decode())
+        return _FakeResp(json.dumps(
+            {"choices": [{"message":
+             {"content": '{"type":"slam_try","reason":"r"}'}}]}).encode())
+
+    monkeypatch.setenv("GITHUB_TOKEN", "tok123")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    out = classify.run_github_models("classify this as JSON",
+                                     model="openai/gpt-4.1-mini")
+    assert '"type":"slam_try"' in out
+    assert captured["url"] == classify.GITHUB_MODELS_URL
+    assert captured["method"] == "POST"
+    assert captured["auth"] == "Bearer tok123"
+    assert captured["body"]["model"] == "openai/gpt-4.1-mini"
+    assert captured["body"]["temperature"] == 0
+    assert (captured["body"]["messages"][0]["content"]
+            == "classify this as JSON")
+
+
+def test_run_github_models_prefers_explicit_models_token(monkeypatch):
+    import urllib.request
+
+    from bridge_trainer.engine import classify
+
+    seen = {}
+
+    def fake_urlopen(req, timeout=None):
+        seen["auth"] = req.headers["Authorization"]
+        return _FakeResp(b'{"choices":[{"message":{"content":"{}"}}]}')
+
+    monkeypatch.setenv("GITHUB_TOKEN", "actions-token")
+    monkeypatch.setenv("GITHUB_MODELS_TOKEN", "pat-token")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    classify.run_github_models("x")
+    assert seen["auth"] == "Bearer pat-token"      # PAT wins over GITHUB_TOKEN
+
+
+def test_run_github_models_requires_a_token(monkeypatch):
+    from bridge_trainer.engine import classify
+
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("GITHUB_MODELS_TOKEN", raising=False)
+    with pytest.raises(RuntimeError, match="GITHUB_TOKEN|models:read"):
+        classify.run_github_models("x")
+
+
+def test_run_github_models_http_error_becomes_runtimeerror(monkeypatch):
+    import io
+    import urllib.error
+    import urllib.request
+
+    from bridge_trainer.engine import classify
+
+    def fake_urlopen(req, timeout=None):
+        raise urllib.error.HTTPError(
+            req.full_url, 429, "Too Many Requests", hdrs=None,
+            fp=io.BytesIO(b"rate limit exceeded"))
+
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    with pytest.raises(RuntimeError, match="429"):
+        classify.run_github_models("x")
+
+
+def test_run_github_models_end_to_end_through_classify_records(monkeypatch):
+    # The full path: classify_records -> run_github_models (default backend) ->
+    # HTTP -> parse_batch_response, with only the network call stubbed.
+    import urllib.request
+
+    from bridge_trainer.engine import classify
+
+    a, b = _two_recs()
+
+    def fake_urlopen(req, timeout=None):
+        return _FakeResp(json.dumps({"choices": [{"message": {"content":
+            '[{"id":"ben1-aaaa","type":"compete_or_sell","reason":"p"},'
+            '{"id":"ben1-bbbb","type":"invite_or_game","reason":"q"}]'}}]}
+            ).encode())
+
+    monkeypatch.setenv("GITHUB_TOKEN", "tok")
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    out = classify.classify_records([a, b])       # no run= -> default backend
+    assert out["ben1-aaaa"]["type"] == "compete_or_sell"
+    assert out["ben1-bbbb"]["type"] == "invite_or_game"
