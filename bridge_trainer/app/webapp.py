@@ -53,6 +53,19 @@ def _head_preloads() -> str:
     return "\n".join(links)
 
 
+def _theme_head_script() -> str:
+    """A tiny inline <head> script that applies the saved theme/scale to <html>
+    BEFORE the stylesheet paints, so a user whose choice differs from the OS
+    preference sees no flash of the wrong theme and no font-size reflow
+    (PERF-F-8). Mirrors applyTheme() in _SHARED_JS, which still runs later for
+    live changes from the settings sheet. Placed first in <head> so the
+    html[data-theme]/[data-scale] attributes exist before CSS is applied."""
+    return ("<script>(function(){try{var d=document.documentElement,"
+            "t=localStorage.getItem('bt_theme'),s=localStorage.getItem('bt_scale');"
+            "if(t&&t!=='system')d.setAttribute('data-theme',t);"
+            "if(s&&s!=='s')d.setAttribute('data-scale',s);}catch(e){}})();</script>")
+
+
 _CSS = """
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
@@ -117,8 +130,13 @@ a { color: var(--accent); }
           letter-spacing: .05em; color: var(--muted); }
 .alllink { background: none; border: 0; font: inherit; font-size: 12px;
            font-weight: 600; color: var(--accent); cursor: pointer;
-           padding: 2px 2px; }
+           /* >=24px tap target (WCAG 2.5.8) without growing the visual text */
+           display: inline-flex; align-items: center;
+           min-height: 24px; padding: 4px 6px; }
 .alllink:hover { text-decoration: underline; }
+/* in-panel guidance when a filter axis is emptied (UX-I-5): tells the user how
+   to leave the "0 problems" dead end instead of only greying the CTA */
+.fhint { font-size: 12px; font-weight: 600; color: var(--loss); margin-top: 6px; }
 /* segmented difficulty control (ordinal, so it reads as one scale) */
 .seg { display: grid; grid-template-columns: repeat(var(--n, 5), 1fr);
        border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
@@ -130,7 +148,10 @@ a { color: var(--accent); }
 .seg button .sname { font-size: 11px; font-weight: 600; }
 .seg button .scount { font-size: 13px; font-weight: 700;
                       font-variant-numeric: tabular-nums; }
-.seg button.active { background: var(--accent-tint); color: var(--accent); }
+.seg button.active { background: var(--accent-tint); color: var(--accent);
+  /* non-colour selection cue (UX-A-8): an inset underline, so the state
+     doesn't rely on the subtle tint/hue alone */
+  box-shadow: inset 0 -3px 0 var(--accent); font-weight: 700; }
 /* problem-type toggle rows: name + proportional volume bar + count */
 .typelist { display: flex; flex-direction: column; gap: 6px; }
 button.typerow { display: flex; align-items: center; gap: 10px; width: 100%;
@@ -185,6 +206,9 @@ a.big.off { background: var(--push); color: var(--fg); cursor: not-allowed; }
 /* four-color suits (BBO default deck) */
 .ss { color: var(--sp); } .sh { color: var(--he); }
 .sd { color: var(--di); } .sc { color: var(--cl); }
+/* belt-and-braces with the VS15 in SUITS: force text (not emoji) rendering so
+   the four-colour suit scheme's `color` always applies (UX-A-6) */
+.ss, .sh, .sd, .sc { font-variant-emoji: text; }
 /* ---- auction diagram: fixed W N E S, vul on the seat plates ---- */
 table.bidding { width: 100%; border-collapse: collapse; font-size: 17px;
                 border-radius: 10px; overflow: hidden; }
@@ -252,6 +276,17 @@ table.bidding td.turn { background: var(--accent-tint); color: var(--accent);
              place-items: center; font-size: 10px; font-weight: 700; }
 .fdcompass .cn { grid-area: cn; } .fdcompass .cw { grid-area: cw; }
 .fdcompass .ce { grid-area: ce; } .fdcompass .cs { grid-area: cs; }
+/* wide analysis tables scroll inside their own box, so a narrow phone doesn't
+   scroll the whole page horizontally (UX-A-9) */
+#ctable, #rtable, #ltable { display: block; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; }
+/* narrow phones (<=380px): tighten table cells and stack the full-deal diagram
+   into two columns (W/E under N, compass below) so nothing overflows */
+@media (max-width: 380px) {
+  table.plain th, table.plain td { padding: 6px 5px; }
+  .fulldeal { grid-template-columns: 1fr 1fr;
+              grid-template-areas: "n n" "w e" "c c" "s s"; }
+}
 /* ---- bidding-box candidates ---- */
 .candidates { display: grid; gap: 8px; margin: 12px 0;
               grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
@@ -302,8 +337,12 @@ button.cand.near::after { position: absolute; top: 2px; right: 6px;
             border-radius: 2px; margin: 0 3px 0 10px; }
 .legend i:first-child { margin-left: 0; }
 .opt { padding: 12px 4px; border-top: 1px solid var(--line); }
-.opt.mine { background: #C8102E0A; border-radius: 8px; }
-table.plain tr.mine td { background: #C8102E0A; }
+/* "your pick" tint follows the --loss token in every theme (UX-A-10) instead
+   of a hardcoded light-theme red-with-alpha that stayed put in dark mode */
+.opt.mine { background: color-mix(in srgb, var(--loss) 4%, transparent);
+  border-radius: 8px; }
+table.plain tr.mine td {
+  background: color-mix(in srgb, var(--loss) 4%, transparent); }
 .opt .l1 { display: flex; align-items: center; gap: 8px; }
 .bidchip { min-width: 40px; height: 32px; border-radius: 6px;
            border: 1px solid var(--line); font-size: 16px; font-weight: 700;
@@ -316,7 +355,10 @@ table.plain tr.mine td { background: #C8102E0A; }
 .opt .shows { color: var(--muted); font-size: 13px; flex: 1;
               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .opt .ev { font-size: 16px; font-weight: 700;
-           font-variant-numeric: tabular-nums; white-space: nowrap; }
+           font-variant-numeric: tabular-nums; white-space: nowrap;
+           /* signed EV like "-1.2 +/-0.3": isolate LTR so the leading minus
+              (U+2212) doesn't reorder to the right in the RTL page (UX-A-5) */
+           direction: ltr; unicode-bidi: isolate; }
 .opt .ev small { font-size: 12px; font-weight: 400; color: var(--muted); }
 .opt .ev .best { color: var(--win); }
 .wpl { display: flex; justify-content: space-between; height: 10px;
@@ -382,11 +424,14 @@ button.cardbtn.near { border-color: var(--gold);
 .bartrack span { display: block; height: 100%; background: var(--accent); }
 .bartrack span.good { background: var(--win); }
 .barval { width: 6.2em; text-align: right; font-variant-numeric: tabular-nums;
-  color: var(--muted); font-size: 12px; }
+  color: var(--muted); font-size: 12px;
+  /* signed values like "-0.50 IMP": isolate LTR so the sign stays left (UX-A-5) */
+  direction: ltr; unicode-bidi: isolate; }
 /* fixed-width "(שלך)" slot on every row keeps all tracks the same length */
 .barrow .byou { flex: 0 0 auto; width: 2.9em; font-size: 12px;
   color: var(--muted); }
-.barrow.mine { background: #C8102E0A; border-radius: 8px; }
+.barrow.mine { background: color-mix(in srgb, var(--loss) 4%, transparent);
+  border-radius: 8px; }
 #bid-meaning { min-height: 1.2em; margin: 6px 0 0; }
 /* single source for the verdict headline (BUG-10: was defined 3x, the 24px v2
    rule winning) */
@@ -539,11 +584,10 @@ button.modecard[aria-pressed="true"] b { color: var(--accent); }
    RTL base direction and isolate it, or the whole sentence scrambles */
 .modegoal { font-size: 13px; color: var(--muted); direction: rtl;
   unicode-bidi: isolate; }
-/* the home lead-scenario card swaps this line between the MP and IMP goals,
-   whose different lengths wrapped to different heights and made the whole card
-   (and the layout below it) jump on every MP<->IMP toggle. Reserve a constant
-   two-line slot so switching modes never reflows. Scoped to the home div by id;
-   the problem page reuses .modegoal as an inline banner span, unaffected. */
+/* the MP and IMP goal strings differ in length and wrapped to different
+   heights, making the selector box jump on every MP<->IMP toggle. Reserve a
+   constant two-line slot so switching modes never reflows. Scoped to the home
+   div by id; the problem page reuses .modegoal as an inline banner, unaffected. */
 #modegoal { min-height: 2.9em; }
 .ctline { font-size: 14px; margin-top: 6px; }
 /* the active mode's primary metric is visually emphasized */
@@ -585,7 +629,10 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
   background: var(--accent); border-color: var(--accent); }
 .modepills button.modecard[aria-pressed="true"] b,
 .modepills button.modecard[aria-pressed="true"] small { color: var(--on-accent); }
-.scencard .modegoal { margin-top: 6px; }
+/* MP/IMP selector now sits below the scenario cards (UX-A-7); the reserved
+   #modegoal height keeps its own box from jumping on an MP<->IMP toggle */
+.modewrap { margin: 0 0 8px; }
+.modewrap .modegoal { margin-top: 6px; }
 /* loading skeletons */
 .skl { height: 12px; border-radius: 6px; background: var(--line);
        margin: 12px 0; }
@@ -595,14 +642,18 @@ table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
 }
 /* inline Hebrew jargon explainer */
 .infot { display: inline-block; margin-inline-start: 4px; color: var(--accent);
-         font-style: normal; font-size: 13px;
+         font-style: normal; font-size: 13px; position: relative;
          background: none; border: 0; padding: 0; cursor: pointer; }
+/* expand the tap target to ~24px without changing the glyph's size (UX-A-10) */
+.infot::after { content: ""; position: absolute; inset: -8px; }
 /* tap-to-explain: a dotted underline marks any term that opens a gloss
    card on tap — the same visual cue as tappable auction calls */
 button.gloss { background: none; border: 0; padding: 0; margin: 0;
-  font: inherit; color: inherit; cursor: pointer;
+  font: inherit; color: inherit; cursor: pointer; position: relative;
   text-decoration: underline dotted 1.5px; text-underline-offset: 3px;
   text-decoration-color: var(--accent); }
+/* taller tap target for the inline glossary term without shifting text layout */
+button.gloss::after { content: ""; position: absolute; inset: -8px -2px; }
 .scorechip[data-gloss] { cursor: pointer; }
 button.typebadge { font: inherit; cursor: pointer; }
 button.modechip { border: 0; font: inherit; cursor: pointer;
@@ -658,6 +709,7 @@ const REVIEW_MIN = 85;         // "review below 85"; near band / opt bin floor
 const NEAR_MIN = 65;           // minor-deviation floor; p/lead "near" chip cut
 const ERROR_MIN = 40;          // error band floor; no-data fallback score
 const SESSION_SIZE = 10;       // problems per practice run (bt_session)
+const SESSION_TTL_MS = 6 * 60 * 60 * 1000;   // a run older than this is stale
 const SCORE_EXP = 1.6;         // soft shoulder, then a fast drop
 const SCORE_LENIENCY = 6;      // max field-leniency points (x policy weight)
 const SCORE_TAU = {bidding: 2.0, leadMP: 0.6, leadIMP: 1.75};
@@ -1219,8 +1271,11 @@ async function prefetchNext(index, filters) {
   } catch (e) { /* prefetch is best-effort */ }
 }
 /* BBO four-color deck */
-const SUITS = {S: ["ss", "\\u2660"], H: ["sh", "\\u2665"],
-               D: ["sd", "\\u2666"], C: ["sc", "\\u2663"]};
+// each glyph carries VS15 (U+FE0E) so Android/Samsung fonts render the TEXT
+// suit symbol, not a colour emoji — otherwise CSS `color` wouldn't apply and
+// the four-colour scheme would break (UX-A-6).
+const SUITS = {S: ["ss", "\\u2660\\uFE0E"], H: ["sh", "\\u2665\\uFE0E"],
+               D: ["sd", "\\u2666\\uFE0E"], C: ["sc", "\\u2663\\uFE0E"]};
 function suitHtml(st) {
   const [cls, g] = SUITS[st];
   return `<span class="${cls}">${g}</span>`;
@@ -1476,12 +1531,23 @@ function applyTheme() {
 applyTheme();
 /* practice-session progress (a 10-problem run started from the home page) */
 function getSession() {
-  try { return JSON.parse(localStorage.getItem("bt_session")); }
+  let s;
+  try { s = JSON.parse(localStorage.getItem("bt_session")); }
   catch (e) { return null; }
+  // expire a stale run (paused hours ago) so its counter/summary don't leak
+  // into a new day's answers (UX-I-6)
+  if (s && s.startedAt && Date.now() - s.startedAt > SESSION_TTL_MS) {
+    localStorage.removeItem("bt_session");
+    return null;
+  }
+  return s;
 }
-function bumpSession(score, id) {
+function bumpSession(score, id, kind) {
   const s = getSession();
   if (!s) return;
+  // only count answers from THIS run's scenario: a lead answered from a direct
+  // link must not be tallied into a paused bidding run (UX-I-6)
+  if (kind && s.kind && kind !== s.kind) return;
   s.count = (s.count || 0) + 1;
   const scored = typeof score === "number";
   if (scored) { s.sum = (s.sum || 0) + score;
@@ -1657,6 +1723,7 @@ def _index_html() -> str:
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{_theme_head_script()}
 <title>מאמן הברידג' — תרגול</title>
 <link rel="stylesheet" href="app.css">
 {_head_preloads()}
@@ -1670,19 +1737,20 @@ def _index_html() -> str:
 <b>תרגול הכרזה</b><small>ההכרזה שלך ליד השולחן</small>
 <span class="sccount" id="count-bidding"></span>
 </div>
-<div class="scencard" data-kind="lead" role="radio" tabindex="0"
+<div class="scencard" data-kind="lead" role="radio" tabindex="-1"
      aria-checked="false">
 <b>תרגול הובלה</b><small>איזה קלף להוביל נגד החוזה</small>
 <span class="sccount" id="count-lead"></span>
-<div class="modepills" id="modes" role="group" aria-label="שיטת חישוב"
-     style="visibility:hidden">
+</div>
+</div>
+<div class="modewrap" id="modewrap" hidden>
+<div class="modepills" id="modes" role="group" aria-label="שיטת חישוב">
 <button type="button" class="modecard" data-mode="MP" aria-pressed="true">
 <b>MP</b><small>מקסימום לקיחות בהגנה</small></button>
 <button type="button" class="modecard" data-mode="IMP" aria-pressed="false">
 <b>IMP</b><small>הפרשי תוצאה גדולים</small></button>
 </div>
-<div class="modegoal" id="modegoal" style="visibility:hidden"></div>
-</div>
+<div class="modegoal" id="modegoal"></div>
 </div>
 <div class="card" id="filters">
 <button type="button" class="fbar" id="fbar" aria-expanded="false"
@@ -1696,11 +1764,13 @@ def _index_html() -> str:
 <div class="grow"><span class="glabel">דרגת קושי</span>
 <button type="button" class="alllink" id="all-diff"></button></div>
 <div class="seg" id="diff-seg"></div>
+<div class="fhint" id="hint-diff" role="alert" hidden>בחר לפחות דרגת קושי אחת</div>
 </div>
 <div class="fgroup" id="type-group">
 <div class="grow"><span class="glabel">סוג בעיה</span>
 <button type="button" class="alllink" id="all-type"></button></div>
 <div class="typelist" id="type-list"></div>
+<div class="fhint" id="hint-type" role="alert" hidden>בחר לפחות סוג בעיה אחד</div>
 </div>
 </div>
 </div>
@@ -1729,14 +1799,13 @@ function saveCur(f) {{ localStorage.setItem(curKey(), JSON.stringify(f)); }}
 function setScenario(kind) {{
   SCEN = kind; localStorage.setItem(SCEN_KEY, kind);
   document.body.dataset.scenario = kind;
-  document.querySelectorAll("#scenario .scencard").forEach(c =>
-    c.setAttribute("aria-checked", c.dataset.kind === kind ? "true" : "false"));
-  // reserve the pills' space in both scenarios (visibility, not display) so
-  // the two cards keep one constant, equal height — toggling never shifts the
-  // layout. The pills only *appear* for the lead scenario.
-  const vis = kind === "lead" ? "visible" : "hidden";
-  document.getElementById("modes").style.visibility = vis;
-  document.getElementById("modegoal").style.visibility = vis;
+  document.querySelectorAll("#scenario .scencard").forEach(c => {{
+    const on = c.dataset.kind === kind;
+    c.setAttribute("aria-checked", on ? "true" : "false");
+    c.tabIndex = on ? 0 : -1;   // roving tabindex for the radiogroup (UX-A-7)
+  }});
+  // the MP/IMP selector lives below the cards now, shown only for leads
+  document.getElementById("modewrap").hidden = kind !== "lead";
   syncModeUi();
   // The choice above is already persisted (SCEN + localStorage) and reflected
   // in the UI. The facet build below needs the pool index; if a click lands
@@ -1754,8 +1823,7 @@ function syncModeUi() {{
     b.setAttribute("aria-pressed", b.dataset.mode === m ? "true" : "false"));
   document.getElementById("modegoal").textContent = MODE_INFO[m].goal;
 }}
-document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = ev => {{
-  ev.stopPropagation();   // don't re-trigger the scenario card underneath
+document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = () => {{
   setLeadMode(b.dataset.mode);
   syncModeUi();
   // mode is persisted (setLeadMode); the facet rebuild needs the index. If the
@@ -1796,7 +1864,7 @@ function buildFilters() {{
   const seg = document.getElementById("diff-seg");
   seg.style.setProperty("--n", f.levels.length || 1);
   seg.innerHTML = f.levels.map(lv =>
-    `<button type="button" data-level="${{lv}}">` +
+    `<button type="button" data-level="${{lv}}" aria-pressed="false">` +
     `<span class="sname">${{DIFF_NAMES[lv]}}</span>` +
     `<span class="scount">0</span></button>`).join("");
   document.getElementById("type-list").innerHTML = f.types.map(t => {{
@@ -1832,8 +1900,11 @@ function updateFacetCounts() {{
 }}
 function applyFilterUi() {{
   const f = facetsFrom(COUNTS, FILTERS.kind);
-  document.querySelectorAll("#diff-seg button").forEach(b =>
-    b.classList.toggle("active", FILTERS.levels.includes(+b.dataset.level)));
+  document.querySelectorAll("#diff-seg button").forEach(b => {{
+    const on = FILTERS.levels.includes(+b.dataset.level);
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");   // UX-A-8
+  }});
   document.querySelectorAll("#type-list .typerow").forEach(b =>
     b.setAttribute("aria-pressed",
       FILTERS.types.includes(b.dataset.type) ? "true" : "false"));
@@ -1841,6 +1912,10 @@ function applyFilterUi() {{
     FILTERS.levels.length >= f.levels.length ? HE.clear : HE.selectAll;
   document.getElementById("all-type").textContent =
     FILTERS.types.length >= f.types.length ? HE.clear : HE.selectAll;
+  // UX-I-5: an emptied axis shows an in-panel "choose at least one" hint so the
+  // 0-problems state is escapable, not a silent dead end
+  document.getElementById("hint-diff").hidden = FILTERS.levels.length > 0;
+  document.getElementById("hint-type").hidden = FILTERS.types.length > 0;
 }}
 function persist() {{
   const f = facetsFrom(COUNTS, FILTERS.kind);
@@ -1935,6 +2010,10 @@ function renderStats() {{
   const deal = document.getElementById("deal");
   const none = !FILTERS.levels.length || !FILTERS.types.length;
   deal.classList.toggle("off", none);
+  // a dead CTA must not be a keyboard focus trap / activatable link (UX-I-5)
+  deal.setAttribute("aria-disabled", none ? "true" : "false");
+  if (none) deal.setAttribute("tabindex", "-1");
+  else deal.removeAttribute("tabindex");
   const dealLabel = FILTERS.kind === "lead"
     ? "התחל תרגול הובלה &larr;" : "התחל תרגול הכרזה &larr;";
   deal.innerHTML = none
@@ -1969,11 +2048,24 @@ async function init() {{
     document.getElementById("fbody").removeAttribute("hidden");
   }}
 }}
-document.querySelectorAll("#scenario .scencard").forEach(c => {{
+// radiogroup keyboard model (UX-A-7/UX-I-9): arrows move selection AND focus
+// between the cards, Enter/Space selects; roving tabindex keeps one tab stop.
+const SCENCARDS = [...document.querySelectorAll("#scenario .scencard")];
+function moveScen(dir) {{
+  const cur = Math.max(0, SCENCARDS.findIndex(c => c.dataset.kind === SCEN));
+  const next = (cur + dir + SCENCARDS.length) % SCENCARDS.length;
+  setScenario(SCENCARDS[next].dataset.kind);
+  SCENCARDS[next].focus();
+}}
+SCENCARDS.forEach(c => {{
   c.addEventListener("click", () => setScenario(c.dataset.kind));
   c.addEventListener("keydown", ev => {{
     if (ev.key === "Enter" || ev.key === " ") {{
       ev.preventDefault(); setScenario(c.dataset.kind);
+    }} else if (ev.key === "ArrowRight" || ev.key === "ArrowDown") {{
+      ev.preventDefault(); moveScen(1);
+    }} else if (ev.key === "ArrowLeft" || ev.key === "ArrowUp") {{
+      ev.preventDefault(); moveScen(-1);
     }}
   }});
 }});
@@ -1996,16 +2088,21 @@ document.getElementById("deal").onclick = () => {{
   }}
   localStorage.setItem("bt_session", JSON.stringify({{
     kind: FILTERS.kind, size: SESSION_SIZE, count: 0, right: 0, sum: 0, scored: 0,
+    startedAt: Date.now(),   // for TTL expiry (UX-I-6)
     mode: FILTERS.kind === "lead" ? leadMode() : null,
     levels: FILTERS.levels.slice(), types: FILTERS.types.slice()}}));
   location.href = routeFor(FILTERS.kind, id);
   return false;
 }};
 function renderSessionSummary() {{
-  let s = null;
-  try {{ s = JSON.parse(localStorage.getItem("bt_session")); }} catch (e) {{}}
+  const explicit = new URLSearchParams(location.search).get("summary");
+  const s = getSession();   // TTL-aware
   if (!s || !s.count) return;
-  localStorage.removeItem("bt_session");   // the run is over
+  // show the summary once the run is COMPLETE, on any home entry (not only the
+  // ?summary=1 auto-redirect) so it isn't lost when returning via the nav; the
+  // blob is cleared only on an explicit action below, so a refresh keeps it
+  // (UX-I-6).
+  if (!explicit && (s.count || 0) < (s.size || SESSION_SIZE)) return;
   const kindLabel = s.kind === "lead" ? "הובלה" : "הכרזה";
   // score trail; bumpSession only ever stores id + score, so a scoreless item
   // (a legacy in-flight session) maps to the no-data fallback, not 0 (= dead)
@@ -2029,18 +2126,24 @@ function renderSessionSummary() {{
     `<div class="wpl" role="img" aria-label="ציון ממוצע ${{avg}} מתוך 100" style="margin-top:8px">` +
     `<span class="w" style="width:${{avg}}%">${{avg}}</span></div>` +
     missHtml +
-    `<button type="button" class="big" id="again">עוד סבב &larr;</button>`;
+    `<div style="display:flex;gap:8px;margin-top:8px">` +
+    `<button type="button" class="big" id="again">עוד סבב &larr;</button>` +
+    `<button type="button" class="alllink" id="sum-close">סגור</button></div>`;
   const main = document.getElementById("main");
   main.insertBefore(card, main.querySelector("#scenario"));
+  // the run is cleared only when the user acts on the summary (not on render),
+  // so refreshing the page doesn't make it vanish (UX-I-6)
+  const endRun = () => localStorage.removeItem("bt_session");
   card.querySelector("#again").onclick = () => {{
-    card.remove();
+    endRun(); card.remove();
     document.getElementById("deal").click();
   }};
+  card.querySelector("#sum-close").onclick = () => {{
+    endRun(); card.remove(); renderSessRibbon();
+  }};
 }}
-if (new URLSearchParams(location.search).get("summary")) {{
-  if (document.readyState !== "loading") renderSessionSummary();
-  else addEventListener("DOMContentLoaded", renderSessionSummary);
-}}
+if (document.readyState !== "loading") renderSessionSummary();
+else addEventListener("DOMContentLoaded", renderSessionSummary);
 // the page rendered from cache; refresh the counts once the background sync
 // lands (T4) — e.g. answers from another device change the waiting counts.
 window.addEventListener("bt-attempts-synced", () => {{
@@ -2056,6 +2159,7 @@ def _problem_html() -> str:
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{_theme_head_script()}
 <title>בעיית הכרזה</title>
 <link rel="stylesheet" href="app.css">
 {_head_preloads()}
@@ -2378,7 +2482,7 @@ function choose(action) {{
   reveal(action);
   const rec = window.BT.gradeBidding(P, action);
   window.BT.record(P.id, rec);   // updates the cache synchronously (excluded below)
-  if (!RETRYING) bumpSession(rec.score, P.id);
+  if (!RETRYING) bumpSession(rec.score, P.id, "bidding");
   RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
@@ -2505,6 +2609,10 @@ async function init() {{
   document.getElementById("problem").innerHTML =
     `<div class="card">${{typeBadgeHtml(P)}}${{auctionTableHtml(P, NOTES)}}` +
     `<div id="bidnote"></div>` +
+    // parity with the lead page's guidance (UX-I-4): tell new users the calls
+    // in the auction are tappable
+    `<p class="muted" style="margin:6px 0 0">הקש הכרזה במכרז כדי לראות ` +
+    `את משמעותה.</p>` +
     `<div class="hand">${{handHtml(P.hand)}}</div></div>`;
   // tap a bid -> alert-style explanation strip under the auction
   let openNote = -1;
@@ -2837,7 +2945,7 @@ function commit(a) {
   reveal(a);
   const rec = window.BT.gradeLead(P, a, MODE);
   window.BT.record(P.id, rec);   // updates the cache synchronously
-  if (!RETRYING) bumpSession(rec.score, P.id);
+  if (!RETRYING) bumpSession(rec.score, P.id, "lead");
   RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
@@ -3020,6 +3128,7 @@ def _lead_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        + _theme_head_script() + '\n'
         '<title>בעיית הובלה</title>\n<link rel="stylesheet" href="app.css">\n'
         + _head_preloads() + '\n'
         '<script type="module" src="bt-firebase.js"></script></head>'
@@ -3027,8 +3136,14 @@ def _lead_html() -> str:
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted" id="meta"></span></div>\n'
         '<div class="sessribbon" id="sessribbon" hidden></div>\n'
-        '<div class="card" id="modebanner"></div>\n'
-        '<div id="problem"></div>\n'
+        # loading skeletons (UX-I-4): match p.html so lead.html shows structure
+        # instead of an empty felt while auth+Firestore resolve
+        '<div class="card" id="modebanner">'
+        '<div class="skl" style="width:45%"></div></div>\n'
+        '<div id="problem">'
+        '<div class="skl" style="width:35%"></div>'
+        '<div class="skl" style="width:100%;height:120px"></div>'
+        '<div class="skl" style="width:70%"></div></div>\n'
         '<div class="leadgrid" id="grid"></div>\n'
         '<div id="confirm"></div>\n'
         '<div id="verdict" class="card" style="display:none" role="status" '
@@ -3422,6 +3537,7 @@ def _dashboard_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        + _theme_head_script() + '\n'
         '<title>ההתקדמות שלי</title>\n'
         '<link rel="stylesheet" href="app.css">\n<style>' + _DASHBOARD_CSS +
         '</style>\n' + _head_preloads() +

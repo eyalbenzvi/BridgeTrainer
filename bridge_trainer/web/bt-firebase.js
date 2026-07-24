@@ -577,6 +577,9 @@ const BT = {
           try { localStorage.removeItem(cacheKey(prevUid)); } catch (e) { /* */ }
           try { localStorage.removeItem(pendingKey(prevUid)); } catch (e) { /* */ }
         }
+        // cancel any pending deferred cache write so a later pagehide flush
+        // can't re-create the just-removed per-user key (SEC-C-8).
+        CACHE_DIRTY_UID = null; CACHE_FLUSH_SCHEDULED = false;
         window.dispatchEvent(new Event("bt-user-changed"));
         gate("signin");
         return;
