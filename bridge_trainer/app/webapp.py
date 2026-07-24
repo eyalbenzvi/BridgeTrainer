@@ -3295,6 +3295,12 @@ def write_app(out_dir: str | Path) -> None:
     # truth (keeps them lint/test-visible); this just writes them out. Loaded as
     # a classic <script> before each page's inline bootstrap, so its top-level
     # functions are defined when the page code runs.
+    # NOTE: the asset names are stable (not content-hashed). On GitHub Pages
+    # (max-age=600, no custom headers) a returning visitor can briefly hold a
+    # new page with a cached-stale bt-shared.js within the ~10-min window after
+    # a deploy — self-healing, low impact here. Content-hashed filenames
+    # (finding PERF-F-5, not in this scope) would eliminate it and enable
+    # long-lived caching.
     (out / "app.css").write_text(_CSS, encoding="utf-8")
     (out / "bt-shared.js").write_text(_SHARED_JS, encoding="utf-8")
     web = resources.files("bridge_trainer") / "web"
