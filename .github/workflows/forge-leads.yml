@@ -24,8 +24,9 @@ name: Forge lead problems
 on:
   schedule:
     # hourly: each firing forges an MP batch then an IMP batch. Seeds are
-    # hour-based (not the script's day-based default!) so consecutive hours
-    # generate fresh boards instead of re-deriving the same day seed.
+    # hour-based and far apart per mode so no hour (and no mode) rescans
+    # another's boards. A manual dispatch with a blank seed uses the script's
+    # per-run time-based default, which likewise gives each run fresh boards.
     - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
@@ -41,7 +42,7 @@ on:
         default: "24"
         required: true
       seed:
-        description: "RNG seed (blank = day-based default)"
+        description: "RNG seed (blank = unique per run, so re-runs add new boards)"
         type: string
         default: ""
         required: false
