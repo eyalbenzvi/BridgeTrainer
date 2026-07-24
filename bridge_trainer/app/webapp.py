@@ -809,6 +809,17 @@ function btScoreExplain(parts) {
   return "מרכיבי הציון: " + bits.join(" · ");
 }
 /* ---- small pure display/data helpers (shared, DOM-free) --------------- */
+/* HTML-escape a FREE-TEXT document field before it is interpolated into
+   innerHTML (SEC-A-2). Use this for prose/opaque strings that originate
+   outside our code — P.source.* (parsed from external LIN vugraph files),
+   engine notes, meanings — NEVER for helpers that intentionally emit markup
+   (callHtml/suitHtml/handHtml/contractHtml/terse), or you double-escape their
+   glyphs. */
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
 /* A finite number or the default (BUG-5): used for CSS widths so a missing
    probability never emits `width:NaN%`. */
 function safeNum(x, d) {
@@ -2188,14 +2199,14 @@ function reveal(chosen) {{
     // an unmapped engine note stays English — isolate it so its final
     // period doesn't jump to the front of the RTL line
     feet.push(NOTE_HE[note.toLowerCase().trim()] ||
-              `<span class="en">${{note[0].toUpperCase() + note.slice(1)}}.</span>`);
+              `<span class="en">${{esc(note[0].toUpperCase() + note.slice(1))}}.</span>`);
   }}
   document.getElementById("footnote").innerHTML = feet.join(" ");
   if (P.source) {{
     const s = P.source;
     document.getElementById("source").innerHTML =
-      `יד אמיתית: <b class="en">${{s.teams}}</b>, ` +
-      `<span class="en">${{s.event}}</span>, לוח ${{s.board}}.`;
+      `יד אמיתית: <b class="en">${{esc(s.teams)}}</b>, ` +
+      `<span class="en">${{esc(s.event)}}</span>, לוח ${{esc(s.board)}}.`;
   }}
   // bid-by-bid review from the same terse grammar as the tap notes
   const items = [];
@@ -2221,7 +2232,7 @@ function reveal(chosen) {{
   }}
   if (P.meanings && P.meanings.length) {{
     document.getElementById("meanings").innerHTML = P.meanings.map(m =>
-      `<li><b>${{m.seat}}</b>: ${{m.meaning}}</li>`).join("");
+      `<li><b>${{esc(m.seat)}}</b>: ${{esc(m.meaning)}}</li>`).join("");
   }} else {{
     document.getElementById("meanings-box").style.display = "none";
   }}
