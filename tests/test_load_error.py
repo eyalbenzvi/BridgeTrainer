@@ -52,10 +52,12 @@ def test_load_error_html_is_offline_aware():
     )
     assert "הטעינה נכשלה" in online and "אין חיבור לרשת" not in online
     assert "אין חיבור לרשת" in offline
-    # both offer a retry button with the caller's id and a way home
+    # both offer a retry button with the caller's id and a way home,
+    # and announce themselves to assistive tech
     for html in (online, offline):
         assert 'id="retry-load"' in html
         assert 'href="index.html"' in html
+        assert 'role="alert"' in html
 
 
 @pytest.mark.parametrize("html_fn", [_problem_html, _lead_html])
@@ -65,6 +67,16 @@ def test_problem_pages_catch_getProblem_and_wire_retry(html_fn):
     assert "try {" in init and "getProblem(id)" in init
     assert "loadErrorHtml(" in init
     assert '"#retry-load"' in init and "init()" in init
+
+
+@pytest.mark.parametrize("html_fn", [_problem_html, _lead_html])
+def test_next_handler_shows_error_panel_not_silent_redirect(html_fn):
+    """A failed fetchIndex on "next" must surface the retry panel, not bounce
+    the user home without explanation."""
+    js = html_fn()
+    # the old silent fallback is gone
+    assert 'location.href = "index.html"; return; }' not in js
+    assert 'catch (e) { location.href = "index.html"' not in js
 
 
 def test_home_catch_uses_load_error_and_retry():

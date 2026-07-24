@@ -823,8 +823,8 @@ function loadErrorHtml(retryId) {
   var em = offline ? "אין חיבור לרשת" : "הטעינה נכשלה";
   var sub = offline ? "בדוק את החיבור ונסה שוב."
                     : "משהו השתבש. אפשר לנסות שוב או לחזור לתרגול.";
-  return '<div class="card state"><div class="em">' + em + '</div>' +
-    '<div class="muted">' + sub + '</div>' +
+  return '<div class="card state" role="alert"><div class="em">' + em +
+    '</div><div class="muted">' + sub + '</div>' +
     '<button type="button" class="big" id="' + retryId + '">נסה שוב</button>' +
     '<div style="margin-top:8px"><a href="index.html">חזרה לתרגול</a></div>' +
     '</div>';
@@ -1778,6 +1778,7 @@ async function init() {{
   try {{ INDEX = await fetchIndex(); }}
   catch (e) {{
     const box = document.getElementById("stats");
+    box.removeAttribute("aria-label");   // was "loading…"; now an error
     box.innerHTML = loadErrorHtml("retry-load");
     box.querySelector("#retry-load").onclick = () => init();
     return;
@@ -2256,6 +2257,7 @@ async function init() {{
   try {{ P = await window.BT.getProblem(id); }}
   catch (e) {{
     const box = document.getElementById("problem");
+    box.removeAttribute("aria-label");   // was "loading…"; now an error
     box.innerHTML = loadErrorHtml("retry-load");
     box.querySelector("#retry-load").onclick = () => init();
     return;
@@ -2319,7 +2321,13 @@ async function init() {{
     const s = getSession();
     if (s && (s.count || 0) >= s.size) {{ location.href = "index.html?summary=1"; return; }}
     try {{ if (!INDEX) INDEX = await fetchIndex(); }}
-    catch (e) {{ location.href = "index.html"; return; }}
+    catch (e) {{
+      const box = document.getElementById("problem");
+      box.removeAttribute("aria-label");
+      box.innerHTML = loadErrorHtml("retry-load");
+      box.querySelector("#retry-load").onclick = () => init();
+      return;
+    }}
     const flt = (s && s.kind === "bidding")
       ? {{kind: "bidding", levels: s.levels, types: s.types}}
       : resolveFilters(INDEX, loadFilters(), "bidding");
@@ -2575,6 +2583,7 @@ async function init() {
   try { P = await window.BT.getProblem(id); }
   catch (e) {
     const box = document.getElementById("problem");
+    box.removeAttribute("aria-label");   // was "loading…"; now an error
     box.innerHTML = loadErrorHtml("retry-load");
     box.querySelector("#retry-load").onclick = () => init();
     return;
@@ -2666,7 +2675,13 @@ async function init() {
     const s = getSession();
     if (s && (s.count || 0) >= s.size) { location.href = "index.html?summary=1"; return; }
     try { if (!INDEX) INDEX = await fetchIndex(); }
-    catch (e) { location.href = "index.html"; return; }
+    catch (e) {
+      const box = document.getElementById("problem");
+      box.removeAttribute("aria-label");
+      box.innerHTML = loadErrorHtml("retry-load");
+      box.querySelector("#retry-load").onclick = () => init();
+      return;
+    }
     const flt = (s && s.kind === "lead")
       ? {kind: "lead", mode: s.mode || leadMode(),
          levels: s.levels, types: s.types}
