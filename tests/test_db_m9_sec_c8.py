@@ -36,6 +36,10 @@ def test_reanswer_bumps_ts_not_just_lastTs():
     assert "attemptCount: increment(1)" in seg
     assert "ts: serverTimestamp()" in seg
     assert "lastTs: serverTimestamp()" in seg
+    # legacy docs (no firstTs) must be backfilled from the existing first-
+    # attempt ts on re-answer, or the bumped ts would reorder them (review fix)
+    assert "!existing.firstTs && tsMillis(existing)" in seg
+    assert "patch.firstTs = new Date(tsMillis(existing))" in seg
 
 
 def test_dashboard_orders_by_firstTs_not_bumped_ts():

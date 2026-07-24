@@ -529,11 +529,14 @@ const BT = {
       try {
         // bump ts (not just lastTs) so the incremental sync on ANOTHER device
         // (which filters on ts) picks up this re-answer's attemptCount; firstTs
-        // is untouched by the merge, so first-attempt ordering is preserved
-        // (DB-M-9).
-        await setDoc(ref, { attemptCount: increment(1),
-                            lastTs: serverTimestamp(),
-                            ts: serverTimestamp() }, { merge: true });
+        // preserves first-attempt ordering. LEGACY docs predate firstTs, so
+        // backfill it here from the existing (first-attempt) ts — otherwise the
+        // bumped ts would let firstMs reorder them on the dashboard (DB-M-9).
+        const patch = { attemptCount: increment(1),
+                        lastTs: serverTimestamp(), ts: serverTimestamp() };
+        if (!existing.firstTs && tsMillis(existing))
+          patch.firstTs = new Date(tsMillis(existing));
+        await setDoc(ref, patch, { merge: true });
       } catch (e) {
         console.error("could not update attempt", e);
         window.dispatchEvent(new Event("bt-save-failed"));
