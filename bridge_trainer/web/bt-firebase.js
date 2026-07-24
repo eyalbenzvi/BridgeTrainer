@@ -131,9 +131,20 @@ function loadIndexCache() {
   try { return JSON.parse(localStorage.getItem(INDEX_CACHE_KEY)); }
   catch (e) { return null; }
 }
+// ~1.5 MB budget: a huge full-index cache would fight the ~5 MB localStorage
+// quota and could starve the more important bt_attempts_<uid> cache (and fail
+// setItem on every navigation, silently negating the win). If the index is
+// bigger, skip caching — we simply re-fetch, as before. T12's per-kind split
+// keeps the cached slice small.
+const INDEX_CACHE_MAX = 1500000;
 function saveIndexCache(stamp, problems) {
   try {
-    localStorage.setItem(INDEX_CACHE_KEY, JSON.stringify({ stamp, problems }));
+    const blob = JSON.stringify({ stamp, problems });
+    if (blob.length > INDEX_CACHE_MAX) {
+      localStorage.removeItem(INDEX_CACHE_KEY);   // don't keep a stale copy
+      return;
+    }
+    localStorage.setItem(INDEX_CACHE_KEY, blob);
   } catch (e) { /* quota/private-mode: cache is best-effort */ }
 }
 
