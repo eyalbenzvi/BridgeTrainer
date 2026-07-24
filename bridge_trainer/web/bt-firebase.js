@@ -32,10 +32,12 @@ import {
   initializeFirestore, getFirestore, persistentLocalCache,
   persistentMultipleTabManager, doc, getDoc, getDocs, collection, setDoc,
   writeBatch, serverTimestamp, query, where, orderBy, increment,
+  getCountFromServer,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, isConfigured } from "./firebase-config.js";
 import { classifySignInError, mergePending, prunePending,
-         indexStamp, sameStamp, unwrapFirestore } from "./bt-logic.js";
+         indexStamp, sameStamp, unwrapFirestore,
+         needsReconcile } from "./bt-logic.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -242,6 +244,21 @@ async function _syncAttempts(uid) {
   // been fully synced (e.g. first load after this logic shipped) or has gone
   // stale past FULL_SYNC_INTERVAL_MS.
   if (!LAST_FULL_SYNC || Date.now() - LAST_FULL_SYNC > FULL_SYNC_INTERVAL_MS) {
+    // A full reconcile exists to catch server-side DELETIONS. Before paying the
+    // O(N) read, ask the server for a COUNT (one aggregation read): if it equals
+    // what the cache expects the server to hold (cached attempts minus the
+    // not-yet-synced pendings), nothing was deleted and we skip the full read
+    // (DB-O-6). Count unavailable -> fall through and reconcile as before.
+    let serverCount = null;
+    try { serverCount = (await getCountFromServer(coll)).data().count; }
+    catch (e) { /* aggregation unavailable/offline: do the full read */ }
+    const expected = Object.keys(ATTEMPTS).length - Object.keys(PENDING).length;
+    if (!needsReconcile(serverCount, expected)) {
+      LAST_FULL_SYNC = Date.now();
+      saveCache(uid);
+      await flushPending(uid);
+      return;
+    }
     const before = new Set(Object.keys(ATTEMPTS));   // known before the read
     const snap = await getDocs(coll);
     const next = {};
@@ -279,9 +296,18 @@ async function _syncAttempts(uid) {
       ? query(coll, where("ts", ">", new Date(LAST_TS)), orderBy("ts"))
       : query(coll, orderBy("ts")));
   } catch (e) {
-    // missing index / offline / legacy docs without ts: one-time full read
-    console.warn("incremental attempt sync failed, full read", e);
-    snap = await getDocs(coll);
+    // Only a missing composite index (failed-precondition) justifies the
+    // expensive whole-collection fallback. A transient/offline error must NOT
+    // be masked behind the most expensive read (DB-O-6) — rethrow so this sync
+    // cycle is skipped and retried on the next load. (Docs without a ts field
+    // don't throw under orderBy("ts") — they're simply omitted and swept up by
+    // the interval full reconcile.)
+    if (e && e.code === "failed-precondition") {
+      console.warn("incremental sync needs an index; one-time full read", e);
+      snap = await getDocs(coll);
+    } else {
+      throw e;
+    }
   }
   for (const d of snap.docs) {
     const a = d.data();

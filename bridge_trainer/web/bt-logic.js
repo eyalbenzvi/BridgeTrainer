@@ -72,6 +72,18 @@ export function sameStamp(a, b) {
     && a.format === b.format;
 }
 
+// ---- full-reconcile skip (DB-O-6) ------------------------------------------
+// Before the O(N) full read that catches server-side deletions, compare a cheap
+// getCountFromServer() aggregation (1 read) against how many docs the cache
+// expects the server to hold (cached attempts minus not-yet-synced pendings).
+// Equal counts mean nothing was deleted, so the full read is skipped. This is
+// best-effort: a simultaneous delete+add (net-zero) is masked and corrected by
+// a later interval reconcile. A null/unknown count forces the reconcile.
+export function needsReconcile(serverCount, expectedCount) {
+  if (serverCount == null) return true;
+  return serverCount !== expectedCount;
+}
+
 // ---- Firestore array un-wrapping (DB-M-8) ----------------------------------
 // The producer's `_firestore_safe` (pool/firestore_store.py) makes docs legal
 // for Firestore by wrapping each directly-nested array as a one-key map
