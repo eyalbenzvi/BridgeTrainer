@@ -3069,6 +3069,16 @@ function tsMillis(a) {
   if (a.ts.seconds) return a.ts.seconds * 1000;
   return 0;
 }
+// Order first-attempts by their FIRST-attempt time. A re-answer now bumps `ts`
+// (so incremental cross-device sync notices attemptCount updates — DB-M-9), but
+// `firstTs` is written once at the first attempt and never moves. Fall back to
+// `ts` for legacy docs that predate firstTs — there `ts` is still the first
+// attempt's time, so ordering is unchanged for them.
+function firstMs(a) { return tsMillis(a && a.firstTs ? {ts: a.firstTs} : a); }
+// Ids still present in the pool index; attempts whose problem was deleted are
+// marked "removed" instead of linking to a dead page (DB-M-9). null = unknown
+// (index unavailable) -> treat every attempt as live, as before.
+let LIVE_IDS = null;
 function row(label, scores) {
   const n = scores.length;
   if (n < MIN_N)
@@ -3193,7 +3203,7 @@ function render(attempts) {
   const n = first.length;
   const avgAll = n
     ? first.reduce((s, a) => s + btScoreOfAttempt(a), 0) / n : 0;
-  const recent = [...first].sort((a, b) => tsMillis(b) - tsMillis(a));
+  const recent = [...first].sort((a, b) => firstMs(b) - firstMs(a));
   let streak = 0;
   for (const a of recent) { if (btScoreOfAttempt(a) >= 100) streak++; else break; }
   // split first-attempts by scenario, and leads further by training mode
@@ -3205,7 +3215,7 @@ function render(attempts) {
   const byKind = {};
   for (const a of first) { const kd = a.kind || "bidding";
     (byKind[kd] ??= []).push(btScoreOfAttempt(a)); }
-  const chrono = [...first].sort((a, b) => tsMillis(a) - tsMillis(b));
+  const chrono = [...first].sort((a, b) => firstMs(a) - firstMs(b));
   let trend = "";
   if (chrono.length >= MIN_TREND) {
     let cum = 0; const pts = [];
@@ -3246,16 +3256,24 @@ function render(attempts) {
   const misses = recent.filter(a => btScoreOfAttempt(a) < 85).slice(0, 10);
   const missList = misses.length
     ? '<div class="card"><b>לשיפור — החלטות מתחת ל־85</b> <span class="muted">(הקש לחזרה)</span>' +
-      '<ul class="misslist">' + misses.map(m =>
-        `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">` +
-        `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
-        `<div style="margin-top:4px">בחרת <b class="ltr">${m.chosenCall}</b> — ` +
-        `${OUTCOME_HE[m.outcomeClass] || m.outcomeClass}` +
-        (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
-        (m.acceptedSet && m.acceptedSet.length
-          ? `. מיטבי: <span class="ltr">${m.acceptedSet.join(", ")}</span>` : "") +
-        ` <span class="go">חזור לתרגל &larr;</span></div></a></li>`
-      ).join("") + "</ul></div>"
+      '<ul class="misslist">' + misses.map(m => {
+        // attempt fields are user-owned free text -> esc() before innerHTML
+        // (SEC-A-6). A problem deleted from the pool becomes a non-link
+        // "removed" row instead of a dead retry link (DB-M-9).
+        const gone = LIVE_IDS && !LIVE_IDS.has(m.problemId);
+        const body =
+          `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
+          `<div style="margin-top:4px">בחרת <b class="ltr">${esc(m.chosenCall)}</b> — ` +
+          `${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}` +
+          (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
+          (m.acceptedSet && m.acceptedSet.length
+            ? `. מיטבי: <span class="ltr">${esc(m.acceptedSet.join(", "))}</span>` : "") +
+          (gone ? ` <span class="go muted">בעיה שהוסרה</span></div>`
+                : ` <span class="go">חזור לתרגל &larr;</span></div>`);
+        return gone
+          ? `<li><div class="missrow">${body}</div></li>`
+          : `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">${body}</a></li>`;
+      }).join("") + "</ul></div>"
     : "";
   const weak = weakArea(scen);
   const weakCard = weak
@@ -3314,8 +3332,16 @@ function render(attempts) {
   });
 }
 async function init() {
-  try { render(await window.BT.allAttempts()); }
-  catch (e) {
+  try {
+    // Learn which problems still exist so deleted ones can be flagged in the
+    // miss list (DB-M-9). Cheap: the index is stamp-cached (T10). If it fails,
+    // LIVE_IDS stays null and every attempt is treated as live (prior behavior).
+    try {
+      const idx = await window.BT.fetchIndex();
+      LIVE_IDS = new Set((idx.problems || []).map(p => p.id));
+    } catch (e) { LIVE_IDS = null; }
+    render(await window.BT.allAttempts());
+  } catch (e) {
     const el = document.getElementById("dash");
     el.innerHTML = 'לא ניתן לטעון את הנתונים שלך: <span class="en"></span>';
     el.querySelector(".en").textContent = e.message;

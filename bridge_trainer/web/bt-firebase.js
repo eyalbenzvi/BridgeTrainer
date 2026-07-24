@@ -116,7 +116,8 @@ async function flushPending(uid) {
     for (const pid of Object.keys(PENDING)) {
       const ref = doc(db, "users", uid, "attempts", pid);
       try {
-        await setDoc(ref, { ...PENDING[pid], ts: serverTimestamp() });
+        await setDoc(ref, { ...PENDING[pid], ts: serverTimestamp(),
+                            firstTs: serverTimestamp() });
         delete PENDING[pid];
       } catch (e) { /* keep it queued */ }
     }
@@ -460,13 +461,18 @@ const BT = {
       // include a client ts so a reconcile overlay (and the dashboard's
       // recent/streak sort) keeps a timestamp; flushPending/setDoc override it
       // with serverTimestamp() on the actual write.
+      // firstTs is the immutable first-attempt time the dashboard orders by;
+      // ts also starts here but a re-answer bumps it so incremental sync
+      // notices cross-device attemptCount updates (DB-M-9). Both start equal.
+      const nowSec = Math.floor(Date.now() / 1000);
       const payload = { ...rec, problemId, isFirstAttempt: true,
-                        attemptCount: 1,
-                        ts: { seconds: Math.floor(Date.now() / 1000) } };
+                        attemptCount: 1, ts: { seconds: nowSec },
+                        firstTs: { seconds: nowSec } };
       ATTEMPTS[problemId] = payload;
       saveCache(uid);
       try {
-        await setDoc(ref, { ...payload, ts: serverTimestamp() });
+        await setDoc(ref, { ...payload, ts: serverTimestamp(),
+                            firstTs: serverTimestamp() });
         delete PENDING[problemId];   // confirmed on the server
         savePending(uid);
       } catch (e) {
@@ -490,8 +496,13 @@ const BT = {
         return;
       }
       try {
+        // bump ts (not just lastTs) so the incremental sync on ANOTHER device
+        // (which filters on ts) picks up this re-answer's attemptCount; firstTs
+        // is untouched by the merge, so first-attempt ordering is preserved
+        // (DB-M-9).
         await setDoc(ref, { attemptCount: increment(1),
-                            lastTs: serverTimestamp() }, { merge: true });
+                            lastTs: serverTimestamp(),
+                            ts: serverTimestamp() }, { merge: true });
       } catch (e) {
         console.error("could not update attempt", e);
         window.dispatchEvent(new Event("bt-save-failed"));
@@ -519,7 +530,15 @@ const BT = {
     let handedOff = false;
     onAuthStateChanged(auth, (u) => {
       if (!u) {
-        USER = null; ATTEMPTS = {}; LAST_TS = 0; PENDING = {};
+        const prevUid = USER && USER.uid;
+        USER = null; ATTEMPTS = {}; LAST_TS = 0; LAST_FULL_SYNC = 0; PENDING = {};
+        // SEC-C-8: on a shared computer, don't leave the signed-out user's
+        // attempt history + pending queue in localStorage for the next person.
+        // (The pool-index cache is shared, not per-user, so it's left alone.)
+        if (prevUid) {
+          try { localStorage.removeItem(cacheKey(prevUid)); } catch (e) { /* */ }
+          try { localStorage.removeItem(pendingKey(prevUid)); } catch (e) { /* */ }
+        }
         window.dispatchEvent(new Event("bt-user-changed"));
         gate("signin");
         return;
