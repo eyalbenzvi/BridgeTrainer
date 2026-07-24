@@ -2982,7 +2982,7 @@ def _dashboard_html() -> str:
 
 
 # Static ES-module assets copied verbatim next to the generated pages.
-_ASSET_FILES = ("firebase-config.js", "bt-firebase.js")
+_ASSET_FILES = ("firebase-config.js", "bt-logic.js", "bt-firebase.js")
 
 
 def write_app(out_dir: str | Path) -> None:

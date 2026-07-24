@@ -34,6 +34,7 @@ import {
   writeBatch, serverTimestamp, query, where, orderBy, increment,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, isConfigured } from "./firebase-config.js";
+import { classifySignInError } from "./bt-logic.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -89,8 +90,18 @@ function saveCache(uid) {
 
 function doSignIn() {
   return signInWithPopup(auth, provider).catch((e) => {
-    console.error("popup sign-in failed, falling back to redirect", e);
-    return signInWithRedirect(auth, provider);
+    const kind = classifySignInError(e && e.code);
+    if (kind === "redirect") {
+      // popup genuinely blocked (or unsupported here): full-page redirect.
+      return signInWithRedirect(auth, provider);
+    }
+    if (kind === "cancel") {
+      // user dismissed the popup — a normal cancellation, not a failure.
+      return null;
+    }
+    // a real error (network/config/internal): let the caller surface it.
+    console.error("sign-in failed", e);
+    throw e;
   });
 }
 
