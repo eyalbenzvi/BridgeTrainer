@@ -1729,6 +1729,51 @@ function initChrome() {
 }
 if (document.readyState !== "loading") initChrome();
 else addEventListener("DOMContentLoaded", initChrome);
+
+/* Service worker (app-shell caching, change C.1). Registered on every page so a
+   returning visitor is served the HTML/CSS/JS shell + Firebase SDK modules from
+   cache — near-instant back-and-forth between index/p/lead/dashboard without
+   touching the network. sw.js NEVER intercepts Firestore/Auth traffic (the SDK
+   owns those). No reload-on-controllerchange: an MPA navigates anyway and picks
+   up a fresh shell on the next page load, so a reload loop is avoided.
+   Kill switch (no redeploy): set localStorage.bt_sw_off='1' OR load any page
+   with ?nosw — both unregister every SW and drop the bt-shell caches. From the
+   console, window.btSW.disable()/enable() do the same. */
+(function () {
+  if (!("serviceWorker" in navigator)) return;
+  function dropShellCaches() {
+    if (!self.caches) return Promise.resolve();
+    return caches.keys().then(function (ks) {
+      return Promise.all(ks.filter(function (k) {
+        return k.indexOf("bt-shell") === 0;
+      }).map(function (k) { return caches.delete(k); }));
+    });
+  }
+  function unregisterAll() {
+    return navigator.serviceWorker.getRegistrations().then(function (rs) {
+      return Promise.all(rs.map(function (r) { return r.unregister(); }));
+    }).then(dropShellCaches).catch(function () {});
+  }
+  window.btSW = {
+    disable: function () {
+      try { localStorage.setItem("bt_sw_off", "1"); } catch (e) {}
+      return unregisterAll();
+    },
+    enable: function () {
+      try { localStorage.removeItem("bt_sw_off"); } catch (e) {}
+      location.reload();
+    }
+  };
+  var off = false;
+  try {
+    off = localStorage.getItem("bt_sw_off") === "1"
+       || /[?&]nosw(?:[=&]|$)/.test(location.search);
+  } catch (e) { off = /[?&]nosw(?:[=&]|$)/.test(location.search); }
+  if (off) { unregisterAll(); return; }
+  addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").catch(function () {});
+  });
+})();
 """
 
 
@@ -3619,6 +3664,151 @@ def _dashboard_html() -> str:
 _ASSET_FILES = ("firebase-config.js", "bt-logic.js", "bt-firebase.js")
 
 
+def _shell_asset_contents() -> list[str]:
+    """Every app-shell asset's content, in a stable order. Feeds _shell_version:
+    any edit to any of these changes the hash, which changes sw.js (VERSION is
+    embedded), which makes the browser install a fresh SW and re-precache."""
+    web = resources.files("bridge_trainer") / "web"
+    parts = [_CSS, _SHARED_JS]
+    for name in _ASSET_FILES:  # firebase-config.js, bt-logic.js, bt-firebase.js
+        parts.append((web / name).read_text(encoding="utf-8"))
+    parts += [_index_html(), _problem_html(), _lead_html(), _dashboard_html()]
+    return parts
+
+
+def _shell_version() -> str:
+    """A 12-char content hash of the whole app shell (CSS + shared JS + the three
+    copied ES modules + all four HTML pages). Used as the SW cache-name suffix so
+    the cache version is safe by construction (senior-review requirement #1): any
+    shell change → new hash → new sw.js bytes → new install → new precache →
+    activate() evicts the old caches. This closes the skew risk from bt-firebase.js
+    et al. being loaded without a ?v= tag."""
+    joined = "\x00".join(_shell_asset_contents())
+    return hashlib.sha1(joined.encode("utf-8")).hexdigest()[:12]
+
+
+_SERVICE_WORKER_TMPL = r'''/* BridgeTrainer service worker — app-shell precache (change C.1).
+   VERSION is a content hash of every shell asset, injected at build time, so any
+   asset edit changes this file; the browser then installs a fresh SW, precaches
+   the new shell, and activate() deletes the stale caches (skipWaiting +
+   clients.claim). The SW NEVER touches Firestore/Auth: those origins are pure
+   passthrough so the Firebase SDK keeps full control of its own transport. */
+const VERSION = "__VERSION__";
+const CACHE = "bt-shell-" + VERSION;
+
+/* Unversioned same-origin docs whose URL is NOT a content identity: the four
+   HTML pages plus the module graph loaded without a ?v= tag. Served
+   stale-while-revalidate (instant from cache, refreshed in the background). */
+const SHELL = __SHELL__;
+/* Versioned same-origin assets (app.css?v=, bt-shared.js?v=): the URL already
+   encodes the content, so cache-first is safe forever. */
+const VERSIONED = __VERSIONED__;
+/* Immutable, version-pinned gstatic Firebase SDK modules: cache-first forever. */
+const SDK = __SDK__;
+
+function basename(p) {
+  var i = p.lastIndexOf("/");
+  var b = i < 0 ? p : p.slice(i + 1);
+  var q = b.indexOf("?");
+  return q < 0 ? b : b.slice(0, q);
+}
+/* basenames drive request classification, so a project-pages subpath (scope
+   derived from sw.js's own location) works with the same relative asset list. */
+const SWR_NAMES = new Set(SHELL.map(basename));
+const CF_NAMES = new Set(VERSIONED.map(basename));
+
+self.addEventListener("install", function (event) {
+  event.waitUntil((async function () {
+    const cache = await caches.open(CACHE);
+    // Atomic: if any first-party shell asset fails, install aborts (no half
+    // shell). Relative URLs resolve against the SW scope.
+    await cache.addAll(SHELL.concat(VERSIONED));
+    // Best-effort: a CDN blip must not fail the whole install; the fetch
+    // handler will cache-first these on first real use anyway.
+    await Promise.allSettled(SDK.map(function (u) {
+      return cache.add(new Request(u, { mode: "cors" }));
+    }));
+    await self.skipWaiting();
+  })());
+});
+
+self.addEventListener("activate", function (event) {
+  event.waitUntil((async function () {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter(function (k) {
+      return k.indexOf("bt-shell-") === 0 && k !== CACHE;
+    }).map(function (k) { return caches.delete(k); }));
+    await self.clients.claim();
+  })());
+});
+
+async function staleWhileRevalidate(req) {
+  const cache = await caches.open(CACHE);
+  // Normalize the key to the path (drop ?id=… etc.) so p.html?id=X hits the one
+  // precached p.html instead of accumulating a cache entry per query string, and
+  // map a scope-root navigation ("…/") to the precached index.html.
+  const keyUrl = new URL(req.url);
+  keyUrl.search = "";
+  if (keyUrl.pathname.endsWith("/")) keyUrl.pathname += "index.html";
+  const key = keyUrl.href;
+  const cached = await cache.match(key);
+  const network = fetch(req).then(function (res) {
+    if (res && res.ok && res.type === "basic") cache.put(key, res.clone());
+    return res;
+  }).catch(function () { return null; });
+  return cached || (await network) || Response.error();
+}
+
+async function cacheFirst(req) {
+  const cache = await caches.open(CACHE);
+  const cached = await cache.match(req);
+  if (cached) return cached;
+  try {
+    const res = await fetch(req);
+    if (res && res.ok && (res.type === "basic" || res.type === "cors")) {
+      cache.put(req, res.clone());
+    }
+    return res;
+  } catch (e) {
+    return (await cache.match(req)) || Response.error();
+  }
+}
+
+self.addEventListener("fetch", function (event) {
+  const req = event.request;
+  if (req.method !== "GET") return;                 // non-GET: passthrough
+  const url = new URL(req.url);
+  if (url.origin === self.location.origin) {
+    var base = basename(url.pathname);
+    if (base === "") base = "index.html";           // navigation to the scope root
+    if (SWR_NAMES.has(base)) { event.respondWith(staleWhileRevalidate(req)); return; }
+    if (CF_NAMES.has(base)) { event.respondWith(cacheFirst(req)); return; }
+    return;                                          // other same-origin (data/…): passthrough
+  }
+  if (url.hostname === "www.gstatic.com") {          // pinned SDK modules
+    event.respondWith(cacheFirst(req));
+    return;
+  }
+  // Everything else — firestore.googleapis.com, identitytoolkit.googleapis.com,
+  // accounts.google.com … — is left entirely to the network / the SDK.
+});
+'''
+
+
+def _service_worker_js() -> str:
+    """Return the sw.js body with the build-time values injected. A template +
+    .replace() (not an f-string) because the SW source is dense with JS ``{}``.
+    The shell list is relative (scope-derived), and reuses the exact _CSS_HREF /
+    _SHARED_SRC the pages link so the versioned precache URLs can never drift."""
+    shell = ["index.html", "p.html", "lead.html", "dashboard.html",
+             "bt-firebase.js", "bt-logic.js", "firebase-config.js"]
+    return (_SERVICE_WORKER_TMPL
+            .replace("__VERSION__", _shell_version())
+            .replace("__SHELL__", json.dumps(shell))
+            .replace("__VERSIONED__", json.dumps([_CSS_HREF, _SHARED_SRC]))
+            .replace("__SDK__", json.dumps(_sdk_module_urls())))
+
+
 def write_app(out_dir: str | Path) -> None:
     from importlib import resources
     out = Path(out_dir)
@@ -3645,4 +3835,8 @@ def write_app(out_dir: str | Path) -> None:
     for name in _ASSET_FILES:
         (out / name).write_text((web / name).read_text(encoding="utf-8"),
                                 encoding="utf-8")
+    # Service worker (change C.1): app-shell precache so returning-visitor
+    # navigation between pages is near-instant. Written last so _shell_version()
+    # hashes the exact asset bytes/pages emitted above. Registered by _SHARED_JS.
+    (out / "sw.js").write_text(_service_worker_js(), encoding="utf-8")
     (out / ".nojekyll").write_text("")
