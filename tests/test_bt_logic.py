@@ -80,3 +80,19 @@ def test_classify_sign_in_error_redirect_only_when_blocked():
     # anything else is a real error the caller should surface
     assert network == "error"
     assert missing == "error"
+
+
+@needs_node
+def test_merge_and_prune_pending_keep_unsynced_answers():
+    keep, pruned, overlaid = run_logic([
+        # a pending answer the server lacks is kept; one the server has is not
+        "prunePending({a: {score: 90}, b: {score: 50}}, {b: {score: 50}})",
+        # nothing pending -> empty
+        "prunePending({}, {x: 1})",
+        # merge overlays pending onto a fresh snapshot without clobbering it
+        "mergePending({b: {score: 51}}, {a: {score: 90}, b: {score: 99}})",
+    ])
+    assert keep == {"a": {"score": 90}}          # only the unsynced one stays
+    assert pruned == {}
+    # server's b wins (not clobbered by pending); a is added back
+    assert overlaid == {"b": {"score": 51}, "a": {"score": 90}}

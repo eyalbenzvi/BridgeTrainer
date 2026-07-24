@@ -34,7 +34,8 @@ import {
   writeBatch, serverTimestamp, query, where, orderBy, increment,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, isConfigured } from "./firebase-config.js";
-import { classifySignInError } from "./bt-logic.js";
+import { classifySignInError, mergePending, prunePending }
+  from "./bt-logic.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -59,6 +60,11 @@ let USER = null;
 let ATTEMPTS = {};   // {problemId: record}, preloaded at sign-in
 let LAST_TS = 0;     // max attempt timestamp (ms) synced so far
 let LAST_FULL_SYNC = 0;   // ms wall-clock of the last full reconcile
+// first-attempt saves that failed (rules/quota/offline), keyed by problemId,
+// awaiting a retry. Persisted so they survive a page navigation. Stored WITHOUT
+// the serverTimestamp() sentinel (not JSON-serializable) — it is re-added on
+// flush. A full reconcile must not drop these (mergePending).
+let PENDING = {};
 
 // How stale the cache may get before we do a full authoritative reconcile
 // (which is the only thing that removes server-deleted docs from the cache).
@@ -86,6 +92,29 @@ function saveCache(uid) {
       JSON.stringify({ byId: ATTEMPTS, lastTs: LAST_TS,
                        lastFullSync: LAST_FULL_SYNC }));
   } catch (e) { /* quota/private-mode: cache is best-effort */ }
+}
+
+// ---- pending (unsynced) first-attempt saves --------------------------
+function pendingKey(uid) { return "bt_pending_" + uid; }
+function loadPending(uid) {
+  try { return JSON.parse(localStorage.getItem(pendingKey(uid))) || {}; }
+  catch (e) { return {}; }
+}
+function savePending(uid) {
+  try { localStorage.setItem(pendingKey(uid), JSON.stringify(PENDING)); }
+  catch (e) { /* best-effort */ }
+}
+// Retry every queued save. On success the entry leaves the queue; a still-
+// failing entry stays for the next attempt. serverTimestamp() is re-added here.
+async function flushPending(uid) {
+  for (const pid of Object.keys(PENDING)) {
+    const ref = doc(db, "users", uid, "attempts", pid);
+    try {
+      await setDoc(ref, { ...PENDING[pid], ts: serverTimestamp() });
+      delete PENDING[pid];
+    } catch (e) { /* keep it queued */ }
+  }
+  savePending(uid);
 }
 
 function doSignIn() {
@@ -140,6 +169,7 @@ async function preloadAttempts(uid) {
   ATTEMPTS = cache.byId || {};
   LAST_TS = cache.lastTs || 0;
   LAST_FULL_SYNC = cache.lastFullSync || 0;
+  PENDING = loadPending(uid);
   const coll = collection(db, "users", uid, "attempts");
 
   // Full reconcile: read the WHOLE collection and REPLACE the cache, so docs
@@ -156,10 +186,15 @@ async function preloadAttempts(uid) {
       if (ms > maxTs) maxTs = ms;
       next[a.problemId || d.id] = a;   // one doc per problem
     }
-    ATTEMPTS = next;
+    // drop pendings the server already has, then keep the rest on top of the
+    // fresh snapshot so an unsynced local answer is never wiped by reconcile.
+    PENDING = prunePending(PENDING, next);
+    ATTEMPTS = mergePending(next, PENDING);
     LAST_TS = maxTs;
     LAST_FULL_SYNC = Date.now();
+    savePending(uid);
     saveCache(uid);
+    await flushPending(uid);
     return;
   }
 
@@ -179,9 +214,13 @@ async function preloadAttempts(uid) {
     const a = d.data();
     const ms = tsMillis(a);
     if (ms > LAST_TS) LAST_TS = ms;
-    ATTEMPTS[a.problemId || d.id] = a;   // one doc per problem
+    const pid = a.problemId || d.id;
+    ATTEMPTS[pid] = a;   // one doc per problem
+    delete PENDING[pid];  // it's on the server now
   }
+  savePending(uid);
   saveCache(uid);
+  await flushPending(uid);   // retry any saves still queued
 }
 
 // ---- grading (compute the stored measurement from the verdict) --------
@@ -297,27 +336,41 @@ const BT = {
   },
   async record(problemId, rec) {
     if (!USER) return;
-    const ref = doc(db, "users", USER.uid, "attempts", problemId);
+    const uid = USER.uid;
+    const ref = doc(db, "users", uid, "attempts", problemId);
     const existing = ATTEMPTS[problemId];
     if (!existing) {
       // first attempt: one doc per problem, keyed by problemId (bounds the
-      // collection size to distinct problems answered).
-      const stored = { ...rec, problemId, isFirstAttempt: true,
-                       attemptCount: 1, ts: serverTimestamp() };
-      ATTEMPTS[problemId] = { ...rec, problemId, isFirstAttempt: true,
-                             attemptCount: 1,
-                             ts: { seconds: Math.floor(Date.now() / 1000) } };
-      try { await setDoc(ref, stored); }
-      catch (e) { console.error("could not save attempt", e); }
+      // collection size to distinct problems answered). Reflect it locally
+      // immediately (optimistic UI), but if the write fails, QUEUE it so it is
+      // retried and a full reconcile won't silently drop it (BUG-2/DB-O-9).
+      const payload = { ...rec, problemId, isFirstAttempt: true,
+                        attemptCount: 1 };
+      ATTEMPTS[problemId] = { ...payload,
+        ts: { seconds: Math.floor(Date.now() / 1000) } };
+      saveCache(uid);
+      try {
+        await setDoc(ref, { ...payload, ts: serverTimestamp() });
+        delete PENDING[problemId];   // confirmed on the server
+        savePending(uid);
+      } catch (e) {
+        console.error("could not save attempt", e);
+        PENDING[problemId] = payload;   // retried on next load / flush
+        savePending(uid);
+        window.dispatchEvent(new Event("bt-save-failed"));
+      }
     } else {
       // re-answer: keep the first-attempt grading, just count it.
       ATTEMPTS[problemId].attemptCount = (existing.attemptCount || 1) + 1;
+      saveCache(uid);
       try {
         await setDoc(ref, { attemptCount: increment(1),
                             lastTs: serverTimestamp() }, { merge: true });
-      } catch (e) { console.error("could not update attempt", e); }
+      } catch (e) {
+        console.error("could not update attempt", e);
+        window.dispatchEvent(new Event("bt-save-failed"));
+      }
     }
-    saveCache(USER.uid);
   },
   async resetAll() {
     if (!USER) return;
@@ -328,8 +381,9 @@ const BT = {
       if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
     }
     if (n) await batch.commit();
-    ATTEMPTS = {}; LAST_TS = 0;
+    ATTEMPTS = {}; LAST_TS = 0; PENDING = {};
     try { localStorage.removeItem(cacheKey(USER.uid)); } catch (e) { /* */ }
+    try { localStorage.removeItem(pendingKey(USER.uid)); } catch (e) { /* */ }
   },
 
   // Sign-in is required. Gate the whole app until authenticated; preload the

@@ -31,3 +31,26 @@ export function classifySignInError(code) {
   if (CANCEL.has(code)) return "cancel";
   return "error";
 }
+
+// ---- attempt-save reliability (T9) -----------------------------------------
+// A first-attempt save that fails (rules/quota/offline) must NOT be dropped: it
+// is queued in a local "pending" map and retried, and a full reconcile must not
+// wipe it. These pure helpers keep that bookkeeping testable.
+
+// Drop pending entries the server already has (they synced — here or on another
+// device), so we don't keep retrying or double-writing them.
+export function prunePending(pending, serverById) {
+  const out = {};
+  const p = pending || {}, s = serverById || {};
+  for (const pid in p) if (!(pid in s)) out[pid] = p[pid];
+  return out;
+}
+
+// Overlay still-pending (not-yet-synced) attempts on a fresh server snapshot so
+// a full reconcile keeps a local answer that hasn't reached the server yet.
+export function mergePending(serverById, pending) {
+  const out = Object.assign({}, serverById || {});
+  const p = pending || {};
+  for (const pid in p) if (!(pid in out)) out[pid] = p[pid];
+  return out;
+}
