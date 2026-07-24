@@ -71,3 +71,18 @@ def test_contrast_light_theme_meets_aa():
 
 def test_contrast_dark_theme_meets_aa():
     _check("dark")
+
+
+def test_no_hardcoded_white_on_accent_win_loss_fill():
+    """Regression guard: a rule that fills with --accent/--win/--loss must not
+    hardcode white text (which fails AA in dark mode); it must use the paired
+    --on-* token. Catches the direct pattern that UX-A-1 was about."""
+    # split each rule into "selector { decls }" blocks
+    blocks = re.findall(r"\{([^{}]*)\}", _CSS)
+    offenders = []
+    for decls in blocks:
+        fills = re.search(r"background:\s*var\(--(accent|win|loss)\)", decls)
+        white = re.search(r"color:\s*#(?:fff|ffffff)\b", decls)
+        if fills and white:
+            offenders.append(decls.strip()[:80])
+    assert not offenders, "hardcoded white on a token fill: " + str(offenders)

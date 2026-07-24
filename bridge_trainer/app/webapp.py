@@ -2740,9 +2740,9 @@ _DASHBOARD_CSS = """
 .band .bseg { display: flex; align-items: center; justify-content: center;
               font-size: 11px; font-weight: 700; color: #fff; min-width: 0;
               box-shadow: inset -1px 0 0 rgba(0,0,0,.15); }
-.band .bseg.opt { background: var(--win); }
+.band .bseg.opt { background: var(--win); color: var(--on-win); }
 .band .bseg.near { background: var(--gold); color: var(--on-gold); }
-.band .bseg.bl { background: var(--loss); }
+.band .bseg.bl { background: var(--loss); color: var(--on-loss); }
 .blegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px;
            color: var(--muted); }
 .blegend i.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block;
