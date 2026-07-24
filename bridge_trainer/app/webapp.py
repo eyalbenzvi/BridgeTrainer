@@ -842,7 +842,7 @@ function btToast(msg) {
       "width:max-content;max-width:90%;z-index:9998;padding:10px 16px;" +
       "border-radius:10px;font-size:14px;background:var(--fg,#222);" +
       "color:var(--card,#fff);box-shadow:0 2px 10px rgba(0,0,0,.3);" +
-      "transition:opacity .3s";
+      "transition:opacity .3s;pointer-events:none";
     document.body.appendChild(t);
   }
   t.textContent = msg;

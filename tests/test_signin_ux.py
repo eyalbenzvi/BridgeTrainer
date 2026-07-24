@@ -31,6 +31,10 @@ def test_gate_states_value_and_surfaces_errors():
     gate = src[src.index('btn.onclick = () => {'):src.index("}\nfunction ungate")]
     assert ".catch(" in gate and ".finally(" in gate
     assert "btn.disabled = true" in gate and "btn.disabled = false" in gate
+    # bt-firebase.js is a static file (not a Python string): dashes must be
+    # literal, not "\\u2014" escapes that would render as raw text.
+    assert "בברידג' —" in src
+    assert "0–100" in src
 
 
 def test_no_misleading_guest_copy():
@@ -51,3 +55,5 @@ def test_save_failed_toast_wired_on_every_page(html_fn):
     js = html_fn()
     assert 'addEventListener("bt-save-failed"' in js
     assert "function btToast(" in js
+    # the faded toast must not linger as an invisible click-blocker
+    assert "pointer-events:none" in js
