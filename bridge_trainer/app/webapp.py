@@ -1269,77 +1269,77 @@ function fullDealHtml(deal, roles) {
   return `<div class="fulldeal">${cell("N")}${cell("W")}${compass}` +
          `${cell("E")}${cell("S")}</div>`;
 }
-/* fixed W-N-E-S auction diagram (BBO layout); vulnerability lives on the
-   seat plates: red = vulnerable, green = not. notes[j] non-empty marks a
-   call as tappable (alert-style explanation). */
-function auctionTableHtml(p, notes) {
+/* Fixed W-N-E-S auction diagram (BBO layout), shared by both trainers.
+   Vulnerability lives on the seat plates (red = vulnerable, green = not).
+   opts:
+     hero            seat that gets the "me" highlight
+     roleOf(seat)    the seat's Hebrew role label ("" for none)
+     noteOf(n)       maps notes[j] -> truthy when the call is tappable
+                     (default: the entry itself)
+     pendingCell     append a trailing "?" cell (bidding: next call is yours)
+     highlightFinal  add "fin" to the last non-pass call (lead: the contract) */
+function auctionTable(p, notes, opts) {
+  opts = opts || {};
   const cols = ["W", "N", "E", "S"];
-  const seats = ["N", "E", "S", "W"];
-  const hero = p.seat, partner = seats[(seats.indexOf(hero) + 2) % 4];
   const vul = vulSeats(p.vul);
   const head = cols.map(s => {
-    const cls = (vul.includes(s) ? "v" : "nv") + (s === hero ? " me" : "");
-    const who = s === hero ? HE.you : (s === partner ? HE.partner : "");
-    const vlab = vul.includes(s) ? HE.vul : HE.notVul;
-    return `<th class="${cls}" title="${s} \\u2014 ${vlab}">${s}` +
-           `${s === p.dealer ? '<sup class="d">D</sup>' : ""}` +
-           `${who ? `<small>${who}</small>` : "<small>&nbsp;</small>"}</th>`;
-  }).join("");
-  const cells = [];
-  for (let i = 0; i < cols.indexOf(p.dealer); i++) cells.push("<td></td>");
-  let seat = p.dealer;
-  p.auction.forEach((tok, j) => {
-    const note = notes && notes[j];
-    cells.push(`<td><span class="call${note ? " expl" : ""}"` +
-               ` data-i="${j}">${callHtml(tok)}</span></td>`);
-    seat = seats[(seats.indexOf(seat) + 1) % 4];
-  });
-  cells.push('<td class="turn">?</td>');
-  while (cells.length % 4) cells.push("<td></td>");
-  let rows = "";
-  for (let i = 0; i < cells.length; i += 4)
-    rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
-  return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
-}
-function cardHtml(tok) {  // "SK" -> four-colour suit glyph + rank (T -> 10)
-  const r = tok[1] === "T" ? "10" : tok[1];
-  return suitHtml(tok[0]) + " " + r;
-}
-/* A COMPLETE auction (W-N-E-S, BBO layout) for opening-lead problems: no
-   pending-call cell, the final contract call highlighted, and every call
-   tappable for its meaning (notes[j].text). Leader plate reads "lead". */
-function completeAuctionTableHtml(p, notes) {
-  const cols = ["W", "N", "E", "S"];
-  const seats = ["N", "E", "S", "W"];
-  const hero = p.leader, decl = p.declarer;
-  const dummy = seats[(seats.indexOf(decl) + 2) % 4];
-  const vul = vulSeats(p.vul);
-  const head = cols.map(s => {
-    const cls = (vul.includes(s) ? "v" : "nv") + (s === hero ? " me" : "");
-    const who = s === hero ? HE.leader : (s === decl ? HE.declarer
-              : (s === dummy ? HE.dummy : ""));
+    const cls = (vul.includes(s) ? "v" : "nv") + (s === opts.hero ? " me" : "");
+    const who = (opts.roleOf && opts.roleOf(s)) || "";
     const vlab = vul.includes(s) ? HE.vul : HE.notVul;
     return `<th class="${cls}" title="${s} \\u2014 ${vlab}">${s}` +
            `${s === p.dealer ? '<sup class="d">D</sup>' : ""}` +
            `${who ? `<small>${who}</small>` : "<small>&nbsp;</small>"}</th>`;
   }).join("");
   let lastBid = -1;
-  p.auction.forEach((t, j) => {
-    if (t !== "P" && t !== "X" && t !== "XX") lastBid = j;
-  });
+  if (opts.highlightFinal)
+    p.auction.forEach((t, j) => {
+      if (t !== "P" && t !== "X" && t !== "XX") lastBid = j;
+    });
   const cells = [];
   for (let i = 0; i < cols.indexOf(p.dealer); i++) cells.push("<td></td>");
   p.auction.forEach((tok, j) => {
-    const note = notes && notes[j] && (notes[j].card || notes[j].text);
-    const fin = j === lastBid ? " fin" : "";
+    const note = notes && notes[j] &&
+      (opts.noteOf ? opts.noteOf(notes[j]) : notes[j]);
+    const fin = (opts.highlightFinal && j === lastBid) ? " fin" : "";
     cells.push(`<td><span class="call${note ? " expl" : ""}${fin}"` +
                ` data-i="${j}">${callHtml(tok)}</span></td>`);
   });
+  if (opts.pendingCell) cells.push('<td class="turn">?</td>');
   while (cells.length % 4) cells.push("<td></td>");
   let rows = "";
   for (let i = 0; i < cells.length; i += 4)
     rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
   return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
+}
+/* bidding page: hero is you, partner labelled, pending "?" cell for your turn;
+   every non-empty note marks its call tappable. */
+function auctionTableHtml(p, notes) {
+  const seats = ["N", "E", "S", "W"];
+  const hero = p.seat, partner = seats[(seats.indexOf(hero) + 2) % 4];
+  return auctionTable(p, notes, {
+    hero,
+    roleOf: s => s === hero ? HE.you : (s === partner ? HE.partner : ""),
+    pendingCell: true,
+  });
+}
+function cardHtml(tok) {  // "SK" -> four-colour suit glyph + rank (T -> 10)
+  const r = tok[1] === "T" ? "10" : tok[1];
+  return suitHtml(tok[0]) + " " + r;
+}
+/* opening-lead page: a COMPLETE auction — hero is the leader, declarer/dummy
+   labelled, no pending cell, the final contract call highlighted, and a call
+   tappable when its note carries a card or text. */
+function completeAuctionTableHtml(p, notes) {
+  const seats = ["N", "E", "S", "W"];
+  const hero = p.leader, decl = p.declarer;
+  const dummy = seats[(seats.indexOf(decl) + 2) % 4];
+  return auctionTable(p, notes, {
+    hero,
+    roleOf: s => s === hero ? HE.leader : (s === decl ? HE.declarer
+              : (s === dummy ? HE.dummy : "")),
+    noteOf: n => n && (n.card || n.text),
+    highlightFinal: true,
+  });
 }
 function candOrder(c) {
   if (c === "P") return 100;
