@@ -1214,10 +1214,18 @@ function terse(card, call) {
     else frags.push(v + "+" + suitHtml(st));
   }
   const hcp = card.hcp;
+  const pts = card.pts;
   if (hcp) {
     const [lo, hi] = hcp;
     if (hi >= 25) { if (lo > 0) frags.push(lo + "+"); }
     else frags.push(lo + "-" + hi);
+  } else if (pts) {
+    // no HCP band, but GIB stated total points — without this a limited pass
+    // ("No suitable call -- 8- total points") rendered with no range at all,
+    // which read as a missing explanation. Mirrors engine/explain.py.
+    const [lo, hi] = pts;
+    if (hi >= 25) { if (lo > 0) frags.push(lo + "+ pts"); }
+    else frags.push(lo + "-" + hi + " pts");
   }
   return frags.join(", ");
 }
