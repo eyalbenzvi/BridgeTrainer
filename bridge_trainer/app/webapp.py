@@ -539,6 +539,12 @@ button.modecard[aria-pressed="true"] b { color: var(--accent); }
    RTL base direction and isolate it, or the whole sentence scrambles */
 .modegoal { font-size: 13px; color: var(--muted); direction: rtl;
   unicode-bidi: isolate; }
+/* the home lead-scenario card swaps this line between the MP and IMP goals,
+   whose different lengths wrapped to different heights and made the whole card
+   (and the layout below it) jump on every MP<->IMP toggle. Reserve a constant
+   two-line slot so switching modes never reflows. Scoped to the home div by id;
+   the problem page reuses .modegoal as an inline banner span, unaffected. */
+#modegoal { min-height: 2.9em; }
 .ctline { font-size: 14px; margin-top: 6px; }
 /* the active mode's primary metric is visually emphasized */
 table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
@@ -1344,7 +1350,7 @@ const TYPE_NAMES = {
   // disjoint from bidding types in the shared facet counts.
   lead_part_score: ["חוזה חלקי", "הובלה נגד חוזה חלקי (מתחת למשחק מלא)"],
   lead_3nt: ["3NT", "הובלה נגד משחק ללא שליט"],
-  lead_suit_game: ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 בגבוה / 5 בנמוך)"],
+  lead_suit_game: ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 במייג'ור / 5 במיינור)"],
   lead_slam: ["סלאם", "הובלה נגד סלאם (רמה 6 או 7)"],
   lead_doubled: ["חוזה מוכפל", "הובלה נגד חוזה מוכפל"],
 };
@@ -2687,6 +2693,7 @@ function reveal(chosen) {
   const mpEm = MODE === "MP" ? ' class="emph"' : "";
   const impEm = MODE === "IMP" ? ' class="emph"' : "";
   let rt = "<tr><th>#</th><th>קלף</th>" +
+    "<th>" + glossHtml("panel", "ציון") + "</th>" +
     "<th" + mpEm + ">" + glossHtml("tricks", "לקיחות צפויות") + "</th>" +
     "<th" + impEm + ">" + glossHtml("ev", "IMP צפוי") + "</th>" +
     "<th>" + glossHtml("set", "סיכוי הכשלה") + "</th></tr>";
@@ -2694,6 +2701,8 @@ function reveal(chosen) {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
     rt += "<tr" + g + "><td>" + (i + 1) + '</td><td><span class="ltr">' +
       cardHtml(r.card) + '</span></td>' +
+      "<td>" + btScoreChipHtml(btScoreLead(P, r.card, MODE).score, true) +
+      "</td>" +
       "<td" + mpEm + ">" + r.avg_def_tricks.toFixed(2) + "</td>" +
       '<td class="ltr' + (MODE === "IMP" ? " emph" : "") + '">' +
       (r.exp_imps === undefined ? "—"
@@ -2936,7 +2945,7 @@ def _lead_html() -> str:
         '<p id="lead-expl" style="white-space:pre-line"></p>\n'
         '<div class="muted" id="difficulty"></div>\n'
         '<button class="big" id="next">ההובלה הבאה &larr;</button>\n'
-        '<details><summary>כל 13 ההובלות, מדורגות</summary>'
+        '<details open><summary>כל 13 ההובלות, מדורגות</summary>'
         '<table class="plain" id="ltable"></table>'
         '<p class="footnote">קלפים שווים במדד המוביל — כולם נכונים.</p>'
         '</details>\n'
@@ -2986,6 +2995,13 @@ _DASHBOARD_CSS = """
                    font-weight: 400; }
 .drill > summary .catrow { margin: 5px 0; }
 .drill .drillbody { padding: 0 1.6em 6px; }
+/* #dash content rides directly on the green felt: its cards reset to their own
+   --fg, but the loading placeholder, the load-error line and the closing
+   footnote are loose text. Default #dash to the on-felt tone (and the footnote
+   to the muted on-felt tone) so they aren't dark-green-on-green — unreadable in
+   light mode. */
+#dash { color: var(--on-felt); }
+#dash .dtab > .footnote { color: var(--on-felt-muted); }
 """
 
 _DASHBOARD_JS = r"""
