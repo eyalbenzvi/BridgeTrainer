@@ -802,6 +802,20 @@ function btScoreExplain(parts) {
               Math.round(parts.policy * 100) + "%)");
   return "מרכיבי הציון: " + bits.join(" · ");
 }
+/* ---- small pure display/data helpers (shared, DOM-free) --------------- */
+/* A finite number or the default (BUG-5): used for CSS widths so a missing
+   probability never emits `width:NaN%`. */
+function safeNum(x, d) {
+  const n = +x;
+  return Number.isFinite(n) ? n : (d === undefined ? 0 : d);
+}
+/* Format a 0-1 fraction as a rounded percent, or an em dash when it is
+   missing/NaN (BUG-5) — mirrors the comparison table's guard so options and
+   chips never show "NaN%". */
+function pct(x) {
+  const n = +x;
+  return Number.isFinite(n) ? Math.round(n * 100) + "%" : "—";
+}
 """
 
 _SHARED_JS = _SCORE_JS + """
@@ -2052,9 +2066,9 @@ function chipsHtml(row) {{
   }}
   if (row.policy !== undefined)
     bits.push(`<span>${{glossHtml("ben", HE.engine)}} ` +
-              `${{Math.round(row.policy * 100)}}%</span>`);
+              `${{pct(row.policy)}}</span>`);
   bits.push(`<span>${{glossHtml("win", HE.wins)}} ` +
-            `${{Math.round(row.p_gain * 100)}}%</span>`);
+            `${{pct(row.p_gain)}}</span>`);
   return `<div class="chips">${{bits.join("")}}</div>`;
 }}
 function optRowHtml(row, i, chosen, accepted) {{
@@ -2066,11 +2080,13 @@ function optRowHtml(row, i, chosen, accepted) {{
                (row.bid === chosen ? '<span class="tag you">שלך</span>' : "");
   const shows = row.shows ? `<span class="shows en">${{row.shows}}</span>`
                           : '<span class="shows"></span>';
-  const gp = Math.round(row.p_gain * 100), lp = Math.round(row.p_loss * 100);
+  // widths clamp missing probabilities to 0 (safeNum) and labels show an em
+  // dash rather than "NaN%" (pct) — BUG-5.
+  const gw = safeNum(row.p_gain) * 100, lw = safeNum(row.p_loss) * 100;
   const bar = `<div class="wpl" role="img" aria-label="זכייה ` +
-    `${{gp}}%, שוויון ${{Math.round(push * 100)}}%, הפסד ${{lp}}%">` +
-    `<span class="w" style="width:${{row.p_gain * 100}}%">${{gp > 12 ? gp + "%" : ""}}</span>` +
-    `<span class="l" style="width:${{row.p_loss * 100}}%">${{lp > 12 ? lp + "%" : ""}}</span></div>`;
+    `${{pct(row.p_gain)}}, שוויון ${{pct(push)}}, הפסד ${{pct(row.p_loss)}}">` +
+    `<span class="w" style="width:${{gw}}%">${{gw > 12 ? pct(row.p_gain) : ""}}</span>` +
+    `<span class="l" style="width:${{lw}}%">${{lw > 12 ? pct(row.p_loss) : ""}}</span></div>`;
   const mine = row.bid === chosen && !accepted.includes(row.bid);
   return `<div class="opt${{mine ? " mine" : ""}}">` +
     `<div class="l1"><span class="bidchip">${{callHtml(row.bid)}}` +
@@ -2328,8 +2344,12 @@ function normalize() {{
     v.corrected = v.table.map(r => ({{
       bid: r.bid, ev: r.ev_imp_vs_top, ci: r.ci,
       p_gain: r.p_gain,
+      // derive p_loss only when both inputs are present; otherwise leave it
+      // undefined (pct/safeNum render that as "—"/0) rather than emit NaN when
+      // p_push is missing — BUG-5.
       p_loss: r.p_loss !== undefined ? r.p_loss
-            : Math.max(0, 1 - r.p_gain - r.p_push),
+            : (r.p_gain !== undefined && r.p_push !== undefined
+                 ? Math.max(0, 1 - r.p_gain - r.p_push) : undefined),
       p_push: r.p_push,
       // Firestore forbids nested arrays, so the uploader wraps each
       // [contract, count] pair as {{items: [...]}}; unwrap it back here.
