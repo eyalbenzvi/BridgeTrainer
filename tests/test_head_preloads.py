@@ -25,15 +25,24 @@ PAGES = {
 }
 
 
-def _imports_in_bt_firebase() -> set[str]:
+def _gstatic_imports_in_bt_firebase() -> set[str]:
+    """Independently parse the module specifiers bt-firebase.js imports (from
+    the `from "..."` / bare `import "..."` clauses) and keep the gstatic SDK
+    ones. Deliberately NOT the production regex, so a mismatch between what
+    _sdk_module_urls() harvests and what is actually imported is caught."""
     src = (resources.files("bridge_trainer") / "web"
            / "bt-firebase.js").read_text(encoding="utf-8")
-    return set(re.findall(r"https://www\.gstatic\.com/firebasejs/\S+?\.js", src))
+    # strip line comments so a URL mentioned in prose isn't counted
+    code = "\n".join(ln for ln in src.splitlines()
+                     if not ln.lstrip().startswith("//"))
+    specs = re.findall(r"""(?:from|import)\s+['"]([^'"]+)['"]""", code)
+    return {s for s in specs if s.startswith("https://www.gstatic.com/")}
 
 
 def test_sdk_urls_match_bt_firebase_imports():
-    """The drift guard: the preload source of truth == the real imports."""
-    assert set(_sdk_module_urls()) == _imports_in_bt_firebase()
+    """The drift guard: what we modulepreload == the gstatic modules actually
+    imported, checked with an independent import parser."""
+    assert set(_sdk_module_urls()) == _gstatic_imports_in_bt_firebase()
     assert _sdk_module_urls(), "expected at least one gstatic SDK module URL"
 
 
