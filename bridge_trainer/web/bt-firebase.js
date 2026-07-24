@@ -106,15 +106,20 @@ function savePending(uid) {
 }
 // Retry every queued save. On success the entry leaves the queue; a still-
 // failing entry stays for the next attempt. serverTimestamp() is re-added here.
+let FLUSHING = false;
 async function flushPending(uid) {
-  for (const pid of Object.keys(PENDING)) {
-    const ref = doc(db, "users", uid, "attempts", pid);
-    try {
-      await setDoc(ref, { ...PENDING[pid], ts: serverTimestamp() });
-      delete PENDING[pid];
-    } catch (e) { /* keep it queued */ }
-  }
-  savePending(uid);
+  if (FLUSHING) return;   // guard against overlapping runs (T4 backgrounds sync)
+  FLUSHING = true;
+  try {
+    for (const pid of Object.keys(PENDING)) {
+      const ref = doc(db, "users", uid, "attempts", pid);
+      try {
+        await setDoc(ref, { ...PENDING[pid], ts: serverTimestamp() });
+        delete PENDING[pid];
+      } catch (e) { /* keep it queued */ }
+    }
+    savePending(uid);
+  } finally { FLUSHING = false; }
 }
 
 function doSignIn() {
@@ -344,10 +349,13 @@ const BT = {
       // collection size to distinct problems answered). Reflect it locally
       // immediately (optimistic UI), but if the write fails, QUEUE it so it is
       // retried and a full reconcile won't silently drop it (BUG-2/DB-O-9).
+      // include a client ts so a reconcile overlay (and the dashboard's
+      // recent/streak sort) keeps a timestamp; flushPending/setDoc override it
+      // with serverTimestamp() on the actual write.
       const payload = { ...rec, problemId, isFirstAttempt: true,
-                        attemptCount: 1 };
-      ATTEMPTS[problemId] = { ...payload,
-        ts: { seconds: Math.floor(Date.now() / 1000) } };
+                        attemptCount: 1,
+                        ts: { seconds: Math.floor(Date.now() / 1000) } };
+      ATTEMPTS[problemId] = payload;
       saveCache(uid);
       try {
         await setDoc(ref, { ...payload, ts: serverTimestamp() });
@@ -363,6 +371,16 @@ const BT = {
       // re-answer: keep the first-attempt grading, just count it.
       ATTEMPTS[problemId].attemptCount = (existing.attemptCount || 1) + 1;
       saveCache(uid);
+      if (PENDING[problemId]) {
+        // the first attempt hasn't reached the server yet — bump the QUEUED
+        // payload instead of a merge write, which would create a partial doc
+        // (no score) that a full reconcile could let win, losing the first
+        // attempt (T9 review). flushPending carries the full record.
+        PENDING[problemId].attemptCount =
+          (PENDING[problemId].attemptCount || 1) + 1;
+        savePending(uid);
+        return;
+      }
       try {
         await setDoc(ref, { attemptCount: increment(1),
                             lastTs: serverTimestamp() }, { merge: true });
