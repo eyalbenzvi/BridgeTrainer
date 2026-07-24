@@ -30,10 +30,21 @@
 - **מקורות אמת:** ה-JS/CSS המוטמעים הם קבועי הפייתון `_SHARED_JS`/`_SCORE_JS`/
   `_LEAD_JS`/`_DASHBOARD_JS`/`_CSS` ב-`webapp.py`. שינויים בהם הם השינוי; `write_app`
   פולט אותם לקבצים חיצוניים בזמן build.
-- **בדיקות JS:** מריצות מחרוזות תחת `node` עם `needs_node` (skip אם אין node).
-  שני דפוסים קיימים: (א) `run_js` ב-`test_scoring_scale.py` שמריץ את `_SCORE_JS`;
-  (ב) `run_logic` ב-`test_bt_logic.py` שמריץ את `bt-logic.js` (ESM עם `export`
-  שמופשט). פונקציות DOM-free נוספות ל-`_SHARED_JS` וניתנות לבדיקה באותו דפוס.
+- **בדיקות JS (מתוקן לפי ביקורת C1):** מריצות מחרוזות תחת `node` עם `needs_node`.
+  **חשוב:** `_SHARED_JS = _SCORE_JS + tail`, וה-tail **אינו** DOM-free — יש בו
+  side-effects ברמת המודול: `applyTheme()` (~1382) ו-`initChrome()`/
+  `addEventListener` (~1530). לכן `run_js` הקיים (`test_scoring_scale.py`) מריץ
+  **רק את `_SCORE_JS`** (DOM-free), ולא ניתן להריץ את `_SHARED_JS` המלא ישירות.
+  שתי אסטרטגיות:
+  - **פונקציות טהורות חדשות** (`safeNum`, `pct`, `esc`, `normAccepted`, `canonProblem`):
+    ימוקמו ב-**`_SCORE_JS`** (הבלוק ה-DOM-free), כך שהן נבדקות ע"י `run_js` הקיים
+    **וגם** נשלחות לכל דף (כי `_SHARED_JS` כולל את `_SCORE_JS`, וכל 4 הדפים
+    מקשרים `bt-shared.js`).
+  - **פונקציות קיימות ב-tail** (`terse`, `callHtml`, `auctionTable`): נבדקות ע"י
+    harness חדש `run_shared` שמזריק stubs ל-`document`/`localStorage`/`window`/
+    `addEventListener`/`requestIdleCallback` **לפני** eval של `_SHARED_JS` המלא,
+    כך ש-`applyTheme()`/`initChrome()` לא זורקים. כל ה-helpers וה-`HE` זמינים אז.
+  - `run_logic` ב-`test_bt_logic.py` ממשיך לשמש ללוגיקה טהורה ב-`bt-logic.js`.
 - **ייבוא בין קבצי בדיקה:** ה-CI מריץ `pytest` (לא `python -m pytest`), לכן ייבוא
   בין קבצי בדיקה חייב להיות בשם מודול חשוף: `from test_x import ...`, **לא**
   `from tests.test_x import ...`.
@@ -93,7 +104,7 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
   `v.accepted = (v.toss_up ? v.toss_up_set : [v.accepted]).filter(Boolean);`
   ולהוסיף fallback ל-`v.corrected[0].bid` כשהתוצאה ריקה (כמו ב-`gradeBidding`
   ב-`bt-firebase.js:315-316`). כדי שיהיה בר-בדיקה טהורה: להוסיף helper קטן
-  `normAccepted(v)` ל-`_SHARED_JS` ולקרוא לו מ-`normalize`.
+  `normAccepted(v)` ל-**`_SCORE_JS`** (DOM-free) ולקרוא לו מ-`normalize`.
 - **בדיקות:** `tests/test_normalize_shapes.py` (חדש) — `run_js` על `normAccepted`
   עם: accepted מחרוזת, accepted חסר (מחזיר `[]` או fallback), toss_up_set,
   ורשומה שבה accepted ריק אך `corrected[0].bid` קיים → חוזר ה-bid. + assert
@@ -105,8 +116,9 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
   `Math.round(row.p_gain*100)` ו-`width:${row.p_gain*100}%` ללא הגנה; `normalize`
   (~2332) `p_loss: Math.max(0, 1 - r.p_gain - r.p_push)` מחזיר NaN כש-`p_push`
   חסר. טבלת ההשוואה כבר מגדירה `pct` בטוח (~2043 בסבב הקודם).
-- **גישה:** להוסיף ל-`_SHARED_JS` שתי פונקציות טהורות: `safeNum(x, d=0)` (מחזיר
-  `d` אם `undefined`/`NaN`) ו-`pct(x)` (מחזיר `"—"` אם `undefined`/`NaN`, אחרת
+- **גישה:** להוסיף ל-**`_SCORE_JS`** (DOM-free, בר-בדיקה ב-`run_js`) שתי פונקציות
+  טהורות: `safeNum(x, d=0)` (מחזיר `d` אם `undefined`/`NaN`) ו-`pct(x)` (מחזיר
+  `"—"` אם `undefined`/`NaN`, אחרת
   `Math.round(x*100)+"%"`). ב-`optRowHtml`/`chipsHtml` לעטוף כל `p_gain*100`/
   `p_loss*100` ב-`safeNum(...)` ל-width ולהשתמש ב-`pct(...)` להצגה + ל-aria-label.
   ב-`normalize` לחשב `p_loss` רק כשגם `p_gain` וגם `p_push` מוגדרים, אחרת
@@ -122,8 +134,11 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
 - **גישה:** להוסיף ל-`terse` את הענף `else if (card.pts)` המשקף בדיוק את פייתון:
   `[lo,hi]=pts; hi>=25 ? (lo>0 && frags.push(lo+"+ pts")) : frags.push(lo+"-"+hi+" pts")`.
   לוודא שהסף (`_HCP_OPEN_TOP`) תואם — לבדוק את הערך ב-`explain.py`.
-- **בדיקות:** (א) `run_js` על `terse({pts:[8,8]}, "P")` → `"8- pts"`-שקול,
-  `terse({pts:[0,25]}, ...)` וכו'. (ב) בדיקת snapshot חוצה-שפה: להריץ
+- **סף מאומת:** `_HCP_OPEN_TOP = 25` (explain.py:20); ה-JS terse כבר משתמש ב-25
+  קשיח בענף ה-hcp (~1183) — לשקף זהה בענף ה-pts.
+- **בדיקות:** (א) `run_shared` (harness עם DOM-stubs, כי `terse` ב-tail) על
+  `terse({pts:[8,8]}, "P")` → `"8- pts"`-שקול, `terse({pts:[0,25]}, ...)` וכו'.
+  (ב) בדיקת snapshot חוצה-שפה: להריץ
   `explain.terse_meaning` בפייתון ו-`terse` ב-node על אותה קבוצת cards ולוודא
   שוויון — תופס דריפט עתידי.
 - **סיכון:** נמוך.
@@ -139,23 +154,32 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
   בהובלה `notes[j].card || notes[j].text`) — יטופל ע"י `noteOf(notes[j])`
   ב-opts. שתי הקריאות הקיימות הופכות ל-wrappers דקים שקוראים ל-`auctionTable`.
   **שים לב:** לשמר את מיקום ה-`?` (בהכרזה יש תא `turn` נוסף לפני ה-padding).
-- **בדיקות:** `run_js` שמרנדר את שני המצבים על אותו `p` ומוודא: מספר תאי ה-header,
+- **בדיקות:** `run_shared` (harness עם DOM-stubs) שמרנדר את שני המצבים על אותו `p`
+  ומוודא: מספר תאי ה-header,
   נוכחות/היעדר `td.turn`, נוכחות `.fin` רק במצב complete, וזהות מבנית לפלט
   הישן (אם אפשר — לשמור snapshot של הפלט הנוכחי לפני ה-refactor ולהשוות).
 - **סיכון:** נמוך (ויזואלי). לצלם snapshot של שתי הפונקציות לפני, להשוות אחרי.
 
 ### SEC-A-2 (50) — `esc()` שיטתי
-- **מיקום:** נקודות הזרקה של שדות מסמך ל-innerHTML ב-`_SHARED_JS`, גוף p.html,
-  `_LEAD_JS`, גוף lead.html, `_DASHBOARD_JS`. נקודות ידועות: `s.teams`/`s.event`/
-  `s.board` (~2151-2152), `NOTES[j]` (~2163, ~2411), `row.shows` (~2067),
-  `P.explanations.note` (~2144), meanings/seat בהובלה, ושדות `P.source` דומים
-  ב-lead.html. **לא לגעת** ב-helpers שמייצרים HTML בכוונה (`callHtml`, `suitHtml`,
-  `handHtml`, `contractHtml`) — הם פלט מתוכנן, לא קלט משתמש.
-- **גישה:** להוסיף `esc(s)` ל-`_SHARED_JS` (וכן לכל בלוק דף שאינו כולל את
-  `_SHARED_JS` — לאמת אילו דפים כוללים אותו) : 
+- **מודל איום (מתוקן לפי ביקורת C2):** מסמכי `problems` נכתבים ע"י ה-producer
+  (Admin SDK בלבד; rules חוסמים כתיבת לקוח), ורשומות attempt נקראות רק ע"י
+  בעליהן. הווקטור המעשי הוא שדות **טקסט חופשי שמקורם חיצוני** — בעיקר
+  `P.source.teams`/`event`/`board` (מפרסינג קבצי LIN מ-BBO) ופרוזה של הערות
+  engine. המאמץ ממוקד שם.
+- **⚠ לא לעטוף ב-esc (יהרוס markup מכוון):** `row.shows` (~2067) ו-`NOTES[j]`
+  (~2163, ~2411) הם פלט של **`terse()`** (`OPTSHOWS[bid]=terse(...)`, ~2318,2325)
+  שמייצר `suitHtml(...)` גליפים ו-`<span class=en>` — עטיפתם ב-esc תציג
+  `&amp;lt;span` מילולית. הם באותה קטגוריה כמו `callHtml`/`suitHtml`/`handHtml`/
+  `contractHtml`: **פלט HTML מכוון, לא קלט**. (ה-XSS של טקסט GIB דרך `terse`
+  הוא SEC-A-1 — ממצא נפרד **מחוץ להיקף** הסבב הזה.)
+- **נקודות ה-esc בפועל:** `P.source.teams`/`event`/`board` בשני הדפים (p ~2151-2152,
+  ו-המקבילה ב-lead.html — לאתר), הענף הגולמי של `P.explanations.note` (~2144-2145,
+  `note[0].toUpperCase()+note.slice(1)`), ושדות `P.meanings[].seat`/`meaning`
+  אם מוזרקים גולמי (לאמת ב-lead.html). **לא** לגעת בפלט helpers.
+- **גישה:** להוסיף `esc(s)` ל-**`_SCORE_JS`** (DOM-free, בר-בדיקה + מגיע לכל דף):
   `s => String(s==null?"":s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))`.
-  לעטוף כל אינטרפולציה של **שדה טקסט חופשי ממסמך** ב-`esc(...)`. לתעד כלל קוד
-  ("אין `${field}` ממסמך בתוך innerHTML ללא esc").
+  לעטוף כל אינטרפולציה של **שדה טקסט חופשי ממסמך** (לפי הרשימה) ב-`esc(...)`.
+  לתעד כלל קוד ("אין `${free-text-field}` ממסמך בתוך innerHTML ללא esc").
 - **בדיקות:** (א) `run_js` על `esc('<img src=x onerror=alert(1)>')` → escaped.
   (ב) בדיקת DOM בסגנון `test_hebrew_ui.py`: להזריק שדה מסמך מדומה עם
   `<img onerror>` ולוודא שהמחרוזת המיוצרת מכילה `&lt;img` ולא `<img`.
@@ -172,10 +196,17 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
   (או dict `TOOLTIPS_HE`) בפייתון, ולהזריק ב-`write_app` את המילון המאוחד כ-
   JSON לתוך ה-JS (משתנה `TYPE_NAMES` נבנה מה-JSON המוזרק במקום literal). כך
   ה-drift נמנע מבנית.
-  - יישום קונקרטי: `write_app` (או `_problem_html`/`_index_html`) יזריק
-    `const TAXONOMY_HE = {...JSON...};` וה-`_SHARED_JS` יגזור ממנו את
-    `TYPE_NAMES`. יש לוודא שהזרקה נעשית לפני השימוש בכל דף שמשתמש ב-TYPE_NAMES
-    (p.html, index.html, dashboard, lead.html).
+  - **יישום קונקרטי (מתוקן לפי ביקורת H1):** כל **ארבע** פונקציות בניית הדף
+    (`_problem_html`, `_index_html`, `_lead_html`, `_dashboard_html`) יזריקו
+    `<script>window.TAXONOMY_HE = {...JSON...};</script>` **לפני** קישור
+    `bt-shared.js` (dashboard משתמש ב-TYPE_NAMES ב-3028/3099/3170; lead דרך
+    `typeBadgeHtml`). ה-JSON נבנה בפייתון מ-`LABELS_HE`+`LEAD_LABELS_HE`+
+    tooltips (פונקציה `taxonomy_he_json()`), עם `ensure_ascii=False` והגנת
+    `</script>` (החלפת `</` ל-`<\/`). ב-`_SHARED_JS`:
+    `const TYPE_NAMES = (typeof window!=="undefined" && window.TAXONOMY_HE) || {..fallback..};`
+    כדי ש-`bt-shared.js` יישאר תקין-תחבירית גם ללא הגלובל (בדיקות import/parse).
+  - **הערה:** זה יוצר תלות סדר-טעינה (`bt-shared.js` תלוי בגלובל המוזרק) —
+    מקובל כי כל הדפים מזריקים אותו; מתועד כנקודת החלטה.
 - **בדיקות:** `tests/test_taxonomy_single_source.py` — (א) מפתחות
   `LABELS_HE`+`LEAD_LABELS_HE` == מפתחות ה-JSON המוזרק; (ב) כל תווית ב-JSON
   == הערך ב-`LABELS_HE`/`LEAD_LABELS_HE` (אין דריפט); (ג) לכל type יש tooltip
@@ -212,6 +243,10 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
      unwrapFirestore, לפני normalize של הדף), ומייצרת צורה קנונית אחת. הענפים
      הקיימים (`v.table`/`v.corrected`/legacy) עוברים אליה; שאר הקוד קורא צורה
      אחת. **לא** למחוק ענפי legacy בקוד עד שהמיגרציה תרוץ בפועל — רק לרכז.
+     - **גבול מול גל 1 (לפי ביקורת M3):** `canonProblem` = **זיהוי צורה/גרסה**
+       בלבד (איזה ענף schema); `normalize` נשאר אחראי על **מיפוי התצוגה**.
+       ARCH-9 **חייב לשמר** את תיקוני BUG-4 (`normAccepted`) ו-BUG-5 (`safeNum`/
+       `pct`/`p_loss` ללא NaN) שנעשו ב-`normalize` בגל 1 — לא לשכתב אותם החוצה.
   2. **producer:** לספק סקריפט מיגרציה חד-פעמי `scripts/migrate_schema.py`
      (dry-run כברירת מחדל) שממיר רשומות לצורה קנונית ומעלה עם `pool push
      --overwrite`. **הסקריפט לא ירוץ על ה-DB החי** במסגרת ה-PR; הוא deliverable
@@ -232,10 +267,18 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
   `failed`. אחרי `writer.close()`, להסיר את ה-pids הכושלים מ-`new_entries`
   (וממניין `uploaded`) לפני עדכון האינדקס, ולהחזיר בדוח שדה `failed`
   (רשימה/מספר). ה-CLI (`cmd_pool push`) יחזיר exit code שגוי כשיש כשלים כדי
-  שה-workflow יאדים. הערה: ה-handler צריך להחזיר `False` (לא re-raise) כדי לא
-  לעצור את שאר ה-batch, אבל כן לרשום את הכישלון. **מיפוי pid:** ה-error
-  callback מקבל אובייקט עם `.document.path`/`.reference` — לחלץ ממנו את ה-pid
-  (document id). לוודא מול ה-API של `bulk_writer` (google-cloud-firestore).
+  שה-workflow יאדים.
+- **API מתוקן לפי ביקורת H2:** `on_write_error(handler)` מקבל אובייקט יחיד
+  `BulkWriteFailure`. מזהה המסמך הכושל: `error.operation.reference.id`
+  (**לא** `.document.path`). ערך ההחזרה שולט ב-**retry**: `True` = לנסות שוב,
+  `False` = לוותר. לכן **אסור** להחזיר `False` תמיד — זה מבטל את ה-retry המובנה
+  של BulkWriter לשגיאות transient. הגישה: להחזיר `True` לקודים transient
+  (ServiceUnavailable/Aborted/DeadlineExceeded/Internal) כל עוד
+  `error.attempts < _MAX_TRANSIENT_RETRIES`, אחרת לרשום את ה-pid ל-`failed`
+  ולהחזיר `False`. **`google-cloud-firestore` אינו מותקן בסביבה הזו** — לאמת את
+  שמות המאפיינים המדויקים מול הגרסה הנעוצה בזמן המימוש; הבדיקות משתמשות ב-fake
+  writer שמדמה את החתימה (אובייקט עם `.operation.reference.id`, `.attempts`,
+  `.code`).
 - **בדיקות:** להזריק fake writer (כמו שכבר עושים fake `remote`) ש-`.set` על pid
   מסוים "נכשל" (קורא ל-handler) — ולוודא: ה-pid הכושל **לא** באינדקס שנכתב,
   `uploaded` לא סופר אותו, והדוח מסמן failure. יש כבר תשתית fake ב-
@@ -251,10 +294,13 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
      `writer.close()`, `succeeded = enqueued - failed`; `new_entries` מוגבל ל-
      `succeeded`. (מימוש: לשמור `staged[pid]=index_entry(rec)` ב-enqueue, ואחרי
      close למחוק את הכושלים; זהה מבחינת התוצאה.)
-  2. **remove:** לעדכן את האינדקס באותה פעולה — לקרוא pointer (read_index),
-     לסנן את הרשומה, `write_index(...)` תחת ה-CAS הקיים (`expect_generation`).
-     במקרה IndexConflict — retry קצר. `remove` יחזיר True רק אחרי מחיקת המסמך
-     ועדכון האינדקס.
+  2. **remove (סדר index-first, מתוקן לפי ביקורת H3):** קודם להסיר מהאינדקס —
+     `read_index` → סינון הרשומה → `write_index(expect_generation=gen)` (CAS
+     קיים, retry על IndexConflict) — **ואז** למחוק את מסמך המסמך. כך קריסה בין
+     שני הצעדים משאירה לכל היותר מסמך "יתום" שאינו באינדקס (לא-נראה ללקוח,
+     בלתי-מזיק, ניתן להוספה מחדש), במקום רשומת אינדקס שמצביעה על מסמך חסר
+     (שגורמת "הבעיה לא נמצאה"). לתעד את חלון-הקריסה השארי. `remove` מחזיר True
+     רק אחרי שני הצעדים.
 - **בדיקות:** (א) push עם pid כושל → אינו באינדקס (מכוסה גם ב-DB-O-5). (ב)
   `remove(pid)` → המסמך נמחק **וגם** האינדקס לא כולל את ה-pid; `remove` של pid
   לא-קיים מחזיר False ולא נוגע באינדקס. fake remote עם read_index/write_index.
@@ -270,9 +316,11 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
      (כמו `store.ProblemPool.add`). ב-`push_local_pool` — הרשומות מגיעות מ-
      `ProblemPool` שכבר אוכף ב-add; להוסיף אכיפה גם בקריאה (הגנת עומק).
   2. **schema_min/max:** `index_entry` יכלול `schema: rec.get("schema", 1)`;
-     `index_from_entries` יחשב `schema_min`/`schema_max` מהערכים בפועל במקום
-     `schema` קבוע (לשמור `schema` לתאימות = schema_min). הקליינט לא בודק כרגע —
-     אבל השדות יהיו אמיתיים ל-schema-3 עתידי.
+     `index_from_entries` יחשב `schema_min`/`schema_max` מהערכים בפועל, **עם
+     ברירת מחדל `e.get("schema", 1)` בכל entry** (מתוקן לפי ביקורת M1:
+     `test_index_cas.py:69` מזריק entry ללא `schema` — `e["schema"]` יזרוק
+     KeyError). לשמור `schema` לתאימות = schema_min. הקליינט לא בודק כרגע — אבל
+     השדות יהיו אמיתיים ל-schema-3 עתידי.
 - **בדיקות:** (א) `add`/`add_unchecked` עם schema לא-נתמך → ValueError. (ב)
   `index_from_entries` על ערבוב schema 1+2 → `schema_min=1, schema_max=2`.
   (ג) תאימות: `index_entry` ללא schema → ברירת מחדל 1.
@@ -291,11 +339,17 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
   2. להגביל את ה-fallback (283-284) לשגיאת `failed-precondition` בלבד
      (missing index), לא לכל error — כדי לא להסוות ניתוק רשת בקריאה יקרה.
   3. לייבא `getCountFromServer` מ-firestore SDK (imports בראש הקובץ).
+- **caveats (לפי ביקורת M2):** (א) `needsReconcile` משווה `serverCount` מול גודל
+  המטמון **פחות PENDING שטרם סונכרן** (אחרת פער מדומה). (ב) שוויון-ספירה עלול
+  להסוות מחיקת-שרת + הוספה-מקומית בו-זמנית (דלתא אפס) — הדילוג הוא best-effort,
+  ה-reconcile התקופתי מתקן בהמשך. (ג) הערת ה-catch הקיימת ("legacy docs without
+  ts") מטעה — מסמכים ללא `ts` פשוט מושמטים תחת `orderBy("ts")` ולא זורקים, כך
+  שה-fallback ל-`failed-precondition` לא פוגע בהם; לתקן/לעדכן את ההערה.
 - **בדיקות:** `run_logic` על `needsReconcile`: שווה→false, פער→true, cache ריק→
-  true. + string-assert ש-`_syncAttempts` קורא `getCountFromServer` וש-fallback
-  מותנה ב-`failed-precondition`.
-- **סיכון:** נמוך (fallback לשרת נשמר). לאמת שם ה-import (`getCountFromServer`
-  קיים ב-firestore-lite/full v10.12.2 — כן).
+  true, שקלול PENDING. + string-assert ש-`_syncAttempts` קורא `getCountFromServer`
+  וש-fallback מותנה ב-`failed-precondition`.
+- **סיכון:** נמוך (fallback לשרת נשמר). `getCountFromServer` קיים ב-
+  `firebase-firestore.js` v10.12.2 (נוסף ב-v9.11), וכרגע חסר מה-imports (31-35).
 
 ### ARCH-6 (35) — `htmlfmt.py` משותף
 - **מיקום:** `publish.py:34,96-107` (`_SUIT_GLYPHS`,`_auction_html`,`_hand_html`)
@@ -376,7 +430,10 @@ DB-O-5(47) → DB-M-5(43) → DB-M-7(45)
 2. **UX-I-2 guest mode מלא** — נדחה (סותר sign-in-required; high-risk). לאשר.
 3. **ARCH-9 מיגרציה על production** — הקוד (ריכוז + סקריפט + בדיקות) נכלל; הרצת
    הסקריפט על ה-DB החי ומחיקת ענפי legacy מה-JS — צעד נפרד באישור.
-4. **ARCH-6 מחיקת publish.py** — לא נמחק (החלטת מוצר); רק מיצוי helpers.
+4. **ARCH-6 עריכת publish.py** — סבב 1 הכריז על publish.py מחוץ להיקף; ARCH-6
+   **כן עורך** אותו (מיצוי helpers משותפים, ללא מחיקה). snapshot לפני/אחרי לשני
+   הצרכנים (report.py/publish.py) לאימות פלט זהה. מחיקת publish.py = החלטת מוצר
+   נפרדת, לא נעשית כאן.
 5. **DB-O-7 issue אוטומטי** — הוספת `issues: write` ל-forge workflow. לאשר.
 
 ## בדיקות — סיכום מערך
