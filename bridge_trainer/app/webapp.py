@@ -2062,7 +2062,7 @@ function chipsHtml(row) {{
     const decl = tok.slice(-1);
     const ours = decl === P.seat || decl === partner;
     bits.push(`<span class="chip${{ours ? "" : " them"}}">` +
-              `${{contractHtml(tok)}} ${{Math.round(share * 100)}}%</span>`);
+              `${{contractHtml(tok)}} ${{pct(share)}}</span>`);
   }}
   if (row.policy !== undefined)
     bits.push(`<span>${{glossHtml("ben", HE.engine)}} ` +
@@ -2252,8 +2252,8 @@ function reveal(chosen) {{
       h += `<tr><td><span class="ltr">${{callHtml(c.bid)}}</span></td>` +
            `<td>${{c.ev >= 0 ? "+" : ""}}` +
            `${{c.ev}} \\u00b1 ${{c.ci}}</td>` +
-           `<td>${{Math.round(c.p_gain * 100)}}%</td>` +
-           `<td>${{Math.round(c.p_loss * 100)}}%</td></tr>`;
+           `<td>${{pct(c.p_gain)}}</td>` +
+           `<td>${{pct(c.p_loss)}}</td></tr>`;
     rbox.innerHTML = h;
   }} else document.getElementById("raw-box").style.display = "none";
   document.getElementById("verdict").style.display = "block";

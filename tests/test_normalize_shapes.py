@@ -73,6 +73,9 @@ def test_optrow_and_chips_use_safe_helpers():
     # no raw Math.round(row.p_gain * 100) / width:${row.p_gain * 100} survives
     assert "Math.round(row.p_gain * 100)" not in html
     assert "Math.round(row.policy * 100)" not in html
+    assert "Math.round(share * 100)" not in html      # contract-share chip
+    assert "Math.round(c.p_gain * 100)" not in html   # raw options table
+    assert "Math.round(c.p_loss * 100)" not in html
     assert "width:${row.p_gain * 100}%" not in html
     assert "width:${row.p_loss * 100}%" not in html
     # the safe helpers are wired in
