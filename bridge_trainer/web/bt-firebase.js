@@ -34,8 +34,8 @@ import {
   writeBatch, serverTimestamp, query, where, orderBy, increment,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, isConfigured } from "./firebase-config.js";
-import { classifySignInError, mergePending, prunePending }
-  from "./bt-logic.js";
+import { classifySignInError, mergePending, prunePending,
+         indexStamp, sameStamp } from "./bt-logic.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -122,6 +122,21 @@ async function flushPending(uid) {
   } finally { FLUSHING = false; }
 }
 
+// ---- pool-index cache (shared pool, not per-user) --------------------
+// Caches the merged shard rows keyed by the pointer's version stamp so repeat
+// navigations don't re-download the whole index. Best-effort: if it exceeds the
+// localStorage quota the write is dropped and we simply re-fetch next time.
+const INDEX_CACHE_KEY = "bt_index_cache";
+function loadIndexCache() {
+  try { return JSON.parse(localStorage.getItem(INDEX_CACHE_KEY)); }
+  catch (e) { return null; }
+}
+function saveIndexCache(stamp, problems) {
+  try {
+    localStorage.setItem(INDEX_CACHE_KEY, JSON.stringify({ stamp, problems }));
+  } catch (e) { /* quota/private-mode: cache is best-effort */ }
+}
+
 function doSignIn() {
   return signInWithPopup(auth, provider).catch((e) => {
     const kind = classifySignInError(e && e.code);
@@ -162,8 +177,8 @@ function gate(mode) {
   g.innerHTML =
     "<div style='max-width:30em;line-height:1.6'>" +
     "<h1 style='color:inherit'>&spades; Bridge Trainer</h1>" +
-    "<p>מאמן הכרזה והובלה בברידג' \\u2014 תרגול בעיות אמת עם משוב מיידי, " +
-    "ניקוד 0\\u2013100 ומעקב התקדמות.</p>" +
+    "<p>מאמן הכרזה והובלה בברידג' — תרגול בעיות אמת עם משוב מיידי, " +
+    "ניקוד 0–100 ומעקב התקדמות.</p>" +
     "<button id='bt-signin' style='font-size:17px;font-weight:700;" +
     "padding:14px 22px;border:0;border-radius:12px;background:#EAB84C;" +
     "color:#2A2410;cursor:pointer'>התחבר עם Google</button>" +
@@ -354,22 +369,33 @@ const BT = {
   signIn: () => doSignIn(),
   signOut: () => signOut(auth).catch((e) => console.error(e)),
 
-  // Read the sharded pool index: a small pointer doc lists shard doc ids;
-  // each shard holds a slice of the problem rows. (Legacy single-doc indexes,
-  // which carry `problems` inline, still work.)
+  // Read the sharded pool index. `getDoc` is server-first when online, so the
+  // old code re-downloaded every shard on EVERY page navigation (multi-page
+  // site) — several MB and reads per visit. Now we read only the small pointer
+  // (1 read), and if its version stamp is unchanged we return the shard rows
+  // from a local cache; we re-download the shards (in PARALLEL) only when the
+  // stamp changes. Legacy single-doc indexes (inline `problems`) still work.
   async fetchIndex() {
     const ptr = await getDoc(doc(db, "meta", "index"));
     if (!ptr.exists()) throw new Error("no pool index");
     const data = ptr.data();
     if (Array.isArray(data.problems)) return data;   // legacy single-doc
+    const stamp = indexStamp(data);
+    const cached = loadIndexCache();
+    if (cached && sameStamp(cached.stamp, stamp)
+        && Array.isArray(cached.problems)) {
+      return { ...data, problems: cached.problems };   // no shard reads
+    }
+    const snaps = await Promise.all((data.shards || []).map(
+      (sid) => getDoc(doc(db, "meta", sid))));
     const problems = [];
-    for (const sid of (data.shards || [])) {
-      const s = await getDoc(doc(db, "meta", sid));
+    for (const s of snaps) {
       if (s.exists()) {
         const sd = s.data();
         if (Array.isArray(sd.problems)) problems.push(...sd.problems);
       }
     }
+    saveIndexCache(stamp, problems);
     return { ...data, problems };
   },
   async getProblem(id) {

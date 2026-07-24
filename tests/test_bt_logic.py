@@ -96,3 +96,26 @@ def test_merge_and_prune_pending_keep_unsynced_answers():
     assert pruned == {}
     # server's b wins (not clobbered by pending); a is added back
     assert overlaid == {"b": {"score": 51}, "a": {"score": 90}}
+
+
+@needs_node
+def test_index_stamp_detects_pointer_changes():
+    same, diff_count, diff_updated, diff_format, missing = run_logic([
+        # identical stamps -> cache is fresh
+        "sameStamp(indexStamp({updated_at:'t1',count:10,index_format:2}),"
+        " indexStamp({updated_at:'t1',count:10,index_format:2}))",
+        # any of count / updated_at / index_format changing -> stale
+        "sameStamp(indexStamp({updated_at:'t1',count:10}),"
+        " indexStamp({updated_at:'t1',count:11}))",
+        "sameStamp(indexStamp({updated_at:'t1',count:10}),"
+        " indexStamp({updated_at:'t2',count:10}))",
+        "sameStamp(indexStamp({updated_at:'t1',count:10,index_format:1}),"
+        " indexStamp({updated_at:'t1',count:10,index_format:2}))",
+        # a null cached stamp is never 'same'
+        "sameStamp(null, indexStamp({updated_at:'t1',count:10}))",
+    ])
+    assert same is True
+    assert diff_count is False
+    assert diff_updated is False
+    assert diff_format is False      # index_format bump (T12) invalidates cache
+    assert missing is False

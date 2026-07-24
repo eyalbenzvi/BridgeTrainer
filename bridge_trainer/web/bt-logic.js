@@ -54,3 +54,20 @@ export function mergePending(serverById, pending) {
   for (const pid in p) if (!(pid in out)) out[pid] = p[pid];
   return out;
 }
+
+// ---- pool-index cache staleness (T10) --------------------------------------
+// The sharded index pointer carries a version stamp; the client caches the
+// merged rows and only re-downloads the shards when the stamp changes. Bumping
+// index_format (T12's per-kind split) invalidates any older cached shape.
+
+export function indexStamp(ptr) {
+  const p = ptr || {};
+  return { updated_at: p.updated_at || null, count: p.count || 0,
+           format: p.index_format || 0 };
+}
+
+export function sameStamp(a, b) {
+  if (!a || !b) return false;
+  return a.updated_at === b.updated_at && a.count === b.count
+    && a.format === b.format;
+}
