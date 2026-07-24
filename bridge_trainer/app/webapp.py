@@ -1080,6 +1080,29 @@ function pickUnseen(index, filters) {
   if (!unseen.length) return null;
   return unseen[Math.floor(Math.random() * unseen.length)].id;
 }
+/* Prefetch the NEXT problem after an answer so the "next" tap navigates
+   instantly: the chosen id + its doc are stashed in sessionStorage, and the
+   destination page consumes the doc (takePrefetch) instead of a fresh read. */
+const PREFETCH_KEY = "bt_prefetch";
+function readPrefetch() {
+  try { return JSON.parse(sessionStorage.getItem(PREFETCH_KEY)); }
+  catch (e) { return null; }
+}
+function takePrefetch(id) {
+  const pf = readPrefetch();
+  try { sessionStorage.removeItem(PREFETCH_KEY); } catch (e) { /* */ }
+  return (pf && pf.id === id && pf.doc) ? pf.doc : null;
+}
+async function prefetchNext(index, filters) {
+  try {
+    if (!index) return;
+    const nid = pickUnseen(index, filters);
+    if (!nid) { sessionStorage.removeItem(PREFETCH_KEY); return; }
+    const doc = await window.BT.getProblem(nid);
+    if (doc) sessionStorage.setItem(PREFETCH_KEY,
+      JSON.stringify({ id: nid, doc }));
+  } catch (e) { /* prefetch is best-effort */ }
+}
 /* BBO four-color deck */
 const SUITS = {S: ["ss", "\\u2660"], H: ["sh", "\\u2665"],
                D: ["sd", "\\u2666"], C: ["sc", "\\u2663"]};
@@ -2235,11 +2258,20 @@ function choose(action) {{
   if (store()[P.id] && !RETRYING) return;
   reveal(action);
   const rec = window.BT.gradeBidding(P, action);
-  window.BT.record(P.id, rec);
+  window.BT.record(P.id, rec);   // updates the cache synchronously (excluded below)
   if (!RETRYING) bumpSession(rec.score, P.id);
   RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
+  // warm the next problem so the "next" tap navigates instantly (best-effort)
+  (async () => {{
+    try {{ if (!INDEX) INDEX = await fetchIndex(); }} catch (e) {{ return; }}
+    const s = getSession();
+    const flt = (s && s.kind === "bidding")
+      ? {{kind: "bidding", levels: s.levels, types: s.types}}
+      : resolveFilters(INDEX, loadFilters(), "bidding");
+    prefetchNext(INDEX, flt);
+  }})();
 }}
 /* two-step selection: first tap shows what the bid means, a second
    (confirm) tap locks the answer in */
@@ -2330,7 +2362,7 @@ function normalize() {{
 }}
 async function init() {{
   const id = new URLSearchParams(location.search).get("id");
-  try {{ P = await window.BT.getProblem(id); }}
+  try {{ P = takePrefetch(id) || await window.BT.getProblem(id); }}
   catch (e) {{
     const box = document.getElementById("problem");
     box.removeAttribute("aria-label");   // was "loading…"; now an error
@@ -2407,7 +2439,9 @@ async function init() {{
     const flt = (s && s.kind === "bidding")
       ? {{kind: "bidding", levels: s.levels, types: s.types}}
       : resolveFilters(INDEX, loadFilters(), "bidding");
-    const nid = pickUnseen(INDEX, flt);
+    // use the prefetched next id if it's still unseen; else pick fresh
+    const pf = readPrefetch();
+    const nid = (pf && !store()[pf.id]) ? pf.id : pickUnseen(INDEX, flt);
     if (!nid) {{ location.href = "index.html?summary=1"; return; }}
     location.href = "p.html?id=" + encodeURIComponent(nid);
   }};
@@ -2668,11 +2702,21 @@ function commit(a) {
   if (store()[P.id] && !RETRYING) return;
   reveal(a);
   const rec = window.BT.gradeLead(P, a, MODE);
-  window.BT.record(P.id, rec);
+  window.BT.record(P.id, rec);   // updates the cache synchronously
   if (!RETRYING) bumpSession(rec.score, P.id);
   RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
+  // warm the next problem so the "next" tap navigates instantly (best-effort)
+  (async () => {
+    try { if (!INDEX) INDEX = await fetchIndex(); } catch (e) { return; }
+    const s = getSession();
+    const flt = (s && s.kind === "lead")
+      ? {kind: "lead", mode: s.mode || leadMode(),
+         levels: s.levels, types: s.types}
+      : resolveFilters(INDEX, loadLead(), "lead");
+    prefetchNext(INDEX, flt);
+  })();
 }
 /* two-step selection: first tap arms the card, a second (confirm) tap
    leads it \\u2014 so one stray tap never locks in a final answer */
@@ -2702,7 +2746,7 @@ function loadLead() {
 async function init() {
   const q = new URLSearchParams(location.search);
   const id = q.get("id");
-  try { P = await window.BT.getProblem(id); }
+  try { P = takePrefetch(id) || await window.BT.getProblem(id); }
   catch (e) {
     const box = document.getElementById("problem");
     box.removeAttribute("aria-label");   // was "loading…"; now an error
@@ -2808,7 +2852,8 @@ async function init() {
       ? {kind: "lead", mode: s.mode || leadMode(),
          levels: s.levels, types: s.types}
       : resolveFilters(INDEX, loadLead(), "lead");
-    const nid = pickUnseen(INDEX, flt);
+    const pf = readPrefetch();
+    const nid = (pf && !store()[pf.id]) ? pf.id : pickUnseen(INDEX, flt);
     if (!nid) { location.href = "index.html?summary=1"; return; }
     location.href = routeFor("lead", nid);
   };
