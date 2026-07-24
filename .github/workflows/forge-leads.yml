@@ -62,6 +62,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write        # DB-O-7: open/append a failure-notification issue
 
 jobs:
   forge:
@@ -171,3 +172,23 @@ jobs:
             forge.log
           if-no-files-found: warn
           retention-days: 30
+
+      # DB-O-7: a failed run must not stay buried in the Actions log — the pool
+      # can stop growing for days unnoticed. On failure, append to (or open) a
+      # single tracking issue so the maintainer is notified. Body carries no
+      # secrets — just the run link.
+      - name: Notify on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "⚠️ Forge workflow is failing"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body="Forge run failed: $RUN_URL (event: $GITHUB_EVENT_NAME)."
+          n=$(gh issue list --state open --search "$TITLE in:title" \
+                --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi

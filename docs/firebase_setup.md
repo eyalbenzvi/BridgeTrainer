@@ -67,3 +67,26 @@ users/{uid}/attempts/{attemptId}  one doc per answered deal (the raw metrics)
 ```
 Per-user metrics on the dashboard are derived on read from `attempts` — no
 aggregation backend, no Cloud Functions, stays on the free tier.
+
+## 10. Monitoring & alerts (required) — DB-O-7
+The app runs on the Spark free tier (≈50k reads/day, ≈20k writes/day, ≈10 GiB
+egress/month), shared across all users. Without alerts, exhausting a quota only
+shows up when the app stops working. Set these up once, in the Google Cloud
+console for the Firebase project:
+
+1. **Cloud Monitoring alert on Firestore usage.** Create an alerting policy on
+   the metrics `firestore.googleapis.com/document/read_count` and
+   `.../document/write_count` (aligned as a daily sum), threshold ≈70% of the
+   daily quota, notification channel = your email. This warns before the quota
+   is hit, not after.
+2. **Budget alert.** Billing → Budgets & alerts → create a budget (even a $0
+   budget on Spark) with email alerts at 50/90/100%. If/when you move to Blaze,
+   this plus a hard cap keeps a traffic spike from silently running up cost.
+3. **Forge workflow failure.** `.github/workflows/forge-leads.yml` already
+   opens/updates a GitHub issue on any failed run (`Notify on failure` step,
+   `issues: write`), so a stalled pool is surfaced within the hour instead of
+   going unnoticed for days. Watch the repo (or the `forge` label) to receive
+   those notifications.
+
+These are configuration, not code: keep them in place after any project or
+billing change.
