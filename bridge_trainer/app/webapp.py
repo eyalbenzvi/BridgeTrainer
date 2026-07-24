@@ -1636,12 +1636,14 @@ document.getElementById("type-list").addEventListener("click", ev => {{
   persist();
 }});
 document.getElementById("all-diff").onclick = () => {{
+  if (!INDEX) return;   // facets need the pool index (see setScenario guard)
   const f = poolFacets(INDEX, FILTERS.kind);
   FILTERS.levels =
     FILTERS.levels.length >= f.levels.length ? [] : f.levels.slice();
   persist();
 }};
 document.getElementById("all-type").onclick = () => {{
+  if (!INDEX) return;   // facets need the pool index (see setScenario guard)
   const f = poolFacets(INDEX, FILTERS.kind);
   FILTERS.types =
     FILTERS.types.length >= f.types.length ? [] : f.types.slice();
