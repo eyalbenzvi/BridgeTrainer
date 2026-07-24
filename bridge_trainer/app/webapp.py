@@ -213,7 +213,7 @@ a.big.off { background: var(--push); color: var(--fg); cursor: not-allowed; }
 /* ---- auction diagram: fixed W N E S, vul on the seat plates ---- */
 table.bidding { width: 100%; border-collapse: collapse; font-size: 17px;
                 border-radius: 10px; overflow: hidden; }
-table.bidding th { padding: 7px 4px 6px; font-weight: 600; font-size: 14px;
+table.bidding th { padding: 5px 4px 4px; font-weight: 600; font-size: 14px;
                    width: 25%; border: 0; }
 table.bidding th.v  { background: var(--vul); color: #fff; }
 table.bidding th.nv { background: var(--nonvul); color: var(--on-nonvul); }
@@ -226,8 +226,8 @@ table.bidding th sup.d { font-size: 9px; border: 1px solid currentColor;
                          margin-left: 3px; vertical-align: super; }
 table.bidding td { text-align: center; padding: 0;
                    border-top: 1px solid var(--line); }
-table.bidding td .call { display: block; min-height: 42px;
-                         line-height: 42px; font-weight: 600; }
+table.bidding td .call { display: block; min-height: 36px;
+                         line-height: 36px; font-weight: 600; }
 table.bidding td .call.expl { text-decoration: underline dotted 1.5px;
                               text-underline-offset: 4px; cursor: pointer; }
 table.bidding td .call.open { background: var(--accent-tint); }
@@ -480,6 +480,27 @@ html[data-scale="xl"] body { font-size: 20px; }
 /* visible focus for everyone */
 :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px;
                  border-radius: 6px; }
+/* ===== problem-page usability (UX round: less scrolling, clearer flow) =====
+   Tighten the vertical rhythm on the two problem pages so the hand and the
+   answer controls sit higher — the auction + banner used to push the cards
+   below the fold on a phone, forcing a scroll before you could even see your
+   hand. Scoped to pages that carry data-scenario so the home/dashboard cards
+   keep their roomier spacing. */
+body[data-scenario] .card { margin: 8px 0; }
+body[data-scenario] #problem .card,
+body[data-scenario] #modebanner.card { padding: 12px 14px; }
+body[data-scenario] .leadgrid,
+body[data-scenario] .candidates { margin: 8px 0; }
+/* leave room above scroll/focus targets so they never land flush against the
+   top edge when brought into view (scrollToEl/ensureVisible + focus()) */
+.headline, #problem, #confirm, #verdict,
+button.cardbtn, button.cand { scroll-margin-top: 12px; }
+/* once an answer is in, the keypad/bidding box is locked — make that legible
+   (dimmed, no pointer) instead of leaving live-looking buttons that ignore
+   taps */
+button.cardbtn:disabled, button.cand:disabled { cursor: default; }
+button.cardbtn:disabled:not(.good):not(.near):not(.bad),
+button.cand:disabled.off { opacity: .55; }
 /* skip link */
 .skip { position: absolute; inset-inline-start: -9999px; top: 8px; z-index: 200;
         background: var(--card); color: var(--fg); padding: 8px 14px;
@@ -996,6 +1017,27 @@ function btToast(msg) {
 if (typeof window !== "undefined")
   window.addEventListener("bt-save-failed",
     () => btToast("השמירה נכשלה — ננסה שוב אוטומטית."));
+/* ===== shared scroll/focus helpers (problem pages) =====
+   Motion respects the OS "reduce motion" setting: a smooth glide for users
+   who allow it, an instant jump for those who don't. */
+function smoothOK() {
+  return !(window.matchMedia &&
+           window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+}
+function scrollToEl(el, block) {
+  if (!el) return;
+  el.scrollIntoView({block: block || "center",
+                     behavior: smoothOK() ? "smooth" : "auto"});
+}
+/* Only scrolls when the element isn't already fully on screen, so an already-
+   visible answer area never jumps. Used on load so a fresh problem's cards +
+   answer controls are in view without the user hunting for them. */
+function ensureVisible(el, block) {
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const vh = window.innerHeight || document.documentElement.clientHeight;
+  if (r.top < 0 || r.bottom > vh) scrollToEl(el, block || "nearest");
+}
 /* ===== central Hebrew string table: UI chrome strings live here, so new
    features add a key instead of an inline literal ===== */
 const HE = {
@@ -2220,7 +2262,8 @@ def _problem_html() -> str:
 <title>בעיית הכרזה</title>
 <link rel="stylesheet" href="{_CSS_HREF}">
 {_head_preloads()}
-<script type="module" src="bt-firebase.js"></script></head><body>
+<script type="module" src="bt-firebase.js"></script></head>
+<body data-scenario="bidding">
 <main id="main" tabindex="-1">
 <div class="topbar">
 <a href="index.html">&rarr; דף הבית</a>
@@ -2232,7 +2275,7 @@ def _problem_html() -> str:
 <div class="skl" style="width:100%;height:120px"></div>
 <div class="skl" style="width:70%"></div>
 </div></div>
-<div class="candidates" id="cands"></div>
+<div class="candidates" id="cands" role="group" aria-label="בחר הכרזה"></div>
 <div id="confirm"></div>
 <div id="verdict" class="card" role="status" aria-live="polite">
 <h2 class="headline" id="headline" tabindex="-1"></h2>
@@ -2293,8 +2336,7 @@ function resetForRetry() {{
   const turn = document.querySelector("table.bidding td.turn");
   if (turn) turn.innerHTML = "?";
   ARMED = null;
-  document.getElementById("cands").scrollIntoView(
-    {{block: "center", behavior: "smooth"}});
+  scrollToEl(document.getElementById("cands"), "center");
   const first = document.querySelector("button.cand");
   if (first) first.focus();   // move focus off the now-hidden verdict
 }}
@@ -2542,7 +2584,9 @@ function choose(action) {{
   if (!RETRYING) bumpSession(rec.score, P.id, "bidding");
   RETRYING = false;
   const hl = document.getElementById("headline");
-  if (hl) hl.focus();
+  // land the result at the top of the viewport (focus() alone scrolls
+  // unreliably right after the verdict flips to display:block on mobile)
+  if (hl) {{ scrollToEl(hl, "start"); hl.focus({{preventScroll: true}}); }}
   // warm the next problem so the "next" tap navigates instantly (best-effort)
   (async () => {{
     const ses = getSession();
@@ -2573,11 +2617,31 @@ function arm(btn) {{
     (shows ? `<span class="shows en">${{shows}}</span>`
            : `<span class="shows">אין תיאור</span>`) + `</div>` +
     `<button class="big" id="go">הכרז <span class="ltr">${{callHtml(a)}}</span></button></div>`;
-  document.getElementById("go").onclick = () => {{
+  const go = document.getElementById("go");
+  go.onclick = () => {{
     ARMED = null; box.innerHTML = "";
     choose(a);
   }};
+  // the confirm step can render below the fold under a tall candidate grid —
+  // bring it into view and move focus onto it so the required second tap is
+  // obvious and keyboard-reachable
+  scrollToEl(box, "center");
+  go.focus({{preventScroll: true}});
 }}
+/* Escape backs out of an armed (not-yet-confirmed) choice — a stray first tap
+   never traps you in the confirm step. */
+function cancelArm() {{
+  if (!ARMED) return;
+  const prev = document.querySelector("button.cand.chosen");
+  ARMED = null;
+  document.getElementById("confirm").innerHTML = "";
+  document.querySelectorAll("button.cand")
+    .forEach(b => b.classList.remove("chosen"));
+  if (prev) prev.focus();
+}}
+document.addEventListener("keydown", e => {{
+  if (e.key === "Escape") cancelArm();
+}});
 function normalize() {{
   const v = P.verdict;
   // tolerant of every stored accepted shape, with empties dropped so
@@ -2746,7 +2810,12 @@ async function init() {{
   // ?retry=1 (from the dashboard "review" links) lands on a clean, answerable
   // problem instead of replaying the prior answer.
   if (prev && !retryParam) reveal(prev.answer);
-  else if (prev && retryParam) RETRYING = true;
+  else {{
+    if (prev && retryParam) RETRYING = true;
+    // fresh/answerable problem: make sure the bidding box is on screen so the
+    // hand + answer controls are visible without a manual scroll
+    ensureVisible(document.getElementById("cands"), "center");
+  }}
 }}
 // if the background sync (T4) brings in an answer (e.g. from another device)
 // after we've already rendered, reveal it — unless the user is mid-retry or
@@ -2780,8 +2849,7 @@ function resetForRetry() {
   const cf = document.getElementById("confirm");
   if (cf) cf.innerHTML = "";
   ARMED = null;
-  document.getElementById("problem").scrollIntoView(
-    {block: "center", behavior: "smooth"});
+  scrollToEl(document.getElementById("problem"), "center");
   const first = document.querySelector("button.cardbtn");
   if (first) first.focus();   // move focus off the now-hidden verdict
 }
@@ -3009,7 +3077,9 @@ function commit(a) {
   if (!RETRYING) bumpSession(rec.score, P.id, "lead");
   RETRYING = false;
   const hl = document.getElementById("headline");
-  if (hl) hl.focus();
+  // land the result at the top of the viewport (focus() alone scrolls
+  // unreliably right after the verdict flips to display:block on mobile)
+  if (hl) { scrollToEl(hl, "start"); hl.focus({preventScroll: true}); }
   // warm the next problem so the "next" tap navigates instantly (best-effort)
   (async () => {
     const ses = getSession();
@@ -3039,11 +3109,29 @@ function arm(btn) {
     '<span class="bidchip">' + cardHtml(a) + '</span>' +
     '<span class="shows">להוביל קלף זה?</span></div>' +
     '<button class="big" id="go">הובל <span class="ltr">' + cardHtml(a) + '</span></button></div>';
-  document.getElementById("go").onclick = () => {
+  const go = document.getElementById("go");
+  go.onclick = () => {
     ARMED = null; box.innerHTML = "";
     commit(a);
   };
+  // the confirm step can sit below the keypad — bring it into view and focus
+  // it so the required second tap is obvious and keyboard-reachable
+  scrollToEl(box, "center");
+  go.focus({preventScroll: true});
 }
+/* Escape backs out of an armed (not-yet-confirmed) card. */
+function cancelArm() {
+  if (!ARMED) return;
+  const prev = document.querySelector("button.cardbtn.chosen");
+  ARMED = null;
+  document.getElementById("confirm").innerHTML = "";
+  document.querySelectorAll("button.cardbtn")
+    .forEach(b => b.classList.remove("chosen"));
+  if (prev) prev.focus();
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") cancelArm();
+});
 function loadLead() {
   try { return JSON.parse(localStorage.getItem("bt_lead_filters")); }
   catch (e) { return null; }
@@ -3170,7 +3258,12 @@ async function init() {
   const prev = store()[P.id];
   const retryParam = new URLSearchParams(location.search).get("retry") === "1";
   if (prev && !retryParam) reveal(prev.answer);
-  else if (prev && retryParam) RETRYING = true;
+  else {
+    if (prev && retryParam) RETRYING = true;
+    // fresh/answerable problem: make sure the hand keypad is on screen so the
+    // cards are visible without a manual scroll
+    ensureVisible(document.getElementById("grid"), "center");
+  }
 }
 function cardHtml_or_call(tok) { return tok ? callHtml(tok) : ""; }
 window.addEventListener("bt-attempts-synced", () => {
@@ -3206,7 +3299,8 @@ def _lead_html() -> str:
         '<div class="skl" style="width:35%"></div>'
         '<div class="skl" style="width:100%;height:120px"></div>'
         '<div class="skl" style="width:70%"></div></div>\n'
-        '<div class="leadgrid" id="grid"></div>\n'
+        '<div class="leadgrid" id="grid" role="group" '
+        'aria-label="בחר קלף להובלה"></div>\n'
         '<div id="confirm"></div>\n'
         '<div id="verdict" class="card" style="display:none" role="status" '
         'aria-live="polite">\n'
