@@ -152,6 +152,72 @@ def test_lead_modes_grade_against_their_own_ranking():
     assert mp_second["score"] >= 60
 
 
+# A tie group modeled on the reported bug (problem lead1i-19f92dec280, IMP
+# mode): two spades tied at +0.27 IMP and five hearts tied at -0.41 IMP, all
+# below the accepted club set, but with the per-card BEN softmax that used to
+# split them (86 vs 83; 61/61/62/62/62).
+LEAD_TIES = {
+    "kind": "lead",
+    "verdict": {
+        "accepted": ["C4", "C2", "CT", "C9"],
+        "by_mode": {
+            "MP": {"accepted": ["C4", "C2", "CT", "C9", "S8", "S7"]},
+            "IMP": {"accepted": ["C4", "C2", "CT", "C9"]},
+        },
+        "table": [
+            {"card": "C4", "avg_def_tricks": 2.229, "vs_best": 0.0,
+             "exp_imps": 0.79, "ben_softmax": 0.092},
+            {"card": "C2", "avg_def_tricks": 2.229, "vs_best": 0.0,
+             "exp_imps": 0.79, "ben_softmax": 0.092},
+            {"card": "CT", "avg_def_tricks": 2.225, "vs_best": -0.004,
+             "exp_imps": 0.77, "ben_softmax": 0.339},
+            {"card": "C9", "avg_def_tricks": 2.225, "vs_best": -0.004,
+             "exp_imps": 0.77, "ben_softmax": 0.0},
+            {"card": "S8", "avg_def_tricks": 2.195, "vs_best": -0.033,
+             "exp_imps": 0.27, "ben_softmax": 0.461},
+            {"card": "S7", "avg_def_tricks": 2.195, "vs_best": -0.033,
+             "exp_imps": 0.27, "ben_softmax": 0.037},
+            {"card": "H9", "avg_def_tricks": 1.908, "vs_best": -0.32,
+             "exp_imps": -0.41, "ben_softmax": 0.0},
+            {"card": "H7", "avg_def_tricks": 1.908, "vs_best": -0.32,
+             "exp_imps": -0.41, "ben_softmax": 0.051},
+            {"card": "H2", "avg_def_tricks": 1.908, "vs_best": -0.32,
+             "exp_imps": -0.41, "ben_softmax": 0.051},
+        ],
+    },
+}
+
+
+@needs_node
+def test_lead_tied_cards_score_identically():
+    """Regression: cards the mode ranks identically must get the SAME score,
+    in either mode — the per-card softmax must not split a tie group."""
+    script = (_SCORE_JS +
+              f"\nconst T = {json.dumps(LEAD_TIES)};" +
+              "\nconst pick = (cards, mode) => cards.map("
+              "c => btScoreLead(T, c, mode).score);" +
+              "\nconsole.log(JSON.stringify({"
+              "s_imp: pick(['S8','S7'], 'IMP'),"
+              "h_imp: pick(['H9','H7','H2'], 'IMP'),"
+              "s_mp: pick(['S8','S7'], 'MP'),"
+              "h_mp: pick(['H9','H7','H2'], 'MP')}));\n")
+    fd, path = tempfile.mkstemp(suffix=".js")
+    try:
+        os.write(fd, script.encode("utf-8"))
+        os.close(fd)
+        res = subprocess.run(["node", path], capture_output=True, text=True)
+        assert res.returncode == 0, res.stderr
+        out = json.loads(res.stdout.strip().splitlines()[-1])
+    finally:
+        os.unlink(path)
+    # every tie group collapses to a single score, in both modes
+    for key in ("s_imp", "h_imp", "s_mp", "h_mp"):
+        assert len(set(out[key])) == 1, (key, out[key])
+    # and the two distinct groups still differ (the fix collapses ties, it
+    # does not flatten everything)
+    assert out["s_imp"][0] != out["h_imp"][0]
+
+
 @needs_node
 def test_attempt_fallback_matches_semantics():
     rows = run_js([

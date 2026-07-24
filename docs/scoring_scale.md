@@ -25,7 +25,9 @@ score = clamp( 95 / (1 + (c_eff / tau)^1.6) + leniency , 1, 94 )
 * **100** is reserved for the accepted set (the winner, plus statistical
   ties the verdict machinery itself could not separate: legacy toss-up
   sets, equal-trick lead groups). What the engine cannot distinguish, the
-  score must not distinguish.
+  score must not distinguish. This holds BELOW the accepted set too: two
+  leads the active mode ranks identically (same leading metric to display
+  precision) always get the same score — see the tie invariant below.
 * **0** is reserved for dead bidding options (`best_share < 0.5%`).
 * **95 cap** — a mistake inside the noise band never quite equals best.
 * **tau** — the cost at which the base score crosses ~47. This is the
@@ -35,7 +37,9 @@ score = clamp( 95 / (1 + (c_eff / tau)^1.6) + leniency , 1, 94 )
 * **leniency** — up to +6 x the engine policy weight of the chosen
   action: the trap the whole field falls into loses a few points less
   than the call nobody considers (the MSC "popular but wrong gets 60"
-  tradition). Never lifts a score above 94.
+  tradition). Never lifts a score above 94. For leads the policy weight
+  is the tie-GROUP's total (see the tie invariant below), not a single
+  card's, so interchangeable leads share it.
 
 ## Per-scenario differentiation
 
@@ -80,6 +84,21 @@ score = clamp( 95 / (1 + (c_eff / tau)^1.6) + leniency , 1, 94 )
 * Vulnerability is already priced into `exp_imps`, so the score inherits
   it for free.
 * Legacy tricks-only records are graded as MP (matching gradeLead).
+
+### Tie invariant (both lead modes)
+
+Cards the active mode ranks identically — same leading metric (expected
+IMPs / defensive tricks) to display precision — are interchangeable leads
+and MUST receive the same panel score. Every score input is therefore a
+property of the tie-GROUP, not the individual card:
+
+* the gap is charged on the *rounded* leading metric, so equal-ranked
+  cards share one cost and hence one base (and, in MP, one rank);
+* field leniency uses the group's TOTAL policy weight (the sum of the
+  interchangeable cards' BEN softmax — the field's probability of finding
+  that single idea) rather than the per-card softmax, which previously
+  split otherwise-identical cards by a few points (e.g. two spades tied at
+  +0.27 IMP scoring 86 vs 83).
 
 ## Display bands
 
