@@ -71,6 +71,9 @@ let PENDING = {};
 // How stale the cache may get before we do a full authoritative reconcile
 // (which is the only thing that removes server-deleted docs from the cache).
 const FULL_SYNC_INTERVAL_MS = 6 * 60 * 60 * 1000;   // 6 hours
+// resetAll delete-batch size (BUG-9): under Firestore's 500-writes-per-batch
+// hard limit, with headroom.
+const RESET_BATCH_LIMIT = 400;
 
 function tsMillis(a) {
   if (!a || !a.ts) return 0;
@@ -432,7 +435,6 @@ function gradeLead(P, card, mode) {
 // ---- public API -------------------------------------------------------
 const BT = {
   user: () => USER,
-  isGuest: () => !USER,
   attempts: () => ATTEMPTS,
   gradeBidding, gradeLead,
   signIn: () => doSignIn(),
@@ -549,7 +551,9 @@ const BT = {
     let batch = writeBatch(db), n = 0;
     for (const d of snap.docs) {
       batch.delete(d.ref);
-      if (++n >= 400) { await batch.commit(); batch = writeBatch(db); n = 0; }
+      if (++n >= RESET_BATCH_LIMIT) {
+        await batch.commit(); batch = writeBatch(db); n = 0;
+      }
     }
     if (n) await batch.commit();
     ATTEMPTS = {}; LAST_TS = 0; PENDING = {};

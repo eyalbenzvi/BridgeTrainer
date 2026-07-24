@@ -285,8 +285,6 @@ button.cand.near::after { position: absolute; top: 2px; right: 6px;
 }
 /* ---- verdict: outcome-first option rows ---- */
 #verdict { display: none; }
-.headline { font-size: 18px; font-weight: 700; margin: 0 0 2px; }
-.headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
 .subline { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
 /* panel-score chip (verdict headline, dashboard rows) + its breakdown line */
 .scorechip { display: inline-flex; align-items: center;
@@ -390,7 +388,9 @@ button.cardbtn.near { border-color: var(--gold);
   color: var(--muted); }
 .barrow.mine { background: #C8102E0A; border-radius: 8px; }
 #bid-meaning { min-height: 1.2em; margin: 6px 0 0; }
-.headline { font-size: 22px; font-weight: 800; margin: 4px 0; }
+/* single source for the verdict headline (BUG-10: was defined 3x, the 24px v2
+   rule winning) */
+.headline { font-size: 24px; font-weight: 800; margin: 4px 0; }
 .headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
 
 /* ===== redesign layer (v2): type scale, theming, nav, a11y, RTL ===== */
@@ -399,7 +399,6 @@ body { font-size: 16px; line-height: 1.55; padding-bottom: 84px;
        padding-inline: 12px; }
 h1 { font-size: 26px; font-weight: 800; }
 h2 { font-size: 19px; font-weight: 700; color: var(--fg); margin: 0; }
-.headline { font-size: 24px; }
 
 /* manual theme override (wins over prefers-color-scheme) */
 html[data-theme="light"] body {
@@ -651,6 +650,14 @@ _SCORE_JS = r"""
    and bt-firebase.js can call it across the classic-script/module boundary
    (inline scripts execute before the deferred module). */
 const SCORE_CAP = 95;          // a non-accepted answer never quite ties best
+const SCORE_MAX_NONBEST = 94;  // rounded clamp ceiling (< SCORE_CAP, so a
+                               // non-accepted answer never rounds up to 95)
+// score-band thresholds (BUG-9): single source for btBandOf, the p/lead pages'
+// near/bad chip class, and the dashboard's review cut + distribution bins.
+const REVIEW_MIN = 85;         // "review below 85"; near band / opt bin floor
+const NEAR_MIN = 65;           // minor-deviation floor; p/lead "near" chip cut
+const ERROR_MIN = 40;          // error band floor; no-data fallback score
+const SESSION_SIZE = 10;       // problems per practice run (bt_session)
 const SCORE_EXP = 1.6;         // soft shoulder, then a fast drop
 const SCORE_LENIENCY = 6;      // max field-leniency points (x policy weight)
 const SCORE_TAU = {bidding: 2.0, leadMP: 0.6, leadIMP: 1.75};
@@ -666,9 +673,9 @@ function btCurve(cost, tau) {
 function btBandOf(score) {
   if (typeof score !== "number") return null;
   if (score >= 100) return "best";
-  if (score >= 85) return "near";
-  if (score >= 65) return "minor";
-  if (score >= 40) return "error";
+  if (score >= REVIEW_MIN) return "near";
+  if (score >= NEAR_MIN) return "minor";
+  if (score >= ERROR_MIN) return "error";
   if (score >= 1) return "blunder";
   return "dead";
 }
@@ -697,7 +704,7 @@ function btScoreBidding(P, action) {
                   ci: t.ci};
   }
   if (!row || row.ev === undefined || row.ev === null) {
-    out.score = 40; out.fallback = true; return out;
+    out.score = ERROR_MIN; out.fallback = true; return out;
   }
   out.cost = Math.max(0, -(+row.ev));
   out.ci = +row.ci || 0;
@@ -711,7 +718,7 @@ function btScoreBidding(P, action) {
     if ((c.call || c) === action) out.policy = +c.policy || 0;
   out.base = btCurve(out.cEff, out.tau);
   out.leniency = SCORE_LENIENCY * out.policy;
-  out.score = Math.round(btClamp(out.base + out.leniency, 1, 94));
+  out.score = Math.round(btClamp(out.base + out.leniency, 1, SCORE_MAX_NONBEST));
   return out;
 }
 /* leads: MP grades tricks below best BLENDED with the matchpoint rank
@@ -731,7 +738,7 @@ function btScoreLead(P, card, mode) {
   if (accepted.includes(card)) { out.score = 100; return out; }
   const rows = v.table || [];
   const row = rows.find(r => r.card === card);
-  if (!row) { out.score = 40; out.fallback = true; return out; }
+  if (!row) { out.score = ERROR_MIN; out.fallback = true; return out; }
   if (mode === "IMP" && row.exp_imps !== undefined) {
     let best = -Infinity;
     for (const r of rows)
@@ -761,7 +768,7 @@ function btScoreLead(P, card, mode) {
   }
   out.policy = +row.ben_softmax || 0;
   out.leniency = SCORE_LENIENCY * out.policy;
-  out.score = Math.round(btClamp(out.base + out.leniency, 1, 94));
+  out.score = Math.round(btClamp(out.base + out.leniency, 1, SCORE_MAX_NONBEST));
   return out;
 }
 /* stored attempts: new ones carry `score`; legacy ones are approximated from
@@ -776,11 +783,11 @@ function btScoreOfAttempt(a) {
   // a recorded MISTAKE with no measured cost (the old graders left cost 0
   // when the chosen option had no table row) gets the scorers' explicit
   // no-data fallback, not a free ride up the curve at cost 0
-  if (!(cost > 0)) return 40;
+  if (!(cost > 0)) return ERROR_MIN;
   const tau = a.kind === "lead"
     ? (a.trainingMode === "IMP" ? SCORE_TAU.leadIMP : SCORE_TAU.leadMP)
     : SCORE_TAU.bidding;
-  return Math.round(btClamp(btCurve(cost, tau), 1, 94));
+  return Math.round(btClamp(btCurve(cost, tau), 1, SCORE_MAX_NONBEST));
 }
 function btScoreChipHtml(score, small) {
   const band = btBandOf(score);
@@ -857,7 +864,6 @@ _SHARED_JS = _SCORE_JS + """
    store() returns the signed-in user's answered-problem cache synchronously
    (preloaded at sign-in); answers persist through BT.record. */
 function store() { return (window.BT && window.BT.attempts()) || {}; }
-function saveStore(s) { /* no-op: attempts persist via BT.record */ }
 async function fetchIndex() {
   if (!window.BT) throw new Error("Firebase not ready");
   return window.BT.fetchIndex();
@@ -909,7 +915,7 @@ const HE = {
   skip: "דלג לתוכן", mainNav: "ניווט ראשי", settings: "הגדרות",
   theme: "ערכת נושא", themeSystem: "מערכת", themeLight: "בהיר",
   themeDark: "כהה", textSize: "גודל טקסט", sizeS: "רגיל", sizeL: "גדול",
-  sizeXL: "ענק", guest: "אורח",
+  sizeXL: "ענק",
   guestNote: "לא מחובר — התחבר כדי לשמור התקדמות",
   signIn: "התחבר עם Google", signOut: "התנתק", connected: "מחובר",
   close: "סגור", selectAll: "בחר הכל", clear: "נקה", problems: "בעיות",
@@ -1085,6 +1091,67 @@ function poolFacets(index, kind) {
     types: Object.keys(TYPE_NAMES).filter(t => typeCount[t]),
     levelCount, typeCount,
   };
+}
+/* PERF-F-6: precompute all pool counts in ONE pass so each filter interaction
+   derives its facets/tallies in O(levels x types) instead of re-scanning the
+   whole ~20k-row index 5-7 times. Keyed by scenario ("bidding" / "lead:MP" /
+   "lead:IMP") so leadMode() only selects a key at read time. Per key:
+     total       - problems in that scenario
+     levelTotal  - {level: count} regardless of type (matches poolFacets)
+     typeTotal   - {type: count} regardless of level (matches poolFacets)
+     matrix      - {level: {type: count}} (both set) for cross-faceted counts */
+function countsKey(kind, mode) {
+  return kind === "lead" ? "lead:" + (mode || leadMode()) : "bidding";
+}
+function buildCounts(index) {
+  const out = {};
+  for (const p of (index && index.problems) || []) {
+    const key = countsKey(kindOf(p), targetModeOf(p));
+    const c = out[key] || (out[key] =
+      {total: 0, levelTotal: {}, typeTotal: {}, matrix: {}});
+    c.total++;
+    const l = p.difficulty_level, t = p.type;
+    if (l) c.levelTotal[l] = (c.levelTotal[l] || 0) + 1;
+    if (t) c.typeTotal[t] = (c.typeTotal[t] || 0) + 1;
+    if (l && t) {
+      const m = c.matrix[l] || (c.matrix[l] = {});
+      m[t] = (m[t] || 0) + 1;
+    }
+  }
+  return out;
+}
+function emptyCount() {
+  return {total: 0, levelTotal: {}, typeTotal: {}, matrix: {}};
+}
+/* poolFacets(index, kind) equivalent, from the precomputed counts */
+function facetsFrom(counts, kind, mode) {
+  const c = (counts && counts[countsKey(kind, mode)]) || emptyCount();
+  return {
+    levels: ALL_LEVELS.filter(l => c.levelTotal[l]),
+    types: Object.keys(TYPE_NAMES).filter(t => c.typeTotal[t]),
+    levelCount: c.levelTotal, typeCount: c.typeTotal,
+  };
+}
+/* facetCounts(index, flt) equivalent (cross-faceted): a level counts only the
+   currently-selected types, a type only the currently-selected levels */
+function facetCountsFrom(counts, flt) {
+  const c = (counts && counts[countsKey(flt.kind, flt.mode)]) || emptyCount();
+  const selTypes = new Set(flt.types), selLevels = new Set(flt.levels);
+  const levelCount = {}, typeCount = {};
+  for (const l in c.matrix) {
+    const inLevel = selLevels.has(+l);
+    for (const t in c.matrix[l]) {
+      const n = c.matrix[l][t];
+      if (selTypes.has(t)) levelCount[l] = (levelCount[l] || 0) + n;
+      if (inLevel) typeCount[t] = (typeCount[t] || 0) + n;
+    }
+  }
+  return {levelCount, typeCount};
+}
+/* total problems in a scenario (poolFacets-free kindTotal / scen totals) */
+function scenTotal(counts, kind, mode) {
+  const c = counts && counts[countsKey(kind, mode)];
+  return c ? c.total : 0;
 }
 /* turn stored (or absent) filters into concrete selected sets. A stored
    selection is sanitized against the CURRENT pool: values that no longer
@@ -1502,7 +1569,7 @@ function initChrome() {
     '<button type="button" data-v="s">' + HE.sizeS + '</button>' +
     '<button type="button" data-v="l">' + HE.sizeL + '</button>' +
     '<button type="button" data-v="xl">' + HE.sizeXL + '</button></span></div>' +
-    '<div class="setrow" id="acct-row"><span id="acct-name">' + HE.guest + '</span>' +
+    '<div class="setrow" id="acct-row"><span id="acct-name">' + HE.account + '</span>' +
     '<button type="button" class="alllink" id="acct-btn"></button></div>' +
     '<button type="button" class="closebtn" id="settings-close">' + HE.close + '</button>' +
     '</div>';
@@ -1522,27 +1589,30 @@ function initChrome() {
     localStorage.setItem("bt_scale", b.dataset.v); applyTheme(); syncCtl("ctl-scale", b.dataset.v);
   };
   function refreshAcct() {
-    const guest = !window.BT || window.BT.isGuest();
+    // sign-in is REQUIRED (no guest mode): when signed in, show the account;
+    // otherwise (only the brief pre-ready window or a transient sign-out, both
+    // behind the full-screen gate) offer a sign-in affordance — never a
+    // misleading "guest" claim (BUG-8).
+    const u = window.BT && window.BT.user();
     const nameEl = document.getElementById("acct-name");
     const btn = document.getElementById("acct-btn");
     const navLbl = document.getElementById("nav-account-lbl");
-    if (guest) {
-      nameEl.textContent = HE.guestNote;
+    if (u) {
+      nameEl.textContent = (u.displayName || u.email) || HE.connected;
+      btn.textContent = HE.signOut;
+      btn.onclick = () => window.BT.signOut();
+      if (navLbl) navLbl.textContent =
+        (u.displayName ? u.displayName.split(" ")[0] : HE.account);
+    } else {
+      nameEl.textContent = HE.guestNote;   // "not signed in — sign in to save"
       btn.textContent = HE.signIn;
-      // swallow the rejection doSignIn() now throws on a real failure so it
-      // isn't an unhandled rejection (the gate shows its own error UI).
+      // swallow the rejection doSignIn() throws on a real failure so it isn't
+      // an unhandled rejection (the gate shows its own error UI).
       btn.onclick = () => {
         const p = window.BT && window.BT.signIn();
         if (p && p.catch) p.catch(() => {});
       };
       if (navLbl) navLbl.textContent = HE.account;
-    } else {
-      const u = window.BT.user();
-      nameEl.textContent = (u && (u.displayName || u.email)) || HE.connected;
-      btn.textContent = HE.signOut;
-      btn.onclick = () => window.BT.signOut();
-      if (navLbl) navLbl.textContent =
-        (u && u.displayName ? u.displayName.split(" ")[0] : HE.account);
     }
   }
   refreshAcct();
@@ -1645,6 +1715,7 @@ def _index_html() -> str:
 <script src="bt-shared.js"></script>
 <script>
 let INDEX = null;
+let COUNTS = {{}};   // precomputed pool counts (PERF-F-6); rebuilt when INDEX loads
 const SCEN_KEY = "bt_scenario";
 const LEAD_FILTERS_KEY = "bt_lead_filters";
 let SCEN = localStorage.getItem(SCEN_KEY) || "bidding";
@@ -1699,22 +1770,29 @@ document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = ev => {{
 function updateScenCounts() {{
   if (!INDEX) return;
   const s = store();
-  const nb = INDEX.problems.filter(p => kindOf(p) === "bidding");
-  const nl = INDEX.problems.filter(p =>
-    kindOf(p) === "lead" && targetModeOf(p) === leadMode());
-  const wb = nb.filter(p => !s[p.id]).length;
-  const wl = nl.filter(p => !s[p.id]).length;
+  const nb = scenTotal(COUNTS, "bidding");           // pool totals from COUNTS
+  const mode = leadMode();
+  const nl = scenTotal(COUNTS, "lead", mode);
+  // waiting = not-yet-answered; store-dependent, so one pass over the index
+  // (can't come from the precomputed COUNTS)
+  let wb = 0, wl = 0;
+  for (const p of INDEX.problems) {{
+    if (s[p.id]) continue;
+    const k = kindOf(p);
+    if (k === "bidding") wb++;
+    else if (k === "lead" && targetModeOf(p) === mode) wl++;
+  }}
   document.getElementById("count-bidding").textContent =
-    nb.length ? `${{wb}} ממתינות מתוך ${{nb.length}}` : "אין בעיות עדיין";
+    nb ? `${{wb}} ממתינות מתוך ${{nb}}` : "אין בעיות עדיין";
   document.getElementById("count-lead").textContent =
-    nl.length ? `${{wl}} ממתינות מתוך ${{nl.length}}` : "אין בעיות במצב זה עדיין";
+    nl ? `${{wl}} ממתינות מתוך ${{nl}}` : "אין בעיות במצב זה עדיין";
 }}
 function toggleFilter(list, value) {{
   const i = list.indexOf(value);
   if (i === -1) list.push(value); else list.splice(i, 1);
 }}
 function buildFilters() {{
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   const seg = document.getElementById("diff-seg");
   seg.style.setProperty("--n", f.levels.length || 1);
   seg.innerHTML = f.levels.map(lv =>
@@ -1731,28 +1809,14 @@ function buildFilters() {{
       `<span class="tcount">0</span></button>`;
   }}).join("");
 }}
-/* Counts shown on each option are cross-filtered: a difficulty segment
-   counts only problems whose type is currently selected, and a type row
-   counts only problems whose difficulty is currently selected. So picking
-   "Hard" makes every type row show its Hard-only tally. Each axis ignores
-   its own selection (standard faceting) so you can still see what turning an
-   option back on would add. */
-function facetCounts(index, flt) {{
-  const levelCount = {{}}, typeCount = {{}};
-  for (const p of index.problems) {{
-    if (kindOf(p) !== flt.kind) continue;
-    if (flt.kind === "lead" &&
-        targetModeOf(p) !== (flt.mode || leadMode())) continue;
-    if (p.difficulty_level && flt.types.includes(p.type))
-      levelCount[p.difficulty_level] =
-        (levelCount[p.difficulty_level] || 0) + 1;
-    if (p.type && flt.levels.includes(p.difficulty_level))
-      typeCount[p.type] = (typeCount[p.type] || 0) + 1;
-  }}
-  return {{levelCount, typeCount}};
-}}
+/* Counts shown on each option are cross-filtered (facetCountsFrom, PERF-F-6):
+   a difficulty segment counts only problems whose type is currently selected,
+   and a type row counts only problems whose difficulty is currently selected.
+   So picking "Hard" makes every type row show its Hard-only tally. Each axis
+   ignores its own selection (standard faceting) so you can still see what
+   turning an option back on would add. */
 function updateFacetCounts() {{
-  const c = facetCounts(INDEX, FILTERS);
+  const c = facetCountsFrom(COUNTS, FILTERS);
   document.querySelectorAll("#diff-seg button").forEach(b => {{
     b.querySelector(".scount").textContent = c.levelCount[+b.dataset.level] || 0;
   }});
@@ -1767,7 +1831,7 @@ function updateFacetCounts() {{
   }});
 }}
 function applyFilterUi() {{
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   document.querySelectorAll("#diff-seg button").forEach(b =>
     b.classList.toggle("active", FILTERS.levels.includes(+b.dataset.level)));
   document.querySelectorAll("#type-list .typerow").forEach(b =>
@@ -1779,7 +1843,7 @@ function applyFilterUi() {{
     FILTERS.types.length >= f.types.length ? HE.clear : HE.selectAll;
 }}
 function persist() {{
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   const full = FILTERS.levels.length >= f.levels.length &&
     FILTERS.types.length >= f.types.length;
   if (full) localStorage.removeItem(curKey());   // everything -> follow the pool
@@ -1800,14 +1864,14 @@ document.getElementById("type-list").addEventListener("click", ev => {{
 }});
 document.getElementById("all-diff").onclick = () => {{
   if (!INDEX) return;   // facets need the pool index (see setScenario guard)
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   FILTERS.levels =
     FILTERS.levels.length >= f.levels.length ? [] : f.levels.slice();
   persist();
 }};
 document.getElementById("all-type").onclick = () => {{
   if (!INDEX) return;   // facets need the pool index (see setScenario guard)
-  const f = poolFacets(INDEX, FILTERS.kind);
+  const f = facetsFrom(COUNTS, FILTERS.kind);
   FILTERS.types =
     FILTERS.types.length >= f.types.length ? [] : f.types.slice();
   persist();
@@ -1821,11 +1885,8 @@ function renderStats() {{
     const rec = s[p.id];
     if (rec) {{ done++; scoreSum += btScoreOfAttempt(rec) || 0; }}
   }}
-  const f = poolFacets(INDEX, FILTERS.kind);
-  const kindTotal = INDEX.problems.filter(p =>
-    kindOf(p) === FILTERS.kind &&
-    (FILTERS.kind !== "lead" ||
-     targetModeOf(p) === (FILTERS.mode || leadMode()))).length;
+  const f = facetsFrom(COUNTS, FILTERS.kind);
+  const kindTotal = scenTotal(COUNTS, FILTERS.kind, FILTERS.mode);
   const narrowed = FILTERS.levels.length < f.levels.length ||
     FILTERS.types.length < f.types.length;
   const label = FILTERS.kind === "lead"
@@ -1892,6 +1953,7 @@ async function init() {{
     box.querySelector("#retry-load").onclick = () => init();
     return;
   }}
+  COUNTS = buildCounts(INDEX);   // one pass; all facet tallies derive from this
   const q = new URLSearchParams(location.search);
   const qk = q.get("kind");
   if (qk === "lead" || qk === "bidding") SCEN = qk;
@@ -1933,7 +1995,7 @@ document.getElementById("deal").onclick = () => {{
     return false;
   }}
   localStorage.setItem("bt_session", JSON.stringify({{
-    kind: FILTERS.kind, size: 10, count: 0, right: 0, sum: 0, scored: 0,
+    kind: FILTERS.kind, size: SESSION_SIZE, count: 0, right: 0, sum: 0, scored: 0,
     mode: FILTERS.kind === "lead" ? leadMode() : null,
     levels: FILTERS.levels.slice(), types: FILTERS.types.slice()}}));
   location.href = routeFor(FILTERS.kind, id);
@@ -1945,16 +2007,16 @@ function renderSessionSummary() {{
   if (!s || !s.count) return;
   localStorage.removeItem("bt_session");   // the run is over
   const kindLabel = s.kind === "lead" ? "הובלה" : "הכרזה";
-  // score trail; a legacy in-flight session carries only a correct flag —
-  // map its misses to the no-data fallback (40), not to 0 (= dead option)
+  // score trail; bumpSession only ever stores id + score, so a scoreless item
+  // (a legacy in-flight session) maps to the no-data fallback, not 0 (= dead)
   const items = (s.items || []).map((it, idx) => ({{...it, idx,
-    sc: typeof it.score === "number" ? it.score : (it.correct ? 100 : 40)}}));
+    sc: typeof it.score === "number" ? it.score : ERROR_MIN}}));
   const avg = items.length
     ? Math.round(items.reduce((t, i) => t + i.sc, 0) / items.length)
     : Math.round(100 * (s.right || 0) / s.count);
-  const misses = items.filter(i => i.sc < 85 && i.id);
+  const misses = items.filter(i => i.sc < REVIEW_MIN && i.id);
   const missHtml = misses.length
-    ? `<div style="margin-top:10px;font-weight:700">לסקירה — החלטות מתחת ל־85</div>` +
+    ? `<div style="margin-top:10px;font-weight:700">לסקירה — החלטות מתחת ל־${{REVIEW_MIN}}</div>` +
       `<ul class="notes">` + misses.map(i =>
         `<li><a href="${{routeFor(s.kind || "bidding", i.id, {{retry: true}})}}">` +
         `בעיה ${{i.idx + 1}} בסבב (ציון ${{i.sc}}) &larr;</a></li>`).join("") + `</ul>`
@@ -2139,7 +2201,7 @@ function reveal(chosen) {{
   document.querySelectorAll("button.cand").forEach(b => {{
     const a = b.dataset.action;
     if (v.accepted.includes(a)) b.classList.add("good");
-    else if (a === chosen) b.classList.add(sp.score >= 65 ? "near" : "bad");
+    else if (a === chosen) b.classList.add(sp.score >= NEAR_MIN ? "near" : "bad");
     else b.classList.add("off");
     if (a === chosen) b.classList.add("chosen");
     b.disabled = true;
@@ -2614,7 +2676,7 @@ function reveal(chosen) {
   document.querySelectorAll("button.cardbtn").forEach(b => {
     const a = b.dataset.action;
     if (acc.includes(a)) b.classList.add("good");
-    else if (a === chosen) b.classList.add(sp.score >= 65 ? "near" : "bad");
+    else if (a === chosen) b.classList.add(sp.score >= NEAR_MIN ? "near" : "bad");
     if (a === chosen) b.classList.add("chosen");
     b.disabled = true;
   });
@@ -3114,7 +3176,7 @@ function costBand(list, kind) {
   let opt = 0, near = 0, bl = 0; const costs = [];
   list.forEach(a => { costs.push(num(a.gradedCost));
     const sc = btScoreOfAttempt(a);
-    if (sc >= 85) opt++; else if (sc >= 40) near++; else bl++; });
+    if (sc >= REVIEW_MIN) opt++; else if (sc >= ERROR_MIN) near++; else bl++; });
   const mean = costs.reduce((s, c) => s + c, 0) / n, med = median(costs), u = cfg.unit;
   const seg = (cls, v) => v
     ? `<span class="bseg ${cls}" style="width:${(v / n * 100).toFixed(1)}%">` +
@@ -3253,9 +3315,9 @@ function render(attempts) {
       (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
         `${"★".repeat(d)}</span><span class="off">${"★".repeat(5 - d)}</span></span>` : "");
   };
-  const misses = recent.filter(a => btScoreOfAttempt(a) < 85).slice(0, 10);
+  const misses = recent.filter(a => btScoreOfAttempt(a) < REVIEW_MIN).slice(0, 10);
   const missList = misses.length
-    ? '<div class="card"><b>לשיפור — החלטות מתחת ל־85</b> <span class="muted">(הקש לחזרה)</span>' +
+    ? '<div class="card"><b>לשיפור — החלטות מתחת ל־' + REVIEW_MIN + '</b> <span class="muted">(הקש לחזרה)</span>' +
       '<ul class="misslist">' + misses.map(m => {
         // attempt fields are user-owned free text -> esc() before innerHTML
         // (SEC-A-6). A problem deleted from the pool becomes a non-link
@@ -3280,7 +3342,7 @@ function render(attempts) {
     ? '<div class="card"><b>מה כדאי לתרגל</b>' +
       `<div style="margin:6px 0 8px">הנקודה החלשה שלך: <b>${weak.label}</b> ` +
       `(ציון ממוצע ${Math.round(weak.m)}).</div>` +
-      `<a class="big" href="${weak.href}">תרגל 10 כאלה &larr;</a></div>`
+      `<a class="big" href="${weak.href}">תרגל ${SESSION_SIZE} כאלה &larr;</a></div>`
     : "";
   const statCard =
     '<div class="card"><div class="statgrid">' +
