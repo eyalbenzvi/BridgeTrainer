@@ -198,8 +198,17 @@ function loadCacheState(uid) {
 }
 
 // The authoritative background sync (full reconcile or incremental) + pending
-// flush. Runs AFTER the page has already rendered from cache.
+// flush. Runs AFTER the page has already rendered from cache. Guarded against
+// overlapping runs (onAuthStateChanged re-fires on token refresh).
+let SYNCING = false;
 async function syncAttempts(uid) {
+  if (SYNCING) return;
+  SYNCING = true;
+  try {
+    await _syncAttempts(uid);
+  } finally { SYNCING = false; }
+}
+async function _syncAttempts(uid) {
   const coll = collection(db, "users", uid, "attempts");
 
   // Full reconcile: read the WHOLE collection and REPLACE the cache, so docs
@@ -207,6 +216,7 @@ async function syncAttempts(uid) {
   // been fully synced (e.g. first load after this logic shipped) or has gone
   // stale past FULL_SYNC_INTERVAL_MS.
   if (!LAST_FULL_SYNC || Date.now() - LAST_FULL_SYNC > FULL_SYNC_INTERVAL_MS) {
+    const before = new Set(Object.keys(ATTEMPTS));   // known before the read
     const snap = await getDocs(coll);
     const next = {};
     let maxTs = 0;
@@ -216,6 +226,13 @@ async function syncAttempts(uid) {
       if (ms > maxTs) maxTs = ms;
       next[a.problemId || d.id] = a;   // one doc per problem
     }
+    // keep answers RECORDED LOCALLY during the in-flight getDocs: a key that
+    // wasn't known before the read and isn't in the snapshot is a fresh answer
+    // (its write may have succeeded — so it left PENDING — but landed after the
+    // snapshot). Distinguishing "new key" from "server-deleted key" is what
+    // makes reconcile safe here (T4 review).
+    for (const pid of Object.keys(ATTEMPTS))
+      if (!before.has(pid) && !(pid in next)) next[pid] = ATTEMPTS[pid];
     // drop pendings the server already has, then keep the rest on top of the
     // fresh snapshot so an unsynced local answer is never wiped by reconcile.
     PENDING = prunePending(PENDING, next);

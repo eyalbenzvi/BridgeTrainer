@@ -2425,7 +2425,7 @@ window.addEventListener("bt-attempts-synced", () => {{
   if (!P) return;
   const prev = store()[P.id];
   const vd = document.getElementById("verdict");
-  if (prev && !RETRYING && (!vd || vd.style.display === "none"))
+  if (prev && !RETRYING && !ARMED && (!vd || vd.style.display === "none"))
     reveal(prev.answer);
 }});
 if (window.BT) window.BT.start(init);
@@ -2822,7 +2822,7 @@ window.addEventListener("bt-attempts-synced", () => {
   if (!P) return;
   const prev = store()[P.id];
   const vd = document.getElementById("verdict");
-  if (prev && !RETRYING && (!vd || vd.style.display === "none"))
+  if (prev && !RETRYING && !ARMED && (!vd || vd.style.display === "none"))
     reveal(prev.answer);
 });
 if (window.BT) window.BT.start(init);
