@@ -21,7 +21,36 @@ place of prose.
 """
 from __future__ import annotations
 
+import re
+from importlib import resources
 from pathlib import Path
+
+
+def _sdk_module_urls() -> list[str]:
+    """The gstatic Firebase SDK module URLs, read from bt-firebase.js so the
+    preload hints can never drift from the modules actually imported."""
+    src = (resources.files("bridge_trainer") / "web"
+           / "bt-firebase.js").read_text(encoding="utf-8")
+    return re.findall(r"https://www\.gstatic\.com/firebasejs/\S+?\.js", src)
+
+
+def _head_preloads() -> str:
+    """<link> hints for the Firebase critical path, shared by every page:
+    preconnect to the SDK CDN and the Firestore API, and modulepreload the SDK
+    modules (crossorigin — module fetches are CORS) plus the same-origin module
+    graph bt-firebase.js pulls in. Kept in one place and derived from
+    bt-firebase.js to avoid drift with the real imports."""
+    links = [
+        '<link rel="preconnect" href="https://www.gstatic.com" crossorigin>',
+        '<link rel="preconnect" href="https://firestore.googleapis.com"'
+        ' crossorigin>',
+    ]
+    for url in _sdk_module_urls():
+        links.append(f'<link rel="modulepreload" href="{url}" crossorigin>')
+    for local in ("bt-logic.js", "firebase-config.js"):
+        links.append(f'<link rel="modulepreload" href="{local}">')
+    return "\n".join(links)
+
 
 _CSS = """
 :root { color-scheme: light dark; }
@@ -1429,6 +1458,7 @@ def _index_html() -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>מאמן הברידג' — תרגול</title>
 <style>{_CSS}</style>
+{_head_preloads()}
 <script type="module" src="bt-firebase.js"></script></head><body data-nav="practice">
 <main id="main" tabindex="-1">
 <h1><span style="opacity:.9">&spades;</span> מאמן הברידג'</h1>
@@ -1827,6 +1857,7 @@ def _problem_html() -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>בעיית הכרזה</title>
 <style>{_CSS}</style>
+{_head_preloads()}
 <script type="module" src="bt-firebase.js"></script></head><body>
 <main id="main" tabindex="-1">
 <div class="topbar">
@@ -2620,6 +2651,7 @@ def _lead_html() -> str:
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         '<title>בעיית הובלה</title>\n<style>' + _CSS + '</style>\n'
+        + _head_preloads() + '\n'
         '<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-scenario="lead">\n<main id="main" tabindex="-1">\n'
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
@@ -2983,7 +3015,8 @@ def _dashboard_html() -> str:
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         '<title>ההתקדמות שלי</title>\n<style>' + _CSS + _DASHBOARD_CSS +
-        '</style>\n<script type="module" src="bt-firebase.js"></script></head>'
+        '</style>\n' + _head_preloads() +
+        '\n<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-nav="progress">\n<main id="main" tabindex="-1">\n'
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted">ההתקדמות שלי</span></div>\n'
