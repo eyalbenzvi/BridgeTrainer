@@ -25,14 +25,49 @@ service cloud.firestore {
       allow write: if false;
     }
 
-    // Each user owns their measurement stream and profile: read/write only
-    // your own subtree. The {doc=**} wildcard is required — subcollection
-    // rules do NOT cascade without it. Writes are size-capped so a client
-    // cannot balloon its own subtree (which also inflates its own read cost).
-    match /users/{uid}/{doc=**} {
-      allow read: if request.auth != null && request.auth.uid == uid;
-      allow write: if request.auth != null && request.auth.uid == uid
-                   && request.resource.size() < 20000;
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    // Schema + size validation for an attempt document. The previous rule used
+    // request.resource.size() — NOT a valid API (Resource has no size()), so
+    // the whole condition failed to evaluate. Use request.resource.data.size()
+    // (a FIELD count) with an explicit key allowlist and string/list caps to
+    // bound the document without relying on a byte measure the language does
+    // not offer. The allowlist is the union of every field the web client
+    // writes: web/bt-firebase.js meta()+gradeBidding()+gradeLead()+record().
+    function validAttempt() {
+      let d = request.resource.data;
+      return d.size() < 25
+        && d.keys().hasOnly([
+          'problemId', 'problemVersion', 'scoringForm', 'kind', 'type',
+          'difficultyLevel', 'answer', 'chosenCall', 'correct', 'outcomeClass',
+          'gradedCost', 'score', 'acceptedSet', 'trainingMode', 'rankingMetric',
+          'chosenRank', 'recommendedLead', 'primaryValue', 'isFirstAttempt',
+          'attemptCount', 'ts', 'lastTs'])
+        // type-check only the fields that are never null; the rest may be
+        // null/absent (see meta()/gradeLead), so don't force a type on them.
+        && d.answer is string && d.answer.size() < 16
+        && d.score is number
+        && d.correct is bool
+        && d.attemptCount is int
+        && (!('acceptedSet' in d) || d.acceptedSet.size() < 40)
+        && (!('chosenCall' in d) || (d.chosenCall is string
+              && d.chosenCall.size() < 16));
+    }
+
+    // Each user owns their own data: read/write only your own subtree. Only the
+    // top-level user doc (a future profile) and the attempts stream are
+    // writable; attempts are schema-validated (validAttempt). No recursive
+    // {doc=**} write rule, so a client can't create arbitrary subcollections.
+    match /users/{uid} {
+      allow read: if owner(uid);
+      allow write: if owner(uid) && request.resource.data.size() < 50;
+
+      match /attempts/{pid} {
+        allow read: if owner(uid);
+        allow write: if owner(uid) && validAttempt();
+      }
     }
   }
 }
