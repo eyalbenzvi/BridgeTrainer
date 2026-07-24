@@ -119,3 +119,60 @@ def test_index_stamp_detects_pointer_changes():
     assert diff_updated is False
     assert diff_format is False      # index_format bump (T12) invalidates cache
     assert missing is False
+
+
+@needs_node
+def test_needs_reconcile_skips_only_on_matching_count():
+    equal, more, fewer, unknown = run_logic([
+        "needsReconcile(10, 10)",   # server == expected -> skip (false)
+        "needsReconcile(12, 10)",   # server grew -> reconcile
+        "needsReconcile(8, 10)",    # server shrank (deletions) -> reconcile
+        "needsReconcile(null, 10)",  # count unavailable -> reconcile
+    ])
+    assert equal is False
+    assert more is True and fewer is True
+    assert unknown is True
+
+
+def test_sync_uses_count_before_full_read_and_narrow_fallback():
+    src = (resources.files("bridge_trainer") / "web" / "bt-firebase.js").read_text(
+        encoding="utf-8")
+    # the count guard precedes the full-collection read
+    assert "getCountFromServer(coll)" in src
+    assert "needsReconcile(serverCount, expected)" in src
+    # the incremental fallback is gated on failed-precondition, not any error
+    assert 'e.code === "failed-precondition"' in src
+    # getCountFromServer is actually imported
+    assert "getCountFromServer," in src
+
+
+@needs_node
+def test_unwrap_firestore_inverts_firestore_safe():
+    """unwrapFirestore (applied in getProblem) is the exact inverse of the
+    producer's _firestore_safe nested-array wrapping (DB-M-8)."""
+    from bridge_trainer.pool.firestore_store import _firestore_safe
+    samples = [
+        {"top_contracts": [["4SW", 231], ["3SW", 104]]},   # verdict shape
+        {"a": {"b": [[1, 2], [3]]}},                        # deeper nesting
+        [[[1]]],                                            # array of arrays
+        # a real record fragment: flat arrays/scalars must round-trip untouched
+        {"auction": ["P", "1D", "P"], "difficulty": 1.6,
+         "candidates": [{"call": "3NT", "policy": 0.46}]},
+        {"verdict": {"table": [{"bid": "4S",
+                                "top_contracts": [["4SW", 5]]}]}},
+    ]
+    wrapped = [_firestore_safe(s) for s in samples]
+    got = run_logic([f"unwrapFirestore({json.dumps(w)})" for w in wrapped])
+    assert got == samples
+
+
+@needs_node
+def test_unwrap_firestore_idempotent_on_flat_records():
+    """Static-file records were never wrapped; unwrapping them is a no-op."""
+    flat = {"auction": ["P", "1H"], "candidates": [{"call": "2H"}],
+            "top_contracts": [["4H", 3]]}   # already-flat pair list
+    (once, twice) = run_logic([
+        f"unwrapFirestore({json.dumps(flat)})",
+        f"unwrapFirestore(unwrapFirestore({json.dumps(flat)}))",
+    ])
+    assert once == flat and twice == flat

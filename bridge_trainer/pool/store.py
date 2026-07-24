@@ -34,6 +34,10 @@ def index_entry(rec: dict) -> dict:
         "difficulty": rec.get("difficulty"),
         "difficulty_level": cls.get("difficulty_level"),
         "created_at": rec.get("created_at"),
+        # the record's own schema version (DB-M-7), so the index can report a
+        # real schema_min/max instead of a hard-coded 1. Legacy records predate
+        # the field and are schema 1.
+        "schema": rec.get("schema", SCHEMA_VERSION),
     }
     if entry["kind"] == "lead":
         # training modes this problem can serve: legacy tricks-only records
@@ -52,8 +56,17 @@ def index_from_entries(entries) -> dict:
     (newest first). Lets callers update the index incrementally without
     re-reading every problem document."""
     entries = sorted(entries, key=lambda e: e["created_at"] or "", reverse=True)
+    # real schema span across the entries (DB-M-7). Default missing per-entry
+    # schema to SCHEMA_VERSION so a bare/legacy entry (e.g. one without the
+    # field) never KeyErrors here. `schema` stays = schema_min for backward
+    # compatibility with any reader that still reads the scalar field.
+    schemas = [e.get("schema", SCHEMA_VERSION) for e in entries]
+    schema_min = min(schemas) if schemas else SCHEMA_VERSION
+    schema_max = max(schemas) if schemas else SCHEMA_VERSION
     return {
-        "schema": SCHEMA_VERSION,
+        "schema": schema_min,
+        "schema_min": schema_min,
+        "schema_max": schema_max,
         "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "count": len(entries),
         "problems": entries,

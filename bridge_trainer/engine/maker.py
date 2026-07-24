@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from ..pool.store import ProblemPool
+from .batch_state import BatchState
 from .conventions import hero_role
 from .difficulty import difficulty_classification
 from .scanner import SEATS, VUL_NAMES, scan_board
@@ -286,41 +286,27 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
                         audit=audit, detail=detail)
 
 
-class _BatchState:
-    """Aggregation shared by the sequential and parallel paths."""
+class _BatchState(BatchState):
+    """Bidding-batch aggregation (shared core in engine/batch_state.py).
+    Logs every board, tracks vul/role/contested quotas, and audits the
+    prescreen. Kept as _BatchState — parallel.py imports it by that name."""
 
-    def __init__(self, pool_dir: str, count: int, log):
-        self.pool = ProblemPool(pool_dir)
-        self.existing = set(self.pool.ids())
-        self.count = count
-        self.log = log
-        self.made: list[str] = []
-        self.rejections = Counter()
-        self.stage_totals = Counter()
+    boards_key = "boards_scanned"
+
+    def _init_quotas(self) -> None:
         self.quotas = {"vuls": Counter(), "roles": Counter(), "contested": 0}
         self.audits = {"pre_rejects_audited": 0, "false_kills": 0}
-        self.boards = 0
 
-    def absorb(self, out: BoardOutcome, tag: str = "") -> None:
-        self.boards += 1
-        for k, x in out.timings.items():
-            self.stage_totals[k] += x
+    def _absorb_extra(self, out: BoardOutcome) -> None:
         if out.audit:
             self.audits["pre_rejects_audited"] += 1
             self.audits["false_kills"] += out.audit["false_kill"]
-        if out.status in ("rejected", "error"):
-            self.rejections[out.reason] += 1
-            if out.detail:
-                self.log(f"  {tag}seed {out.seed}: {out.detail}")
-            return
-        rec = out.rec
-        if rec["id"] in self.existing:
-            self.rejections["duplicate"] += 1
-            return
-        self.pool.add(rec)
-        self.pool.rebuild_index()
-        self.existing.add(rec["id"])
-        self.made.append(rec["id"])
+
+    def _on_reject(self, out: BoardOutcome, tag: str) -> None:
+        if out.detail:
+            self.log(f"  {tag}seed {out.seed}: {out.detail}")
+
+    def _on_accept(self, out: BoardOutcome, rec, tag: str) -> None:
         self.quotas["vuls"][rec["vul"]] += 1
         self.quotas["roles"][rec["hero_role"]] += 1
         stem, dealer = rec["auction"], SEATS.index(rec["dealer"])
@@ -334,22 +320,14 @@ class _BatchState:
                      f"ACCEPTED {rec['id']} [{len(self.made)}/{self.count}]",
                      1))
 
-    def summary(self, wall: float) -> dict:
-        s = {
-            "made": self.made, "count": len(self.made),
-            "wall_s": round(wall, 1), "boards_scanned": self.boards,
-            "rejections": dict(self.rejections),
-            "stage_totals_s": {k: round(x, 1)
-                               for k, x in self.stage_totals.items()},
-            "per_accepted_s": round(wall / len(self.made), 1)
-            if self.made else None,
-            "mix": {"vuls": dict(self.quotas["vuls"]),
-                    "roles": dict(self.quotas["roles"]),
-                    "contested": self.quotas["contested"]},
-        }
+    def _mix(self) -> dict:
+        return {"vuls": dict(self.quotas["vuls"]),
+                "roles": dict(self.quotas["roles"]),
+                "contested": self.quotas["contested"]}
+
+    def _summary_extra(self, summary: dict) -> None:
         if self.audits["pre_rejects_audited"]:
-            s["prescreen_audit"] = dict(self.audits)
-        return s
+            summary["prescreen_audit"] = dict(self.audits)
 
 
 def forge_batch(pool_dir: str, count: int, base_seed: int,

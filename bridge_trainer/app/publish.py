@@ -26,13 +26,10 @@ import numpy as np
 
 from ..bank.schema import load_problem
 from ..dealing.myhand import sample_my_hand
-from ..domain.auction import partner_of
 from ..domain.interfaces import GenerationBudget
+from . import htmlfmt
 from .report import render_report
 from .runner import RunResult, run_problem
-
-_SUIT_GLYPHS = {"S": "&#9824;", "H": '<span class="red">&#9829;</span>',
-                "D": '<span class="red">&#9830;</span>', "C": "&#9827;"}
 
 _BASE_CSS = """
 :root { color-scheme: light dark; }
@@ -93,20 +90,6 @@ class PublishedEntry:
     variants: int
 
 
-def _auction_html(problem) -> str:
-    return " &ndash; ".join(
-        f"({c.token})" if seat not in (problem.my_seat,
-                                       partner_of(problem.my_seat))
-        else c.token
-        for seat, c in problem.auction.calls_with_seats()) + " &ndash; ?"
-
-
-def _hand_html(hand: str) -> str:
-    parts = hand.split(".")
-    return "<br>".join(f"{_SUIT_GLYPHS[s]} {html.escape(p) or '&mdash;'}"
-                       for s, p in zip("SHDC", parts))
-
-
 def _quiz_payload(result: RunResult, k: int, total: int) -> dict:
     def comp_rows(comp):
         return [{
@@ -154,8 +137,8 @@ def render_quiz(result: RunResult, k: int, total: int) -> str:
 <div class="card">
 <div class="muted">Dealer {p.dealer} &middot; Vul {p.vul} &middot; IMPs &middot;
 you are {p.my_seat}</div>
-<div class="auction">{_auction_html(p)}</div>
-<div class="hand">{_hand_html(p.my_hand)}</div>
+<div class="auction">{htmlfmt.auction_html(p)}</div>
+<div class="hand">{htmlfmt.hand_html(p.my_hand, suit_sep="<br>", glyph_sep=" ", dash="&mdash;")}</div>
 </div>
 <div class="candidates">{buttons}</div>
 <div id="verdict" class="card">

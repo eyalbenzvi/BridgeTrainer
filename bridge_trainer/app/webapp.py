@@ -21,6 +21,7 @@ place of prose.
 """
 from __future__ import annotations
 
+import json
 import re
 from importlib import resources
 from pathlib import Path
@@ -539,6 +540,12 @@ button.modecard[aria-pressed="true"] b { color: var(--accent); }
    RTL base direction and isolate it, or the whole sentence scrambles */
 .modegoal { font-size: 13px; color: var(--muted); direction: rtl;
   unicode-bidi: isolate; }
+/* the home lead-scenario card swaps this line between the MP and IMP goals,
+   whose different lengths wrapped to different heights and made the whole card
+   (and the layout below it) jump on every MP<->IMP toggle. Reserve a constant
+   two-line slot so switching modes never reflows. Scoped to the home div by id;
+   the problem page reuses .modegoal as an inline banner span, unaffected. */
+#modegoal { min-height: 2.9em; }
 .ctline { font-size: 14px; margin-top: 6px; }
 /* the active mode's primary metric is visually emphasized */
 table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
@@ -801,6 +808,47 @@ function btScoreExplain(parts) {
     bits.push("+" + Math.round(parts.leniency) + " הקלת שדה (המנוע נתן לבחירתך " +
               Math.round(parts.policy * 100) + "%)");
   return "מרכיבי הציון: " + bits.join(" · ");
+}
+/* ---- small pure display/data helpers (shared, DOM-free) --------------- */
+/* HTML-escape a FREE-TEXT document field before it is interpolated into
+   innerHTML (SEC-A-2). Use this for prose/opaque strings that originate
+   outside our code — P.source.* (parsed from external LIN vugraph files),
+   engine notes, meanings — NEVER for helpers that intentionally emit markup
+   (callHtml/suitHtml/handHtml/contractHtml/terse), or you double-escape their
+   glyphs. */
+function esc(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+/* A finite number or the default (BUG-5): used for CSS widths so a missing
+   probability never emits `width:NaN%`. */
+function safeNum(x, d) {
+  const n = +x;
+  return Number.isFinite(n) ? n : (d === undefined ? 0 : d);
+}
+/* Format a 0-1 fraction as a rounded percent, or an em dash when it is
+   missing/NaN (BUG-5) — mirrors the comparison table's guard so options and
+   chips never show "NaN%". */
+function pct(x) {
+  const n = +x;
+  return Number.isFinite(n) ? Math.round(n * 100) + "%" : "—";
+}
+/* The accepted-call list, tolerant of every stored shape, with empty entries
+   dropped so callHtml(accepted[0]) never receives undefined (BUG-4). When the
+   list ends up empty it falls back to the top corrected/table row's bid, the
+   same fallback gradeBidding uses, so the verdict still names a best call. */
+function normAccepted(v) {
+  v = v || {};
+  let acc = Array.isArray(v.accepted) ? v.accepted
+          : (v.toss_up ? (v.toss_up_set || []) : [v.accepted]);
+  acc = (acc || []).filter(Boolean);
+  if (!acc.length) {
+    const fb = (v.corrected && v.corrected[0] && v.corrected[0].bid) ||
+               (v.table && v.table[0] && (v.table[0].bid || v.table[0].action));
+    if (fb) acc = [fb];
+  }
+  return acc;
 }
 """
 
@@ -1178,10 +1226,18 @@ function terse(card, call) {
     else frags.push(v + "+" + suitHtml(st));
   }
   const hcp = card.hcp;
+  const pts = card.pts;
   if (hcp) {
     const [lo, hi] = hcp;
     if (hi >= 25) { if (lo > 0) frags.push(lo + "+"); }
     else frags.push(lo + "-" + hi);
+  } else if (pts) {
+    // no HCP band, but GIB stated total points — without this a limited pass
+    // ("No suitable call -- 8- total points") rendered with no range at all,
+    // which read as a missing explanation. Mirrors engine/explain.py.
+    const [lo, hi] = pts;
+    if (hi >= 25) { if (lo > 0) frags.push(lo + "+ pts"); }
+    else frags.push(lo + "-" + hi + " pts");
   }
   return frags.join(", ");
 }
@@ -1225,77 +1281,77 @@ function fullDealHtml(deal, roles) {
   return `<div class="fulldeal">${cell("N")}${cell("W")}${compass}` +
          `${cell("E")}${cell("S")}</div>`;
 }
-/* fixed W-N-E-S auction diagram (BBO layout); vulnerability lives on the
-   seat plates: red = vulnerable, green = not. notes[j] non-empty marks a
-   call as tappable (alert-style explanation). */
-function auctionTableHtml(p, notes) {
+/* Fixed W-N-E-S auction diagram (BBO layout), shared by both trainers.
+   Vulnerability lives on the seat plates (red = vulnerable, green = not).
+   opts:
+     hero            seat that gets the "me" highlight
+     roleOf(seat)    the seat's Hebrew role label ("" for none)
+     noteOf(n)       maps notes[j] -> truthy when the call is tappable
+                     (default: the entry itself)
+     pendingCell     append a trailing "?" cell (bidding: next call is yours)
+     highlightFinal  add "fin" to the last non-pass call (lead: the contract) */
+function auctionTable(p, notes, opts) {
+  opts = opts || {};
   const cols = ["W", "N", "E", "S"];
-  const seats = ["N", "E", "S", "W"];
-  const hero = p.seat, partner = seats[(seats.indexOf(hero) + 2) % 4];
   const vul = vulSeats(p.vul);
   const head = cols.map(s => {
-    const cls = (vul.includes(s) ? "v" : "nv") + (s === hero ? " me" : "");
-    const who = s === hero ? HE.you : (s === partner ? HE.partner : "");
-    const vlab = vul.includes(s) ? HE.vul : HE.notVul;
-    return `<th class="${cls}" title="${s} \\u2014 ${vlab}">${s}` +
-           `${s === p.dealer ? '<sup class="d">D</sup>' : ""}` +
-           `${who ? `<small>${who}</small>` : "<small>&nbsp;</small>"}</th>`;
-  }).join("");
-  const cells = [];
-  for (let i = 0; i < cols.indexOf(p.dealer); i++) cells.push("<td></td>");
-  let seat = p.dealer;
-  p.auction.forEach((tok, j) => {
-    const note = notes && notes[j];
-    cells.push(`<td><span class="call${note ? " expl" : ""}"` +
-               ` data-i="${j}">${callHtml(tok)}</span></td>`);
-    seat = seats[(seats.indexOf(seat) + 1) % 4];
-  });
-  cells.push('<td class="turn">?</td>');
-  while (cells.length % 4) cells.push("<td></td>");
-  let rows = "";
-  for (let i = 0; i < cells.length; i += 4)
-    rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
-  return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
-}
-function cardHtml(tok) {  // "SK" -> four-colour suit glyph + rank (T -> 10)
-  const r = tok[1] === "T" ? "10" : tok[1];
-  return suitHtml(tok[0]) + " " + r;
-}
-/* A COMPLETE auction (W-N-E-S, BBO layout) for opening-lead problems: no
-   pending-call cell, the final contract call highlighted, and every call
-   tappable for its meaning (notes[j].text). Leader plate reads "lead". */
-function completeAuctionTableHtml(p, notes) {
-  const cols = ["W", "N", "E", "S"];
-  const seats = ["N", "E", "S", "W"];
-  const hero = p.leader, decl = p.declarer;
-  const dummy = seats[(seats.indexOf(decl) + 2) % 4];
-  const vul = vulSeats(p.vul);
-  const head = cols.map(s => {
-    const cls = (vul.includes(s) ? "v" : "nv") + (s === hero ? " me" : "");
-    const who = s === hero ? HE.leader : (s === decl ? HE.declarer
-              : (s === dummy ? HE.dummy : ""));
+    const cls = (vul.includes(s) ? "v" : "nv") + (s === opts.hero ? " me" : "");
+    const who = (opts.roleOf && opts.roleOf(s)) || "";
     const vlab = vul.includes(s) ? HE.vul : HE.notVul;
     return `<th class="${cls}" title="${s} \\u2014 ${vlab}">${s}` +
            `${s === p.dealer ? '<sup class="d">D</sup>' : ""}` +
            `${who ? `<small>${who}</small>` : "<small>&nbsp;</small>"}</th>`;
   }).join("");
   let lastBid = -1;
-  p.auction.forEach((t, j) => {
-    if (t !== "P" && t !== "X" && t !== "XX") lastBid = j;
-  });
+  if (opts.highlightFinal)
+    p.auction.forEach((t, j) => {
+      if (t !== "P" && t !== "X" && t !== "XX") lastBid = j;
+    });
   const cells = [];
   for (let i = 0; i < cols.indexOf(p.dealer); i++) cells.push("<td></td>");
   p.auction.forEach((tok, j) => {
-    const note = notes && notes[j] && (notes[j].card || notes[j].text);
-    const fin = j === lastBid ? " fin" : "";
+    const note = notes && notes[j] &&
+      (opts.noteOf ? opts.noteOf(notes[j]) : notes[j]);
+    const fin = (opts.highlightFinal && j === lastBid) ? " fin" : "";
     cells.push(`<td><span class="call${note ? " expl" : ""}${fin}"` +
                ` data-i="${j}">${callHtml(tok)}</span></td>`);
   });
+  if (opts.pendingCell) cells.push('<td class="turn">?</td>');
   while (cells.length % 4) cells.push("<td></td>");
   let rows = "";
   for (let i = 0; i < cells.length; i += 4)
     rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
   return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
+}
+/* bidding page: hero is you, partner labelled, pending "?" cell for your turn;
+   every non-empty note marks its call tappable. */
+function auctionTableHtml(p, notes) {
+  const seats = ["N", "E", "S", "W"];
+  const hero = p.seat, partner = seats[(seats.indexOf(hero) + 2) % 4];
+  return auctionTable(p, notes, {
+    hero,
+    roleOf: s => s === hero ? HE.you : (s === partner ? HE.partner : ""),
+    pendingCell: true,
+  });
+}
+function cardHtml(tok) {  // "SK" -> four-colour suit glyph + rank (T -> 10)
+  const r = tok[1] === "T" ? "10" : tok[1];
+  return suitHtml(tok[0]) + " " + r;
+}
+/* opening-lead page: a COMPLETE auction — hero is the leader, declarer/dummy
+   labelled, no pending cell, the final contract call highlighted, and a call
+   tappable when its note carries a card or text. */
+function completeAuctionTableHtml(p, notes) {
+  const seats = ["N", "E", "S", "W"];
+  const hero = p.leader, decl = p.declarer;
+  const dummy = seats[(seats.indexOf(decl) + 2) % 4];
+  return auctionTable(p, notes, {
+    hero,
+    roleOf: s => s === hero ? HE.leader : (s === decl ? HE.declarer
+              : (s === dummy ? HE.dummy : "")),
+    noteOf: n => n && (n.card || n.text),
+    highlightFinal: true,
+  });
 }
 function candOrder(c) {
   if (c === "P") return 100;
@@ -1304,36 +1360,7 @@ function candOrder(c) {
   return +c[0] * 10 + ["C", "D", "H", "S", "NT"].indexOf(c.slice(1));
 }
 /* classification display names (ids: engine/classify.py taxonomy) */
-const TYPE_NAMES = {
-  open_or_pass: ["החלטת פתיחה",
-    "לפתוח יד גבולית, או לפאס — ובאיזו פתיחה?"],
-  preempt_decision: ["הכרזת מנע",
-    "להפריע או לא — ועד איזו רמה?"],
-  enter_auction: ["כניסה למכרז",
-    "אוברקול, כפל, או להישאר בחוץ?"],
-  compete_or_sell: ["קרב חוזה חלקי",
-    "להכריז עוד פעם, לפאס, או לדחוף אותם גבוה יותר?"],
-  invite_or_game: ["הזמנה או משחק מלא",
-    "לעצור, להזמין, או להכריז משחק מלא?"],
-  slam_try: ["ניסיון סלאם",
-    "להתקדם לסלאם, או להסתפק במשחק מלא?"],
-  choice_of_strain: ["בחירת שליט",
-    "הרמה סגורה — אבל היכן: איזו סדרה, או ללא־שליט?"],
-  double_or_bid: ["החלטת כפל",
-    "כפל, להמשיך להכריז, או לפאס?"],
-  sacrifice_decision: ["הקרבה",
-    "לדרוס את החוזה שלהם במחיר מינוס, או להגן?"],
-  describe_hand: ["תיאור היד",
-    "איזו הכרזה בונה מתארת הכי טוב את הכוח והצורה?"],
-  // opening-lead categories (engine/lead_classify.py): one per problem, a
-  // mechanical fact of the contract you lead against. lead_ prefix keeps them
-  // disjoint from bidding types in the shared facet counts.
-  lead_part_score: ["חוזה חלקי", "הובלה נגד חוזה חלקי (מתחת למשחק מלא)"],
-  lead_3nt: ["3NT", "הובלה נגד משחק ללא שליט"],
-  lead_suit_game: ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 בגבוה / 5 בנמוך)"],
-  lead_slam: ["סלאם", "הובלה נגד סלאם (רמה 6 או 7)"],
-  lead_doubled: ["חוזה מוכפל", "הובלה נגד חוזה מוכפל"],
-};
+const TYPE_NAMES = (typeof window !== "undefined" && window.TAXONOMY_HE) || {};
 const DIFF_NAMES = ["", "קל", "בינוני", "מאתגר", "קשה", "מומחה"];
 /* Hebrew suit + card names for screen-reader labels (glyphs stay four-color) */
 const SUIT_NAME_HE = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
@@ -1532,6 +1559,30 @@ else addEventListener("DOMContentLoaded", initChrome);
 """
 
 
+def _taxonomy_he_json() -> str:
+    """The Hebrew {type_id: [label, tooltip]} map, built from the taxonomy
+    modules (the single source of truth) — bidding types from classify.py,
+    opening-lead types from lead_classify.py."""
+    from ..engine.classify import LABELS_HE, TOOLTIPS_HE
+    from ..engine.lead_classify import LEAD_LABELS_HE, LEAD_TOOLTIPS_HE
+    data = {}
+    for tid, label in LABELS_HE.items():
+        data[tid] = [label, TOOLTIPS_HE.get(tid, "")]
+    for tid, label in LEAD_LABELS_HE.items():
+        data[tid] = [label, LEAD_TOOLTIPS_HE.get(tid, "")]
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _taxonomy_script() -> str:
+    """Inline <script> that sets window.TAXONOMY_HE before bt-shared.js loads.
+    _SHARED_JS derives TYPE_NAMES from it, so the Hebrew type labels/tooltips
+    live in one place (the taxonomy modules) instead of a JS literal that had
+    already drifted from them (ARCH-5). </ is escaped so a label could never
+    close the script tag early."""
+    return ('<script>window.TAXONOMY_HE = '
+            + _taxonomy_he_json().replace('</', '<\\/') + ';</script>')
+
+
 def _index_html() -> str:
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
@@ -1590,6 +1641,7 @@ def _index_html() -> str:
 <div class="skl" style="width:40%"></div>
 </div>
 </main>
+{_taxonomy_script()}
 <script src="bt-shared.js"></script>
 <script>
 let INDEX = null;
@@ -1996,6 +2048,7 @@ style="white-space:pre-line;font-size:13px"></div></details>
 <table id="rtable" class="plain"></table></details>
 </div>
 </main>
+{_taxonomy_script()}
 <script src="bt-shared.js"></script>
 <script>
 let P = null, INDEX = null, NOTES = [], OPTSHOWS = {{}};
@@ -2048,13 +2101,13 @@ function chipsHtml(row) {{
     const decl = tok.slice(-1);
     const ours = decl === P.seat || decl === partner;
     bits.push(`<span class="chip${{ours ? "" : " them"}}">` +
-              `${{contractHtml(tok)}} ${{Math.round(share * 100)}}%</span>`);
+              `${{contractHtml(tok)}} ${{pct(share)}}</span>`);
   }}
   if (row.policy !== undefined)
     bits.push(`<span>${{glossHtml("ben", HE.engine)}} ` +
-              `${{Math.round(row.policy * 100)}}%</span>`);
+              `${{pct(row.policy)}}</span>`);
   bits.push(`<span>${{glossHtml("win", HE.wins)}} ` +
-            `${{Math.round(row.p_gain * 100)}}%</span>`);
+            `${{pct(row.p_gain)}}</span>`);
   return `<div class="chips">${{bits.join("")}}</div>`;
 }}
 function optRowHtml(row, i, chosen, accepted) {{
@@ -2066,11 +2119,13 @@ function optRowHtml(row, i, chosen, accepted) {{
                (row.bid === chosen ? '<span class="tag you">שלך</span>' : "");
   const shows = row.shows ? `<span class="shows en">${{row.shows}}</span>`
                           : '<span class="shows"></span>';
-  const gp = Math.round(row.p_gain * 100), lp = Math.round(row.p_loss * 100);
+  // widths clamp missing probabilities to 0 (safeNum) and labels show an em
+  // dash rather than "NaN%" (pct) — BUG-5.
+  const gw = safeNum(row.p_gain) * 100, lw = safeNum(row.p_loss) * 100;
   const bar = `<div class="wpl" role="img" aria-label="זכייה ` +
-    `${{gp}}%, שוויון ${{Math.round(push * 100)}}%, הפסד ${{lp}}%">` +
-    `<span class="w" style="width:${{row.p_gain * 100}}%">${{gp > 12 ? gp + "%" : ""}}</span>` +
-    `<span class="l" style="width:${{row.p_loss * 100}}%">${{lp > 12 ? lp + "%" : ""}}</span></div>`;
+    `${{pct(row.p_gain)}}, שוויון ${{pct(push)}}, הפסד ${{pct(row.p_loss)}}">` +
+    `<span class="w" style="width:${{gw}}%">${{gw > 12 ? pct(row.p_gain) : ""}}</span>` +
+    `<span class="l" style="width:${{lw}}%">${{lw > 12 ? pct(row.p_loss) : ""}}</span></div>`;
   const mine = row.bid === chosen && !accepted.includes(row.bid);
   return `<div class="opt${{mine ? " mine" : ""}}">` +
     `<div class="l1"><span class="bidchip">${{callHtml(row.bid)}}` +
@@ -2142,14 +2197,14 @@ function reveal(chosen) {{
     // an unmapped engine note stays English — isolate it so its final
     // period doesn't jump to the front of the RTL line
     feet.push(NOTE_HE[note.toLowerCase().trim()] ||
-              `<span class="en">${{note[0].toUpperCase() + note.slice(1)}}.</span>`);
+              `<span class="en">${{esc(note[0].toUpperCase() + note.slice(1))}}.</span>`);
   }}
   document.getElementById("footnote").innerHTML = feet.join(" ");
   if (P.source) {{
     const s = P.source;
     document.getElementById("source").innerHTML =
-      `יד אמיתית: <b class="en">${{s.teams}}</b>, ` +
-      `<span class="en">${{s.event}}</span>, לוח ${{s.board}}.`;
+      `יד אמיתית: <b class="en">${{esc(s.teams)}}</b>, ` +
+      `<span class="en">${{esc(s.event)}}</span>, לוח ${{esc(s.board)}}.`;
   }}
   // bid-by-bid review from the same terse grammar as the tap notes
   const items = [];
@@ -2175,7 +2230,7 @@ function reveal(chosen) {{
   }}
   if (P.meanings && P.meanings.length) {{
     document.getElementById("meanings").innerHTML = P.meanings.map(m =>
-      `<li><b>${{m.seat}}</b>: ${{m.meaning}}</li>`).join("");
+      `<li><b>${{esc(m.seat)}}</b>: ${{esc(m.meaning)}}</li>`).join("");
   }} else {{
     document.getElementById("meanings-box").style.display = "none";
   }}
@@ -2236,8 +2291,8 @@ function reveal(chosen) {{
       h += `<tr><td><span class="ltr">${{callHtml(c.bid)}}</span></td>` +
            `<td>${{c.ev >= 0 ? "+" : ""}}` +
            `${{c.ev}} \\u00b1 ${{c.ci}}</td>` +
-           `<td>${{Math.round(c.p_gain * 100)}}%</td>` +
-           `<td>${{Math.round(c.p_loss * 100)}}%</td></tr>`;
+           `<td>${{pct(c.p_gain)}}</td>` +
+           `<td>${{pct(c.p_loss)}}</td></tr>`;
     rbox.innerHTML = h;
   }} else document.getElementById("raw-box").style.display = "none";
   document.getElementById("verdict").style.display = "block";
@@ -2302,8 +2357,9 @@ function arm(btn) {{
 }}
 function normalize() {{
   const v = P.verdict;
-  if (!Array.isArray(v.accepted))
-    v.accepted = v.toss_up ? v.toss_up_set : [v.accepted];
+  // tolerant of every stored accepted shape, with empties dropped so
+  // callHtml(v.accepted[0]) in reveal() never crashes on undefined (BUG-4).
+  v.accepted = normAccepted(v);
   v.fog = v.fog || (v.flags || []).includes("dd_fog");
   const policy = {{}};
   for (const c of P.candidates || []) {{
@@ -2328,8 +2384,12 @@ function normalize() {{
     v.corrected = v.table.map(r => ({{
       bid: r.bid, ev: r.ev_imp_vs_top, ci: r.ci,
       p_gain: r.p_gain,
+      // derive p_loss only when both inputs are present; otherwise leave it
+      // undefined (pct/safeNum render that as "—"/0) rather than emit NaN when
+      // p_push is missing — BUG-5.
       p_loss: r.p_loss !== undefined ? r.p_loss
-            : Math.max(0, 1 - r.p_gain - r.p_push),
+            : (r.p_gain !== undefined && r.p_push !== undefined
+                 ? Math.max(0, 1 - r.p_gain - r.p_push) : undefined),
       p_push: r.p_push,
       // Firestore forbids nested arrays, so the uploader wraps each
       // [contract, count] pair as {{items: [...]}}; unwrap it back here.
@@ -2667,6 +2727,7 @@ function reveal(chosen) {
   const mpEm = MODE === "MP" ? ' class="emph"' : "";
   const impEm = MODE === "IMP" ? ' class="emph"' : "";
   let rt = "<tr><th>#</th><th>קלף</th>" +
+    "<th>" + glossHtml("panel", "ציון") + "</th>" +
     "<th" + mpEm + ">" + glossHtml("tricks", "לקיחות צפויות") + "</th>" +
     "<th" + impEm + ">" + glossHtml("ev", "IMP צפוי") + "</th>" +
     "<th>" + glossHtml("set", "סיכוי הכשלה") + "</th></tr>";
@@ -2674,6 +2735,8 @@ function reveal(chosen) {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
     rt += "<tr" + g + "><td>" + (i + 1) + '</td><td><span class="ltr">' +
       cardHtml(r.card) + '</span></td>' +
+      "<td>" + btScoreChipHtml(btScoreLead(P, r.card, MODE).score, true) +
+      "</td>" +
       "<td" + mpEm + ">" + r.avg_def_tricks.toFixed(2) + "</td>" +
       '<td class="ltr' + (MODE === "IMP" ? " emph" : "") + '">' +
       (r.exp_imps === undefined ? "—"
@@ -2916,7 +2979,7 @@ def _lead_html() -> str:
         '<p id="lead-expl" style="white-space:pre-line"></p>\n'
         '<div class="muted" id="difficulty"></div>\n'
         '<button class="big" id="next">ההובלה הבאה &larr;</button>\n'
-        '<details><summary>כל 13 ההובלות, מדורגות</summary>'
+        '<details open><summary>כל 13 ההובלות, מדורגות</summary>'
         '<table class="plain" id="ltable"></table>'
         '<p class="footnote">קלפים שווים במדד המוביל — כולם נכונים.</p>'
         '</details>\n'
@@ -2925,7 +2988,7 @@ def _lead_html() -> str:
         'double-dummy</button>; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>\n'
         '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
-        '</div>\n</main>\n<script src="bt-shared.js"></script>\n<script>'
+        '</div>\n</main>\n' + _taxonomy_script() + '\n<script src="bt-shared.js"></script>\n<script>'
         + _LEAD_JS + '</script>\n</body></html>'
     )
 
@@ -2966,6 +3029,13 @@ _DASHBOARD_CSS = """
                    font-weight: 400; }
 .drill > summary .catrow { margin: 5px 0; }
 .drill .drillbody { padding: 0 1.6em 6px; }
+/* #dash content rides directly on the green felt: its cards reset to their own
+   --fg, but the loading placeholder, the load-error line and the closing
+   footnote are loose text. Default #dash to the on-felt tone (and the footnote
+   to the muted on-felt tone) so they aren't dark-green-on-green — unreadable in
+   light mode. */
+#dash { color: var(--on-felt); }
+#dash .dtab > .footnote { color: var(--on-felt-muted); }
 """
 
 _DASHBOARD_JS = r"""
@@ -3272,7 +3342,7 @@ def _dashboard_html() -> str:
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted">ההתקדמות שלי</span></div>\n'
         '<h1>ההתקדמות שלי</h1>\n<div id="dash" class="muted">טוען&hellip;</div>\n'
-        '</main>\n<script src="bt-shared.js"></script>\n<script>'
+        + _taxonomy_script() + '\n<script src="bt-shared.js"></script>\n<script>'
         + _DASHBOARD_JS + '</script>\n</body></html>'
     )
 

@@ -21,7 +21,7 @@ LEAD_TAXONOMY = [
     ("lead_3nt", "3NT", "3NT",
      "הובלה נגד משחק ללא שליט."),
     ("lead_suit_game", "Suit game", "משחק בשליט",
-     "הובלה נגד משחק מלא בשליט (4 בגבוה / 5 בנמוך)."),
+     "הובלה נגד משחק מלא בשליט (4 במייג'ור / 5 במיינור)."),
     ("lead_slam", "Slam", "סלם",
      "הובלה נגד סלם (רמה 6 או 7)."),
     ("lead_doubled", "Doubled", "חוזה מוכפל",
@@ -31,6 +31,9 @@ LEAD_TAXONOMY = [
 LEAD_TYPE_IDS = [t[0] for t in LEAD_TAXONOMY]
 LEAD_LABELS_EN = {t[0]: t[1] for t in LEAD_TAXONOMY}
 LEAD_LABELS_HE = {t[0]: t[2] for t in LEAD_TAXONOMY}
+# Hebrew tooltip per lead type = the one-line description above; shared with the
+# web UI as window.TAXONOMY_HE (ARCH-5) so the label/tooltip live in one place.
+LEAD_TOOLTIPS_HE = {t[0]: t[3] for t in LEAD_TAXONOMY}
 
 # Ben's 32-card lead encoding (mirrors engine/ben.lead_code32, kept here as a
 # pure, TensorFlow-free copy so the verdict gate and offline tooling can dedupe
