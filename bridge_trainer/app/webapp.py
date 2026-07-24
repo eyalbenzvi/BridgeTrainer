@@ -1504,6 +1504,12 @@ function setScenario(kind) {{
   document.getElementById("modes").style.visibility = vis;
   document.getElementById("modegoal").style.visibility = vis;
   syncModeUi();
+  // The choice above is already persisted (SCEN + localStorage) and reflected
+  // in the UI. The facet build below needs the pool index; if a click lands
+  // before it loads, stop here — init() calls setScenario(SCEN) once the index
+  // arrives and rebuilds from the persisted choice (guards against a null-INDEX
+  // crash in resolveFilters/poolFacets).
+  if (!INDEX) return;
   FILTERS = resolveFilters(INDEX, loadCur(), kind);
   buildFilters(); applyFilterUi(); updateFacetCounts(); renderStats();
 }}
@@ -1518,6 +1524,9 @@ document.querySelectorAll("#modes .modecard").forEach(b => b.onclick = ev => {{
   ev.stopPropagation();   // don't re-trigger the scenario card underneath
   setLeadMode(b.dataset.mode);
   syncModeUi();
+  // mode is persisted (setLeadMode); the facet rebuild needs the index. If the
+  // click lands before it loads, stop here — init() rebuilds once it arrives.
+  if (!INDEX) return;
   // each mode serves its own generator's pool, so the facet options and
   // counts are rebuilt from that pool
   FILTERS = resolveFilters(INDEX, loadCur(), SCEN);
