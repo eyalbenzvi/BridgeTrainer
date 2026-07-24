@@ -16,7 +16,8 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import _index_html, _lead_html, _problem_html
+from bridge_trainer.app.webapp import (_index_html, _lead_html, _problem_html,
+                                       _SHARED_JS)
 from tests.test_home_early_click import _extract_function
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
@@ -25,8 +26,8 @@ needs_node = pytest.mark.skipif(shutil.which("node") is None,
 
 @needs_node
 def test_take_prefetch_matches_id_and_clears():
-    read = _extract_function(_index_html(), "readPrefetch")
-    take = _extract_function(_index_html(), "takePrefetch")
+    read = _extract_function(_SHARED_JS, "readPrefetch")
+    take = _extract_function(_SHARED_JS, "takePrefetch")
     harness = (
         'const PREFETCH_KEY = "bt_prefetch";\n' + read + "\n" + take + """
         const store = {};

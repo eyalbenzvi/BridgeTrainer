@@ -16,7 +16,7 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import (_dashboard_html, _index_html,
+from bridge_trainer.app.webapp import (_SHARED_JS, _dashboard_html, _index_html,
                                        _lead_html, _problem_html)
 from tests.test_home_early_click import _extract_function
 
@@ -26,7 +26,7 @@ needs_node = pytest.mark.skipif(shutil.which("node") is None,
 
 @needs_node
 def test_routeFor_appends_retry_flag():
-    fn = _extract_function(_index_html(), "routeFor")
+    fn = _extract_function(_SHARED_JS, "routeFor")
     harness = (
         fn
         + """

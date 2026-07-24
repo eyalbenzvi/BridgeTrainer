@@ -20,7 +20,8 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import (_dashboard_html, _index_html,
+from bridge_trainer.app.webapp import (_SHARED_JS,
+    _dashboard_html, _index_html,
                                         _lead_html, _problem_html)
 
 # Universal terms that stay Latin by design (see the makeover plan §7):
@@ -68,7 +69,7 @@ def test_brand_is_hebrew():
 
 def test_call_labels_are_hebrew():
     # פאס / כפל / כפל כפליים, not Pass / Dbl / Rdbl
-    js = _index_html()
+    js = _index_html() + _SHARED_JS
     assert '"פאס"' in js and '"כפל"' in js and '"כפל כפליים"' in js
     assert "Pass" not in _visible_text(_index_html())
 

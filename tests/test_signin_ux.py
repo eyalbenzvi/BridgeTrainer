@@ -11,8 +11,8 @@ from importlib import resources
 
 import pytest
 
-from bridge_trainer.app.webapp import (_dashboard_html, _index_html,
-                                       _lead_html, _problem_html)
+from bridge_trainer.app.webapp import (_SHARED_JS, _dashboard_html,
+                                       _index_html, _lead_html, _problem_html)
 
 
 def _fb() -> str:
@@ -38,13 +38,13 @@ def test_gate_states_value_and_surfaces_errors():
 
 
 def test_no_misleading_guest_copy():
-    js = _index_html()
+    js = _index_html() + _fb() + _SHARED_JS
     assert "ההתקדמות נשמרת מקומית" not in js       # the false promise is gone
     assert "לא מחובר — התחבר כדי לשמור התקדמות" in js
 
 
 def test_settings_signin_onclick_swallows_rejection():
-    js = _index_html()
+    js = _SHARED_JS
     # the nav/settings sign-in button guards the promise doSignIn now rejects
     assert "if (p && p.catch) p.catch(() => {})" in js
 
@@ -52,8 +52,9 @@ def test_settings_signin_onclick_swallows_rejection():
 @pytest.mark.parametrize("html_fn", [_index_html, _problem_html, _lead_html,
                                      _dashboard_html])
 def test_save_failed_toast_wired_on_every_page(html_fn):
-    js = html_fn()
-    assert 'addEventListener("bt-save-failed"' in js
-    assert "function btToast(" in js
-    # the faded toast must not linger as an invisible click-blocker
-    assert "pointer-events:none" in js
+    # every page links the shared bundle that carries the toast + listener
+    assert 'src="bt-shared.js"' in html_fn()
+    # ...and the shared bundle wires them (btToast is non-click-blocking)
+    assert 'addEventListener("bt-save-failed"' in _SHARED_JS
+    assert "function btToast(" in _SHARED_JS
+    assert "pointer-events:none" in _SHARED_JS

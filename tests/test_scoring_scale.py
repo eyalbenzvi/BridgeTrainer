@@ -16,9 +16,9 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import (_SCORE_JS, _dashboard_html,
-                                       _index_html, _lead_html,
-                                       _problem_html)
+from bridge_trainer.app.webapp import (_CSS, _SCORE_JS, _SHARED_JS,
+                                       _dashboard_html, _index_html,
+                                       _lead_html, _problem_html)
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
                                 reason="node not available")
@@ -191,8 +191,12 @@ def test_pages_wire_the_score():
     assert "btScoreBidding(P, chosen)" in p and "scoreline" in p
     assert "btScoreLead(P, chosen, MODE)" in l and "scoreline" in l
     for page in (p, l, d, i):
-        assert "btScoreOfAttempt" in page    # shared module on every page
-        assert ".scorechip" in page          # chip styling shipped
+        # the shared score module + chip styling now ship as external assets
+        # (T2); every page must link them.
+        assert 'src="bt-shared.js"' in page
+        assert 'href="app.css"' in page
+    assert "btScoreOfAttempt" in _SHARED_JS   # shared score module
+    assert ".scorechip" in _CSS               # chip styling
     # the session trail and home stats aggregate scores, not correct counts
     assert "bumpSession(rec.score, P.id)" in p
     assert "bumpSession(rec.score, P.id)" in l

@@ -17,7 +17,8 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import (_index_html, _lead_html, _problem_html)
+from bridge_trainer.app.webapp import (_index_html, _lead_html, _problem_html,
+                                       _SHARED_JS)
 from tests.test_home_early_click import _extract_function
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
@@ -38,7 +39,7 @@ def _node_eval(src: str):
 
 @needs_node
 def test_load_error_html_is_offline_aware():
-    fn = _extract_function(_index_html(), "loadErrorHtml")
+    fn = _extract_function(_SHARED_JS, "loadErrorHtml")
     online, offline = _node_eval(
         fn
         + """

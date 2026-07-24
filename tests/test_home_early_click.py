@@ -22,7 +22,7 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import _index_html
+from bridge_trainer.app.webapp import _index_html, _SHARED_JS
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
                                 reason="node not available")
@@ -64,7 +64,7 @@ def test_real_pool_facets_crashes_on_null_index_but_works_on_a_pool():
     """Exercises the REAL poolFacets (the crash site the guard prevents): it
     derefs index.problems, so a null index throws, while a valid pool returns
     the present levels/types."""
-    fn = _extract_function(_index_html(), "poolFacets")
+    fn = _extract_function(_SHARED_JS, "poolFacets")
     harness = (
         fn
         + """

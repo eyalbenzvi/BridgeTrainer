@@ -1537,7 +1537,7 @@ def _index_html() -> str:
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>מאמן הברידג' — תרגול</title>
-<style>{_CSS}</style>
+<link rel="stylesheet" href="app.css">
 {_head_preloads()}
 <script type="module" src="bt-firebase.js"></script></head><body data-nav="practice">
 <main id="main" tabindex="-1">
@@ -1590,7 +1590,8 @@ def _index_html() -> str:
 <div class="skl" style="width:40%"></div>
 </div>
 </main>
-<script>{_SHARED_JS}
+<script src="bt-shared.js"></script>
+<script>
 let INDEX = null;
 const SCEN_KEY = "bt_scenario";
 const LEAD_FILTERS_KEY = "bt_lead_filters";
@@ -1942,7 +1943,7 @@ def _problem_html() -> str:
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>בעיית הכרזה</title>
-<style>{_CSS}</style>
+<link rel="stylesheet" href="app.css">
 {_head_preloads()}
 <script type="module" src="bt-firebase.js"></script></head><body>
 <main id="main" tabindex="-1">
@@ -1995,7 +1996,8 @@ style="white-space:pre-line;font-size:13px"></div></details>
 <table id="rtable" class="plain"></table></details>
 </div>
 </main>
-<script>{_SHARED_JS}
+<script src="bt-shared.js"></script>
+<script>
 let P = null, INDEX = null, NOTES = [], OPTSHOWS = {{}};
 // true while re-attempting an already-answered problem: the re-answer is
 // recorded (attemptCount++) but keeps the first-attempt score and does NOT
@@ -2893,7 +2895,7 @@ def _lead_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        '<title>בעיית הובלה</title>\n<style>' + _CSS + '</style>\n'
+        '<title>בעיית הובלה</title>\n<link rel="stylesheet" href="app.css">\n'
         + _head_preloads() + '\n'
         '<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-scenario="lead">\n<main id="main" tabindex="-1">\n'
@@ -2923,7 +2925,8 @@ def _lead_html() -> str:
         'double-dummy</button>; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>\n'
         '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
-        '</div>\n</main>\n<script>' + _SHARED_JS + _LEAD_JS + '</script>\n</body></html>'
+        '</div>\n</main>\n<script src="bt-shared.js"></script>\n<script>'
+        + _LEAD_JS + '</script>\n</body></html>'
     )
 
 
@@ -3261,14 +3264,16 @@ def _dashboard_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-        '<title>ההתקדמות שלי</title>\n<style>' + _CSS + _DASHBOARD_CSS +
+        '<title>ההתקדמות שלי</title>\n'
+        '<link rel="stylesheet" href="app.css">\n<style>' + _DASHBOARD_CSS +
         '</style>\n' + _head_preloads() +
         '\n<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-nav="progress">\n<main id="main" tabindex="-1">\n'
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted">ההתקדמות שלי</span></div>\n'
         '<h1>ההתקדמות שלי</h1>\n<div id="dash" class="muted">טוען&hellip;</div>\n'
-        '</main>\n<script>' + _SHARED_JS + _DASHBOARD_JS + '</script>\n</body></html>'
+        '</main>\n<script src="bt-shared.js"></script>\n<script>'
+        + _DASHBOARD_JS + '</script>\n</body></html>'
     )
 
 
@@ -3284,6 +3289,14 @@ def write_app(out_dir: str | Path) -> None:
     (out / "p.html").write_text(_problem_html(), encoding="utf-8")
     (out / "lead.html").write_text(_lead_html(), encoding="utf-8")
     (out / "dashboard.html").write_text(_dashboard_html(), encoding="utf-8")
+    # Emit the shared CSS/JS as external files (T2/PERF-F-4): every page links
+    # them instead of inlining ~73 KB, so the browser caches them once and each
+    # page's HTML shrinks to a few KB. The Python constants stay the source of
+    # truth (keeps them lint/test-visible); this just writes them out. Loaded as
+    # a classic <script> before each page's inline bootstrap, so its top-level
+    # functions are defined when the page code runs.
+    (out / "app.css").write_text(_CSS, encoding="utf-8")
+    (out / "bt-shared.js").write_text(_SHARED_JS, encoding="utf-8")
     web = resources.files("bridge_trainer") / "web"
     for name in _ASSET_FILES:
         (out / name).write_text((web / name).read_text(encoding="utf-8"),
