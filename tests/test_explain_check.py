@@ -90,6 +90,35 @@ def test_option_holding_assertions_are_fatal_soft_bands_are_not():
     assert any("6H" in v for v in soft)
 
 
+# ben1-0135752a: W dealer, hero S. After P-1NT-P Ben's 2NT is a natural
+# invitational raise, but GIB's 2/1 card glosses it "Minor transfer -- 6+ !C".
+HANDS_0135752A = ["AJ3.AK43.KT87.73",       # N (the 1NT opener)
+                  "Q82.QJ8.Q6432.Q6",       # E
+                  "K74.T5.AJ95.JT42",       # S (hero, 4 clubs)
+                  "T965.9762..AK985"]       # W
+
+
+def test_option_promising_suit_hero_lacks_is_fatal():
+    stem = [
+        {"idx": 0, "seat": "W", "call": "P", "card": _card()},
+        {"idx": 1, "seat": "N", "call": "1NT",
+         "card": _card("notrump opener. Could have 5M. -- 15-17 HCP",
+                       "notrump opener. Could have 5M", hcp=(15, 17))},
+        {"idx": 2, "seat": "E", "call": "P", "card": _card()},
+    ]
+    options = {
+        "2NT": _card("Minor transfer -- 6+ !C", "Minor transfer",
+                     minlen={"C": 6}),
+        "3NT": _card(hcp=(10, 15)),
+    }
+    fatal, soft = hand_violations(stem, options, HANDS_0135752A,
+                                  dealer_i=3, hero_i=2)
+    # 4 clubs against a promised 6 is 2 beyond slack: a different system,
+    # not a stretch — must kill the board
+    assert any("2NT" in v and "< promised 6" in v for v in fatal)
+    assert not any("3NT" in v for v in fatal)
+
+
 def test_queen_ask_is_not_a_statement():
     # "? queen" (N's ask) must not be read as asserting the queen
     fatal, _ = hand_violations(_stem_01354c2d(), {}, HANDS,
@@ -142,6 +171,25 @@ def test_band_vs_card_flags_omitted_suit_and_refuted_promise():
     # disjoint hcp bands fire
     bad = band_vs_card(_card(hcp=(20, 22)), feats, "4C")
     assert any("hcp" in v for v in bad)
+
+
+def test_band_refutes_promised_suit_by_scale_and_majority():
+    # ben1-0135752a's 2NT, measured on the real engine: 7-9 hcp, avg 4.0
+    # clubs, P(5+ clubs)=0.34 — against a "Minor transfer -- 6+ !C" gloss.
+    # The average scrapes past 6-2, so the majority rule must catch it.
+    feats = {"n": 128, "hcp_p10": 7, "hcp_p90": 9, "hcp_avg": 8.2,
+             "len_avg": {"S": 3.0, "H": 3.0, "D": 3.0, "C": 4.0},
+             "len5plus": {"S": 0.05, "H": 0.05, "D": 0.05, "C": 0.34}}
+    bad = band_vs_card(_card(minlen={"C": 6}), feats, "2NT")
+    assert any("6+C" in v for v in bad)
+    # sister board ben1-013572ee (avg 3.8): the scaled average fires too
+    feats38 = dict(feats, len_avg={**feats["len_avg"], "C": 3.8})
+    assert band_vs_card(_card(minlen={"C": 6}), feats38, "2NT")
+    # a genuine 5+ promise Ben merely shades (a good 4-carder about half
+    # the time) is style, not a different convention — no violation
+    shade = dict(feats, len_avg={**feats["len_avg"], "C": 4.6},
+                 len5plus={**feats["len5plus"], "C": 0.55})
+    assert band_vs_card(_card(minlen={"C": 5}), shade, "2NT") == []
 
 
 def test_prose_lengths_and_total_points_parse_and_render():

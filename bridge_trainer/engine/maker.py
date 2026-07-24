@@ -128,7 +128,8 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
     # ---- explanation-consistency gate, cheap half (engine/explain_check):
     # GIB's gloss for every stem call and offered option vs the ACTUAL
     # cards. A stem that misdescribes the hand that bid it, or an option
-    # asserting specific cards the hero lacks (keycard counts, "!CQ"),
+    # asserting specific cards the hero lacks (keycard counts, "!CQ") or
+    # promising a suit the hero is 2+ cards short of,
     # kills the board before any rollout money is spent. Soft band
     # stretches (hero shades the gloss's HCP) are kept as annotations —
     # they ARE the training content. GIB fetches are cached, so the stem
@@ -221,14 +222,15 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
                    f" [{t['scan_s']:.1f}+{t['verdict_s']:.1f}s]")
 
     # ---- explanation-consistency gate, expensive half: Ben's MEASURED
-    # meaning of each stem call (sampled layouts) vs GIB's gloss. Catches
-    # conventions GIB narrates as something else entirely (Leaping
-    # Michaels glossed as a natural club overcall). Runs only here — on
-    # boards the statistical judge already accepted — so its sampling
-    # cost lands on ~1 board in 12.
+    # meaning of each stem call AND each offered candidate (sampled
+    # layouts) vs GIB's gloss. Catches conventions GIB narrates as
+    # something else entirely (Leaping Michaels glossed as a natural club
+    # overcall; a natural invitational 2NT glossed as a minor transfer).
+    # Runs only here — on boards the statistical judge already accepted —
+    # so its sampling cost lands on ~1 board in 12.
     from .explain_check import band_violations
     try:
-        band_bad = band_violations(engine, spot, stem_expl)
+        band_bad = band_violations(engine, spot, stem_expl, option_cards)
     except Exception as e:
         return BoardOutcome(seed, "error", "expl_band_error", timings=t,
                             detail=f"band check error "

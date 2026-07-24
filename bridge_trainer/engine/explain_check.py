@@ -9,6 +9,18 @@ can neither follow such an auction nor trust its explanations, so the board
 must not be published. Both faults are visible mechanically at generation
 time; nothing here consults an LLM or a human.
 
+Second motivating board (ben1-0135752a): after P-1NT-P, Ben offered 2NT as
+a natural invitational raise (its rollouts pass it or raise to 3NT), but
+GIB's 2/1 card glosses that sequence "Minor transfer -- 6+ !C" — a
+convention Ben does not play. The hero held four clubs, so the gloss was
+a lie about the very option being taught. Two rules catch this class:
+an OPTION whose gloss promises a suit length the hero breaches beyond
+slack is now fatal (not a style shade), and the band check compares
+Ben's measured meaning of every offered candidate — not just stem calls —
+against GIB's card, with the length-refutation threshold scaled to the
+promised length (a 6+ promise is refuted by an average well above the
+one that refutes a 5+ promise).
+
 Two independent checks:
 
 ``hand_violations`` (cheap, no engine)
@@ -25,13 +37,14 @@ Two independent checks:
 
 ``band_violations`` (engine sampling; run only on boards that already
     passed the statistical judge, so its cost lands on ~1 board in 12)
-    Ben's OWN meaning of a stem call — suit-length/HCP statistics over the
-    layouts Ben's sampler accepts after that call — is compared against
-    GIB's parsed card. Fires when the bid systemically promises 5+ cards in
-    a suit the gloss does not mention (Leaping Michaels glossed as a
-    natural club overcall), when the gloss promises a 5+ suit the bid's
-    band refutes, or when the HCP bands are disjoint. Pass/X/XX and low-n
-    bands are skipped.
+    Ben's OWN meaning of a stem call or offered candidate — suit-length/HCP
+    statistics over the layouts Ben's sampler accepts after that call — is
+    compared against GIB's parsed card. Fires when the bid systemically
+    promises 5+ cards in a suit the gloss does not mention (Leaping
+    Michaels glossed as a natural club overcall), when the gloss promises
+    a 5+ suit the bid's band refutes (Minor transfer glossed onto a natural
+    invitational 2NT), or when the HCP bands are disjoint. Pass/X/XX and
+    low-n bands are skipped.
 """
 from __future__ import annotations
 
@@ -44,7 +57,8 @@ SLACK_HCP = 2          # GIB band may be shaded by a couple of points
 SLACK_LEN = 1          # ... and a promised length by one card
 BAND_N_MIN = 30        # below this many samples a band proves nothing
 BAND_P5_SURE = 0.90    # measured "the bid promises 5+ here"
-BAND_LEN_REFUTED = 3.0 # gloss says 5+, band average below this refutes it
+BAND_LEN_SLACK = 2.0   # gloss says N+, band average below N-2 refutes it
+BAND_P5_REFUTED = 0.5  # gloss says 5+/6+, most sampled hands lack even 5
 BAND_HCP_GAP = 2       # gloss and band HCP ranges must at least touch ±this
 
 _HCP_W = {"A": 4, "K": 3, "Q": 2, "J": 1}
@@ -168,13 +182,20 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
     fatal — the board must not be published:
       * any violation on a STEM call (the stem is forced context; if it
         misdescribes the hand that actually bid it, the trainee analyzes
-        a lie), and
+        a lie),
       * hard assertions on an OPTION: keycard/ace counts, explicit
         holdings (!CQ), trump-queen statements. Offering "5♠ = queen and
-        king" to a hand holding neither is nonsense, not a style choice.
+        king" to a hand holding neither is nonsense, not a style choice,
+      * an OPTION whose gloss promises a suit length the hero breaches
+        beyond slack. A reported breach is already 2+ cards short of the
+        promise — that is never a stretch a player weighs; it means the
+        gloss describes a convention Ben is not playing (ben1-0135752a:
+        a natural invitational 2NT glossed "Minor transfer -- 6+ !C"
+        offered to a hand with four clubs).
 
-    soft — kept, for annotation only: an option whose HCP/length band the
-    hero shades ("shows 14-17", hero has 11). That is not a defect — the
+    soft — kept, for annotation only: an option whose HCP band the hero
+    shades ("shows 14-17", hero has 11) or whose length CAP the hero
+    exceeds (3NT over a long suit). That is not a defect — the
     stretch/underbid dilemma is exactly what this trainer trades in."""
     fatal, soft = [], []
     for j, e in enumerate(stem_entries):
@@ -192,7 +213,8 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
         if bid in ("P", "X", "XX"):
             continue
         for v in card_vs_hand(card or {}, hero):
-            (fatal if "asserts" in v else soft).append(f"option {bid}: {v}")
+            (fatal if "asserts" in v or "< promised" in v
+             else soft).append(f"option {bid}: {v}")
         e = {"call": bid, "card": card}
         v = _ask_answer_violation(e, entries + [e], len(entries), hero)
         if v:
@@ -242,10 +264,17 @@ def band_vs_card(card: dict, feats: dict, call: str,
                 and known.get(st, 0) < 4:
             out.append(f"bid promises 5+{st} "
                        f"(P={feats['len5plus'][st]:.2f}) but gloss omits it")
-        # the gloss promises a suit the bid's own meaning refutes
-        if minlen.get(st, 0) >= 5 and feats["len_avg"][st] < BAND_LEN_REFUTED:
-            out.append(f"gloss promises {minlen[st]}+{st} but bid shows "
-                       f"avg {feats['len_avg'][st]:.1f}")
+        # the gloss promises a suit the bid's own meaning refutes — by a
+        # band average far below the promise (scaled: a 6+ gloss dies at
+        # a higher average than a 5+ one) or because MOST sampled hands
+        # lack even five (ben1-0135752a: "Minor transfer -- 6+ !C" on a
+        # natural invitational 2NT whose band was avg 4.0 clubs, P5+ 0.34)
+        mn = minlen.get(st, 0)
+        if mn >= 5 and (feats["len_avg"][st] < mn - BAND_LEN_SLACK
+                        or feats["len5plus"][st] < BAND_P5_REFUTED):
+            out.append(f"gloss promises {mn}+{st} but bid shows "
+                       f"avg {feats['len_avg'][st]:.1f} "
+                       f"(P5+={feats['len5plus'][st]:.2f})")
     hcp = card.get("hcp")
     if hcp:
         lo, hi = int(hcp[0]), int(hcp[1])
@@ -256,10 +285,18 @@ def band_vs_card(card: dict, feats: dict, call: str,
     return out
 
 
-def band_violations(engine, spot, stem_entries: list[dict]) -> list[str]:
+def band_violations(engine, spot, stem_entries: list[dict],
+                    option_cards: dict | None = None) -> list[str]:
     """Gloss-vs-Ben's-measured-meaning violations for every non-pass stem
-    call. Costs one sampling pass per checked call; callers run it late,
-    on boards that already passed the statistical judge."""
+    call and (when *option_cards* is given) every offered candidate.
+    Costs one sampling pass per checked call; callers run it late, on
+    boards that already passed the statistical judge.
+
+    Options matter as much as the stem: a candidate whose gloss narrates
+    a convention Ben is not bidding (ben1-0135752a's natural 2NT glossed
+    as a minor transfer) teaches the trainee a system nobody at the table
+    is playing, even when the hero's actual cards happen to fit the gloss
+    (a 5-club hand slips the hand check's slack)."""
     from .ben import seat_features
 
     out = []
@@ -292,6 +329,20 @@ def band_violations(engine, spot, stem_entries: list[dict]) -> list[str]:
             for st in "SHDC":
                 if feats["len5plus"][st] >= BAND_P5_SURE:
                     acc[st] = max(acc.get(st, 0), 5)
+    for bid, card in (option_cards or {}).items():
+        if bid in ("P", "X", "XX") or not card:
+            continue
+        observer_i = (spot.hero_i + 2) % 4      # partner sees the candidate
+        if observer_i not in bots:
+            bots[observer_i] = engine.bot(spot.hands[observer_i], observer_i,
+                                          spot.dealer_i, spot.vul)
+        hands_np, n = engine.sample_prefix(
+            bots[observer_i], spot.dealer_i, spot.stem + [bid])
+        feats = seat_features(hands_np, spot.hero_i,
+                              engine.models.n_cards_bidding)
+        for v in band_vs_card(card, feats, bid,
+                              known_minlen=known.get(spot.hero_i)):
+            out.append(f"option {bid}: {v}")
     return out
 
 
