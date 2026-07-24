@@ -66,6 +66,38 @@ def test_pct_never_emits_nan():
     assert nan == "—"
 
 
+@needs_node
+def test_norm_accepted_drops_empties_and_falls_back():
+    (as_str, missing, tossup, arr_with_empty, empty_fb_corrected,
+     empty_fb_table) = run_score([
+        # accepted as a bare string -> singleton list
+        "normAccepted({accepted: '4H'})",
+        # accepted absent -> no [undefined]; empties dropped -> []
+        "normAccepted({})",
+        # toss-up set
+        "normAccepted({toss_up: true, toss_up_set: ['4H','4S']})",
+        # array carrying a null entry -> filtered
+        "normAccepted({accepted: ['4H', null]})",
+        # empty accepted but corrected present -> falls back to its top bid
+        "normAccepted({accepted: [], corrected: [{bid: '3N'}]})",
+        # empty accepted, no corrected, table present -> falls back to table bid
+        "normAccepted({accepted: null, table: [{bid: '2C'}]})",
+    ])
+    assert as_str == ["4H"]
+    assert missing == []                     # never [undefined] (the BUG-4 crash)
+    assert tossup == ["4H", "4S"]
+    assert arr_with_empty == ["4H"]
+    assert empty_fb_corrected == ["3N"]
+    assert empty_fb_table == ["2C"]
+
+
+def test_normalize_uses_norm_accepted():
+    html = _problem_html()
+    assert "v.accepted = normAccepted(v);" in html
+    # the old unguarded [v.accepted] path is gone
+    assert "v.accepted = v.toss_up ? v.toss_up_set : [v.accepted]" not in html
+
+
 def test_optrow_and_chips_use_safe_helpers():
     """optRowHtml/chipsHtml must route probabilities through pct()/safeNum() so
     a row without p_gain/p_push cannot render "NaN%" or width:NaN%."""

@@ -822,6 +822,22 @@ function pct(x) {
   const n = +x;
   return Number.isFinite(n) ? Math.round(n * 100) + "%" : "—";
 }
+/* The accepted-call list, tolerant of every stored shape, with empty entries
+   dropped so callHtml(accepted[0]) never receives undefined (BUG-4). When the
+   list ends up empty it falls back to the top corrected/table row's bid, the
+   same fallback gradeBidding uses, so the verdict still names a best call. */
+function normAccepted(v) {
+  v = v || {};
+  let acc = Array.isArray(v.accepted) ? v.accepted
+          : (v.toss_up ? (v.toss_up_set || []) : [v.accepted]);
+  acc = (acc || []).filter(Boolean);
+  if (!acc.length) {
+    const fb = (v.corrected && v.corrected[0] && v.corrected[0].bid) ||
+               (v.table && v.table[0] && (v.table[0].bid || v.table[0].action));
+    if (fb) acc = [fb];
+  }
+  return acc;
+}
 """
 
 _SHARED_JS = _SCORE_JS + """
@@ -2324,8 +2340,9 @@ function arm(btn) {{
 }}
 function normalize() {{
   const v = P.verdict;
-  if (!Array.isArray(v.accepted))
-    v.accepted = v.toss_up ? v.toss_up_set : [v.accepted];
+  // tolerant of every stored accepted shape, with empties dropped so
+  // callHtml(v.accepted[0]) in reveal() never crashes on undefined (BUG-4).
+  v.accepted = normAccepted(v);
   v.fog = v.fog || (v.flags || []).includes("dd_fog");
   const policy = {{}};
   for (const c of P.candidates || []) {{
