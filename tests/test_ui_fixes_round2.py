@@ -10,8 +10,10 @@ UI-5  the ranked-leads table is open by default.
 """
 from __future__ import annotations
 
-from bridge_trainer.app.webapp import (_CSS, _SHARED_JS, _dashboard_html,
-                                       _lead_html)
+import json
+
+from bridge_trainer.app.webapp import (_CSS, _dashboard_html, _lead_html,
+                                       _taxonomy_he_json)
 from bridge_trainer.engine.lead_classify import LEAD_TAXONOMY
 
 
@@ -27,9 +29,12 @@ def test_ui2_modegoal_reserves_constant_height():
 
 
 def test_ui3_major_minor_transliterated():
-    assert "מייג'ור" in _SHARED_JS and "מיינור" in _SHARED_JS
-    assert "4 בגבוה / 5 בנמוך" not in _SHARED_JS
-    # single source of truth (ARCH-5 target) carries the new wording too
+    # ARCH-5 made the taxonomy modules the single source; the label/tooltip is
+    # injected as window.TAXONOMY_HE (via _taxonomy_he_json), no longer a
+    # literal in _SHARED_JS.
+    tip = json.loads(_taxonomy_he_json())["lead_suit_game"][1]
+    assert "מייג'ור" in tip and "מיינור" in tip
+    assert "בגבוה" not in tip and "בנמוך" not in tip
     suit_game = next(t for t in LEAD_TAXONOMY if t[0] == "lead_suit_game")
     assert "מייג'ור" in suit_game[3] and "מיינור" in suit_game[3]
 

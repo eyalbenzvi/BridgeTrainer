@@ -11,8 +11,8 @@ import types
 import pytest
 
 from bridge_trainer.pool import firestore_store as fs
-from bridge_trainer.pool.firestore_store import (IndexConflict, _check_schema,
-                                                 push_local_pool)
+from bridge_trainer.pool.firestore_store import (IndexConflict, _bulk_retryable,
+                                                 _check_schema, push_local_pool)
 from bridge_trainer.pool.store import index_entry, index_from_entries
 
 # module-name import (CI runs `pytest`, not `python -m pytest`)
@@ -127,6 +127,22 @@ def test_remove_missing_doc_is_noop():
                 document=lambda pid: types.SimpleNamespace(
                     get=lambda: types.SimpleNamespace(exists=False)))
     assert Fake().remove("nope") is False
+
+
+def test_bulk_retryable_handles_int_and_enum_codes():
+    import types as _t
+    # bare int gRPC statuses (the real BulkWriteFailure.code form)
+    assert _bulk_retryable(14, 1) is True          # UNAVAILABLE
+    assert _bulk_retryable(4, 1) is True           # DEADLINE_EXCEEDED
+    assert _bulk_retryable(8, 1) is False          # RESOURCE_EXHAUSTED (quota)
+    # enum-like code with a .name
+    assert _bulk_retryable(_t.SimpleNamespace(name="unavailable"), 1) is True
+    assert _bulk_retryable(_t.SimpleNamespace(name="PERMISSION_DENIED"), 1) \
+        is False
+    # transient but out of budget -> give up
+    assert _bulk_retryable(14, 99) is False
+    # unknown / missing code -> not retryable
+    assert _bulk_retryable(None, 1) is False
 
 
 def test_check_schema_enforced():

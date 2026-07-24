@@ -40,11 +40,25 @@ SHARD_MAX_ENTRIES = 3000            # ~150-200 B/entry -> well under 1 MiB
 SINGLE_DOC_MAX_ENTRIES = 4000       # ~4000 * 200 B ~= 0.8 MiB, safe under 1 MiB
 _MAX_TRANSIENT_RETRIES = 4
 _MAX_INDEX_CAS_RETRIES = 5
-# BulkWriter give-up policy (DB-O-5): keep retrying these transient gRPC
-# statuses (up to the transient budget), then record the failure and stop —
-# so a permanent error (RESOURCE_EXHAUSTED/PERMISSION_DENIED) is recorded at
-# once instead of being retried forever, and its doc is kept OUT of the index.
-_RETRYABLE_STATUS = {"UNAVAILABLE", "DEADLINE_EXCEEDED", "ABORTED", "INTERNAL"}
+# BulkWriter give-up policy (DB-O-5): keep retrying these transient statuses
+# (up to the transient budget), then record the failure and stop — so a
+# permanent error (RESOURCE_EXHAUSTED/PERMISSION_DENIED) is recorded at once
+# instead of being retried forever, and its doc is kept OUT of the index.
+# BulkWriteFailure.code may be a gRPC StatusCode enum (has .name) OR a bare int
+# status, so the set holds BOTH the names and the integer codes:
+#   UNAVAILABLE=14  DEADLINE_EXCEEDED=4  ABORTED=10  INTERNAL=13
+_RETRYABLE_STATUS = {"UNAVAILABLE", "DEADLINE_EXCEEDED", "ABORTED", "INTERNAL",
+                     14, 4, 10, 13}
+
+
+def _bulk_retryable(code, attempts) -> bool:
+    """Whether a BulkWriter write error is transient and still within the retry
+    budget. *code* may be a StatusCode enum (``.name``), a bare int status, or
+    None; normalize to the token the set is keyed on."""
+    token = getattr(code, "name", code)
+    if isinstance(token, str):
+        token = token.upper()
+    return token in _RETRYABLE_STATUS and (attempts or 1) < _MAX_TRANSIENT_RETRIES
 
 
 def _check_schema(record: dict) -> None:
@@ -74,9 +88,10 @@ def _firestore_safe(value):
 
     The web client reverses this exactly once, in ``getProblem`` via
     ``unwrapFirestore`` (web/bt-logic.js); the two are inverses and must stay in
-    sync. Round-trip is covered by tests/test_firestore_safe.py. (This replaces
-    the old, false claim that no wrapped field is read by the client — the
-    verdict's ``top_contracts`` always was.)
+    sync. The round-trip (``unwrapFirestore(_firestore_safe(x)) == x``) is
+    covered by tests/test_bt_logic.py; tests/test_firestore_safe.py covers this
+    forward direction. (This replaces the old, false claim that no wrapped field
+    is read by the client — the verdict's ``top_contracts`` always was.)
     """
     if isinstance(value, dict):
         return {k: _firestore_safe(v) for k, v in value.items()}
@@ -379,13 +394,11 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
     failed = set()
 
     def _on_write_error(err):
-        ref = getattr(getattr(err, "operation", None), "reference", None)
-        code = getattr(getattr(err, "code", None), "name", str(
-            getattr(err, "code", ""))).upper()
-        attempts = getattr(err, "attempts", 1) or 1
-        if code in _RETRYABLE_STATUS and attempts < _MAX_TRANSIENT_RETRIES:
+        if _bulk_retryable(getattr(err, "code", None),
+                           getattr(err, "attempts", 1)):
             return True                      # transient: let BulkWriter retry
-        failed.add(getattr(ref, "id", ref))  # permanent/exhausted: record + stop
+        ref = getattr(getattr(err, "operation", None), "reference", None)
+        failed.add(getattr(ref, "id", ref) or "<unknown>")   # record + give up
         return False
 
     if hasattr(writer, "on_write_error"):
