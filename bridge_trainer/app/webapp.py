@@ -814,6 +814,21 @@ async function fetchIndex() {
   if (!window.BT) throw new Error("Firebase not ready");
   return window.BT.fetchIndex();
 }
+/* Shared load-error panel: distinguishes an offline device from a genuine
+   failure and offers a retry (the caller wires #<retryId> to re-run init),
+   so a failed getProblem/fetchIndex never strands the user on a blank
+   skeleton with no way out. */
+function loadErrorHtml(retryId) {
+  var offline = typeof navigator !== "undefined" && navigator.onLine === false;
+  var em = offline ? "אין חיבור לרשת" : "הטעינה נכשלה";
+  var sub = offline ? "בדוק את החיבור ונסה שוב."
+                    : "משהו השתבש. אפשר לנסות שוב או לחזור לתרגול.";
+  return '<div class="card state"><div class="em">' + em + '</div>' +
+    '<div class="muted">' + sub + '</div>' +
+    '<button type="button" class="big" id="' + retryId + '">נסה שוב</button>' +
+    '<div style="margin-top:8px"><a href="index.html">חזרה לתרגול</a></div>' +
+    '</div>';
+}
 /* ===== central Hebrew string table: UI chrome strings live here, so new
    features add a key instead of an inline literal ===== */
 const HE = {
@@ -1762,9 +1777,9 @@ function renderStats() {{
 async function init() {{
   try {{ INDEX = await fetchIndex(); }}
   catch (e) {{
-    document.getElementById("stats").innerHTML =
-      '<div class="state"><div class="em">המאגר עדיין נבנה</div>' +
-      '<div class="muted">חזור בעוד רגע.</div></div>';
+    const box = document.getElementById("stats");
+    box.innerHTML = loadErrorHtml("retry-load");
+    box.querySelector("#retry-load").onclick = () => init();
     return;
   }}
   const q = new URLSearchParams(location.search);
@@ -2238,7 +2253,13 @@ function normalize() {{
 }}
 async function init() {{
   const id = new URLSearchParams(location.search).get("id");
-  P = await window.BT.getProblem(id);
+  try {{ P = await window.BT.getProblem(id); }}
+  catch (e) {{
+    const box = document.getElementById("problem");
+    box.innerHTML = loadErrorHtml("retry-load");
+    box.querySelector("#retry-load").onclick = () => init();
+    return;
+  }}
   if (!P) {{ document.getElementById("problem").innerHTML =
     '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
     '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }}
@@ -2297,7 +2318,8 @@ async function init() {{
   document.getElementById("next").onclick = async () => {{
     const s = getSession();
     if (s && (s.count || 0) >= s.size) {{ location.href = "index.html?summary=1"; return; }}
-    if (!INDEX) INDEX = await fetchIndex();
+    try {{ if (!INDEX) INDEX = await fetchIndex(); }}
+    catch (e) {{ location.href = "index.html"; return; }}
     const flt = (s && s.kind === "bidding")
       ? {{kind: "bidding", levels: s.levels, types: s.types}}
       : resolveFilters(INDEX, loadFilters(), "bidding");
@@ -2550,7 +2572,13 @@ function loadLead() {
 async function init() {
   const q = new URLSearchParams(location.search);
   const id = q.get("id");
-  P = await window.BT.getProblem(id);
+  try { P = await window.BT.getProblem(id); }
+  catch (e) {
+    const box = document.getElementById("problem");
+    box.innerHTML = loadErrorHtml("retry-load");
+    box.querySelector("#retry-load").onclick = () => init();
+    return;
+  }
   if (!P) { document.getElementById("problem").innerHTML =
     '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
     '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }
@@ -2637,7 +2665,8 @@ async function init() {
   document.getElementById("next").onclick = async () => {
     const s = getSession();
     if (s && (s.count || 0) >= s.size) { location.href = "index.html?summary=1"; return; }
-    if (!INDEX) INDEX = await fetchIndex();
+    try { if (!INDEX) INDEX = await fetchIndex(); }
+    catch (e) { location.href = "index.html"; return; }
     const flt = (s && s.kind === "lead")
       ? {kind: "lead", mode: s.mode || leadMode(),
          levels: s.levels, types: s.types}
