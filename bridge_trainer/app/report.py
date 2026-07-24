@@ -7,18 +7,10 @@ from pathlib import Path
 
 import numpy as np
 
-from ..domain.auction import SEATS, partner_of
+from ..domain.auction import SEATS
 from ..scoring.comparison import ComparisonResult
+from . import htmlfmt
 from .runner import RunResult
-
-_SUIT_GLYPHS = {"S": "&#9824;", "H": "<span class=red>&#9829;</span>",
-                "D": "<span class=red>&#9830;</span>", "C": "&#9827;"}
-
-
-def _hand_html(hand: str) -> str:
-    parts = hand.split(".")
-    return " ".join(f"{_SUIT_GLYPHS[s]}{html.escape(p) or '—'}"
-                    for s, p in zip("SHDC", parts))
 
 
 def _bar(value: float, max_value: float, cls: str = "") -> str:
@@ -96,7 +88,7 @@ def _audit_section(result: RunResult) -> str:
                 share = float(weights[lens == L].sum() / weights.sum())
                 if share >= 0.005:
                     dist.append(f"{L}:{share:.0%}")
-            suit_rows.append(f"<tr><td>{_SUIT_GLYPHS[suit]}</td>"
+            suit_rows.append(f"<tr><td>{htmlfmt.SUIT_GLYPHS[suit]}</td>"
                              f"<td>{mean:.2f}</td>"
                              f"<td>{' &nbsp; '.join(dist)}</td></tr>")
 
@@ -135,7 +127,7 @@ def _disaster_section(result: RunResult) -> str:
     for d in result.disasters:
         hands = d.pbn.split(":", 1)[1].split()
         diagram = "<br>".join(
-            f"<b>{seat}</b>: {_hand_html(h)}"
+            f"<b>{seat}</b>: {htmlfmt.hand_html(h)}"
             for seat, h in zip("NESW", hands))
         rows.append(f"""<div class="disaster">
 <div class="deal">{diagram}</div>
@@ -149,10 +141,7 @@ def _disaster_section(result: RunResult) -> str:
 def render_report(result: RunResult, user_answer: str | None = None) -> str:
     p = result.problem
     d = result.diagnostics
-    auction_html = " &ndash; ".join(
-        f"({c.token})" if seat not in (p.my_seat, partner_of(p.my_seat))
-        else c.token
-        for seat, c in p.auction.calls_with_seats()) + " &ndash; ?"
+    auction_html = htmlfmt.auction_html(p)
 
     fog = ('<div class="fog">&#9888; Raw and corrected verdicts disagree '
            '&mdash; this problem is <b>inside the DD fog</b>. Trust it less.</div>'
@@ -226,7 +215,7 @@ button.toggle {{ font-size: 1em; padding: .3em .9em; cursor: pointer; }}
 </style></head><body>
 <h1>{html.escape(p.title)}</h1>
 <div class="problem">
-<b>{html.escape(p.my_seat)}</b> holds: {_hand_html(p.my_hand)}<br>
+<b>{html.escape(p.my_seat)}</b> holds: {htmlfmt.hand_html(p.my_hand)}<br>
 Dealer {p.dealer}, Vul {p.vul} &middot; IMPs<br>
 Auction: {auction_html}
 </div>
