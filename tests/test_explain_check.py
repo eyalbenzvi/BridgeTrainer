@@ -119,6 +119,77 @@ def test_option_promising_suit_hero_lacks_is_fatal():
     assert not any("3NT" in v for v in fatal)
 
 
+# ben1-19f93c012bc: S dealer, hero S (AQT.AJ853.K.T753 — 3 spades, a
+# singleton diamond, 14 HCP). After 1H-P-1S-3D GIB glosses X as its own
+# strong two-suited action double: "5+ !H; 1- !S; 17-21 HCP; biddable !D".
+# Ben's double is nothing of the sort; the gloss lied about the taught
+# option because X/XX options used to be skipped by the gate.
+HANDS_19F93C012BC = ["K953.Q9.Q2.AJ984",       # N
+                     "J87.4.AJ98765.Q6",       # E
+                     "AQT.AJ853.K.T753",       # S (hero)
+                     "642.KT762.T43.K2"]       # W
+
+
+def _stem_19f93c012bc():
+    return [
+        {"idx": 0, "seat": "S", "call": "1H",
+         "card": _card("Major suit opening -- 5+ !H; 11-21 HCP",
+                       "Major suit opening", hcp=(11, 21), minlen={"H": 5})},
+        {"idx": 1, "seat": "W", "call": "P", "card": _card()},
+        {"idx": 2, "seat": "N", "call": "1S",
+         "card": _card("One over one -- 4+ !S; 6+ total points",
+                       "One over one", minlen={"S": 4})},
+        {"idx": 3, "seat": "E", "call": "3D",
+         "card": _card("Aggressive weak jump overcall -- 6+ !D; 10- HCP",
+                       "Aggressive weak jump overcall", hcp=(0, 10),
+                       minlen={"D": 6})},
+    ]
+
+
+def test_double_option_gloss_hero_contradicts_is_fatal():
+    options = {
+        "X": _card("5+ !H; 1- !S; 17-21 HCP; biddable !D; 22- total points",
+                   hcp=(17, 21), minlen={"H": 5, "S": 0, "D": 4},
+                   maxlen={"H": 13, "S": 1}),
+        "P": _card("No suitable call -- 5+ !H; 11-21 HCP",
+                   "No suitable call", hcp=(11, 21), minlen={"H": 5}),
+    }
+    fatal, soft = hand_violations(_stem_19f93c012bc(), options,
+                                  HANDS_19F93C012BC, dealer_i=2, hero_i=2)
+    # a singleton diamond against a promised 4 is 2 beyond slack — the
+    # gloss describes a double Ben is not making; the board must die
+    assert any("option X" in v and "D len 1 < promised 4" in v
+               for v in fatal)
+    # the HCP shade (14 vs 17-21) and the spade cap (3 vs 1-) stay soft
+    assert any("option X" in v and "hcp" in v for v in soft)
+    assert any("option X" in v and "> promised max" in v for v in soft)
+    # Pass options are still exempt (their gloss restates earlier bids)
+    assert not any("option P" in v for v in fatal + soft)
+
+
+def test_double_option_hcp_shade_alone_stays_soft():
+    # a sound off-shape X whose only sin is shading the gloss's HCP band
+    # is the training content, not a lie — must NOT kill the board
+    options = {"X": _card("11+ HCP; 3+ !S", hcp=(11, 37), minlen={"S": 3})}
+    fatal, soft = hand_violations(_stem_19f93c012bc(), options,
+                                  HANDS_19F93C012BC, dealer_i=2, hero_i=2)
+    assert not any("option X" in v for v in fatal)
+
+
+def test_stem_double_gloss_is_vetted_too():
+    # an X inside the STEM whose gloss promises a suit the doubler lacks
+    # misdescribes forced context — fatal, like any stem suit bid
+    stem = _stem_19f93c012bc() + [
+        {"idx": 4, "seat": "S", "call": "P", "card": _card()},
+        {"idx": 5, "seat": "W", "call": "X",
+         "card": _card("Penalty double -- 5+ !D", "Penalty double",
+                       minlen={"D": 5})},   # W holds 3 diamonds
+    ]
+    fatal, _ = hand_violations(stem, {}, HANDS_19F93C012BC,
+                               dealer_i=2, hero_i=2)
+    assert any("stem X" in v and "D len 3 < promised 5" in v for v in fatal)
+
+
 def test_queen_ask_is_not_a_statement():
     # "? queen" (N's ask) must not be read as asserting the queen
     fatal, _ = hand_violations(_stem_01354c2d(), {}, HANDS,

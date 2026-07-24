@@ -21,6 +21,18 @@ against GIB's card, with the length-refutation threshold scaled to the
 promised length (a 6+ promise is refuted by an average well above the
 one that refutes a 5+ promise).
 
+Third motivating board (ben1-19f93c012bc): after 1♥-P-1♠-3♦ GIB glosses
+X as "5+ !H; 1- !S; 17-21 HCP; biddable !D" — its own strong two-suited
+action double — but Ben doubles holding three spades, a singleton
+diamond and 14 HCP (a support/action double GIB does not play there).
+The gate used to skip X/XX wholesale, so the lying card was published
+on the very option the board teaches. Doubles and redoubles are now
+vetted like any suit bid — GIB's card for them states real hand
+requirements — in both checks, stems and options alike. Only Pass stays
+exempt: its "No suitable call" gloss merely restates constraints the
+seat's earlier bids established, which those bids' own entries already
+vet.
+
 Two independent checks:
 
 ``hand_violations`` (cheap, no engine)
@@ -43,7 +55,7 @@ Two independent checks:
     promises 5+ cards in a suit the gloss does not mention (Leaping
     Michaels glossed as a natural club overcall), when the gloss promises
     a 5+ suit the bid's band refutes (Minor transfer glossed onto a natural
-    invitational 2NT), or when the HCP bands are disjoint. Pass/X/XX and
+    invitational 2NT), or when the HCP bands are disjoint. Pass and
     low-n bands are skipped.
 """
 from __future__ import annotations
@@ -196,10 +208,17 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
     soft — kept, for annotation only: an option whose HCP band the hero
     shades ("shows 14-17", hero has 11) or whose length CAP the hero
     exceeds (3NT over a long suit). That is not a defect — the
-    stretch/underbid dilemma is exactly what this trainer trades in."""
+    stretch/underbid dilemma is exactly what this trainer trades in.
+
+    X/XX go through the same vetting as suit bids — GIB's card for a
+    double states real hand requirements, and a breached one is the same
+    lie (ben1-19f93c012bc: X glossed "5+!H, 4+!D, 17-21" offered to a
+    hand with a singleton diamond and 14 HCP). Only Pass is exempt: its
+    gloss restates constraints the seat's earlier bids established,
+    which those bids' own entries already vet."""
     fatal, soft = [], []
     for j, e in enumerate(stem_entries):
-        if e.get("call") in ("P", "X", "XX"):
+        if e.get("call") == "P":
             continue
         bidder = hands[seat_of(dealer_i, e["idx"])]
         for v in card_vs_hand(e.get("card") or {}, bidder):
@@ -210,7 +229,7 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
     hero = hands[hero_i]
     entries = list(stem_entries)
     for bid, card in option_cards.items():
-        if bid in ("P", "X", "XX"):
+        if bid == "P":
             continue
         for v in card_vs_hand(card or {}, hero):
             (fatal if "asserts" in v or "< promised" in v
@@ -304,7 +323,7 @@ def band_violations(engine, spot, stem_entries: list[dict],
     known: dict[int, dict] = {}     # per seat: suit minima stated so far
     for j, e in enumerate(stem_entries):
         call = e.get("call")
-        if call in ("P", "X", "XX"):
+        if call == "P":
             continue
         bidder_i = seat_of(spot.dealer_i, e["idx"])
         observer_i = (bidder_i + 2) % 4         # partner sees the call
@@ -330,7 +349,7 @@ def band_violations(engine, spot, stem_entries: list[dict],
                 if feats["len5plus"][st] >= BAND_P5_SURE:
                     acc[st] = max(acc.get(st, 0), 5)
     for bid, card in (option_cards or {}).items():
-        if bid in ("P", "X", "XX") or not card:
+        if bid == "P" or not card:
             continue
         observer_i = (spot.hero_i + 2) % 4      # partner sees the candidate
         if observer_i not in bots:
