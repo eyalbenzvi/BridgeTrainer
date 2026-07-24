@@ -951,10 +951,14 @@ function loadFilters() {
 function saveFilters(f) { localStorage.setItem(FILTERS_KEY, JSON.stringify(f)); }
 /* the site splits into two scenarios; kind routes each problem + page */
 function kindOf(p) { return p.kind || "bidding"; }
-function routeFor(kind, id) {
-  const base = (kind === "lead" ? "lead.html" : "p.html") + "?id=" +
-               encodeURIComponent(id);
-  return kind === "lead" ? base + "&mode=" + leadMode() : base;
+function routeFor(kind, id, opts) {
+  let base = (kind === "lead" ? "lead.html" : "p.html") + "?id=" +
+             encodeURIComponent(id);
+  if (kind === "lead") base += "&mode=" + leadMode();
+  // retry=1 deep-links into a clean re-attempt (skips the auto-reveal of the
+  // prior answer) so the dashboard's "review" links let you practice again.
+  if (opts && opts.retry) base += "&retry=1";
+  return base;
 }
 /* Opening-lead training modes: exactly two — MP (Matchpoints) and IMPs.
    Both modes show every metric; ONLY the ranking objective differs. */
@@ -1847,7 +1851,7 @@ function renderSessionSummary() {{
   const missHtml = misses.length
     ? `<div style="margin-top:10px;font-weight:700">לסקירה — החלטות מתחת ל־85</div>` +
       `<ul class="notes">` + misses.map(i =>
-        `<li><a href="${{routeFor(s.kind || "bidding", i.id)}}">` +
+        `<li><a href="${{routeFor(s.kind || "bidding", i.id, {{retry: true}})}}">` +
         `בעיה ${{i.idx + 1}} בסבב (ציון ${{i.sc}}) &larr;</a></li>`).join("") + `</ul>`
     : `<div style="margin-top:8px">הכול מיטבי או קרוב לכך — כל הכבוד!</div>`;
   const card = document.createElement("div");
@@ -1936,6 +1940,27 @@ style="white-space:pre-line;font-size:13px"></div></details>
 </main>
 <script>{_SHARED_JS}
 let P = null, INDEX = null, NOTES = [], OPTSHOWS = {{}};
+// true while re-attempting an already-answered problem: the re-answer is
+// recorded (attemptCount++) but keeps the first-attempt score and does NOT
+// count toward the practice session.
+let RETRYING = false;
+function resetForRetry() {{
+  RETRYING = true;
+  document.getElementById("verdict").style.display = "none";
+  const rb = document.getElementById("retry-answer");
+  if (rb) rb.remove();
+  document.querySelectorAll("button.cand").forEach(b => {{
+    b.disabled = false;
+    b.classList.remove("good", "near", "bad", "off", "chosen");
+  }});
+  const cf = document.getElementById("confirm");
+  if (cf) cf.innerHTML = "";
+  const turn = document.querySelector("table.bidding td.turn");
+  if (turn) turn.innerHTML = "?";
+  ARMED = null;
+  document.getElementById("cands").scrollIntoView(
+    {{block: "center", behavior: "smooth"}});
+}}
 function stripNoise(t) {{
   return (t || "").replace(/Next call is usually[^]*?%\\)\\.\\s*/g, "")
                   .replace(/most common continuation:[^]*?%\\)\\.\\s*/g, "");
@@ -2155,13 +2180,25 @@ function reveal(chosen) {{
     rbox.innerHTML = h;
   }} else document.getElementById("raw-box").style.display = "none";
   document.getElementById("verdict").style.display = "block";
+  // let the user re-attempt an answered problem (the "review" loop). The
+  // re-answer keeps the first score and doesn't touch the session.
+  if (!document.getElementById("retry-answer")) {{
+    const rb = document.createElement("button");
+    rb.type = "button"; rb.className = "big"; rb.id = "retry-answer";
+    rb.style.cssText = "background:var(--card);color:var(--accent);" +
+      "border:1px solid var(--accent)";
+    rb.textContent = "נסה שוב (לא ישפיע על הציון)";
+    rb.onclick = resetForRetry;
+    document.getElementById("verdict").appendChild(rb);
+  }}
 }}
 function choose(action) {{
-  if (store()[P.id]) return;
+  if (store()[P.id] && !RETRYING) return;
   reveal(action);
   const rec = window.BT.gradeBidding(P, action);
   window.BT.record(P.id, rec);
-  bumpSession(rec.score, P.id);
+  if (!RETRYING) bumpSession(rec.score, P.id);
+  RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
 }}
@@ -2169,7 +2206,7 @@ function choose(action) {{
    (confirm) tap locks the answer in */
 let ARMED = null;
 function arm(btn) {{
-  if (store()[P.id]) return;
+  if (store()[P.id] && !RETRYING) return;
   const a = btn.dataset.action;
   const box = document.getElementById("confirm");
   document.querySelectorAll("button.cand")
@@ -2336,7 +2373,11 @@ async function init() {{
     location.href = "p.html?id=" + encodeURIComponent(nid);
   }};
   const prev = store()[P.id];
-  if (prev) reveal(prev.answer);
+  const retryParam = new URLSearchParams(location.search).get("retry") === "1";
+  // ?retry=1 (from the dashboard "review" links) lands on a clean, answerable
+  // problem instead of replaying the prior answer.
+  if (prev && !retryParam) reveal(prev.answer);
+  else if (prev && retryParam) RETRYING = true;
 }}
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
@@ -2346,6 +2387,21 @@ else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 
 _LEAD_JS = r"""
 let P = null, INDEX = null, MODE = "MP", MODE_FALLBACK = false;
+// true while re-attempting an already-answered problem (see the bidding page).
+let RETRYING = false;
+function resetForRetry() {
+  RETRYING = true;
+  document.getElementById("verdict").style.display = "none";
+  const rb = document.getElementById("retry-answer");
+  if (rb) rb.remove();
+  document.querySelectorAll("button.cardbtn").forEach(b => {
+    b.disabled = false;
+    b.classList.remove("good", "near", "bad", "chosen");
+  });
+  const cf = document.getElementById("confirm");
+  if (cf) cf.innerHTML = "";
+  ARMED = null;
+}
 const RANKS = "23456789TJQKA";
 /* ---- training-mode helpers: MP ranks by expected defensive tricks, IMP by
    expected IMP value. Every metric stays visible in both modes; only the
@@ -2542,13 +2598,23 @@ function reveal(chosen) {
       fullDealHtml(P.full_deal, roles);
   }
   document.getElementById("verdict").style.display = "block";
+  if (!document.getElementById("retry-answer")) {
+    const rb = document.createElement("button");
+    rb.type = "button"; rb.className = "big"; rb.id = "retry-answer";
+    rb.style.cssText = "background:var(--card);color:var(--accent);" +
+      "border:1px solid var(--accent)";
+    rb.textContent = "נסה שוב (לא ישפיע על הציון)";
+    rb.onclick = resetForRetry;
+    document.getElementById("verdict").appendChild(rb);
+  }
 }
 function commit(a) {
-  if (store()[P.id]) return;
+  if (store()[P.id] && !RETRYING) return;
   reveal(a);
   const rec = window.BT.gradeLead(P, a, MODE);
   window.BT.record(P.id, rec);
-  bumpSession(rec.score, P.id);
+  if (!RETRYING) bumpSession(rec.score, P.id);
+  RETRYING = false;
   const hl = document.getElementById("headline");
   if (hl) hl.focus();
 }
@@ -2556,7 +2622,7 @@ function commit(a) {
    leads it \\u2014 so one stray tap never locks in a final answer */
 let ARMED = null;
 function arm(btn) {
-  if (store()[P.id]) return;
+  if (store()[P.id] && !RETRYING) return;
   const a = btn.dataset.action;
   const box = document.getElementById("confirm");
   document.querySelectorAll("button.cardbtn")
@@ -2691,7 +2757,9 @@ async function init() {
     location.href = routeFor("lead", nid);
   };
   const prev = store()[P.id];
-  if (prev) reveal(prev.answer);
+  const retryParam = new URLSearchParams(location.search).get("retry") === "1";
+  if (prev && !retryParam) reveal(prev.answer);
+  else if (prev && retryParam) RETRYING = true;
 }
 function cardHtml_or_call(tok) { return tok ? callHtml(tok) : ""; }
 if (window.BT) window.BT.start(init);
@@ -2984,7 +3052,7 @@ function render(attempts) {
   const missList = misses.length
     ? '<div class="card"><b>לשיפור — החלטות מתחת ל־85</b> <span class="muted">(הקש לחזרה)</span>' +
       '<ul class="misslist">' + misses.map(m =>
-        `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId)}">` +
+        `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">` +
         `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
         `<div style="margin-top:4px">בחרת <b class="ltr">${m.chosenCall}</b> — ` +
         `${OUTCOME_HE[m.outcomeClass] || m.outcomeClass}` +
