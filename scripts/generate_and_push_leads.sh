@@ -17,7 +17,9 @@
 #   MODE=MP|IMP   target training mode (default MP): which mode's gates
 #                 select the boards — MP forges trick-decision problems,
 #                 IMP forges score-swing (expected-IMP) problems
-#   SEED=...      override the RNG seed (default: day-based)
+#   SEED=...      override the RNG seed (default: unique per run, time-based —
+#                 so re-running grows the pool instead of re-scanning the same
+#                 boards; pin an explicit SEED for a reproducible batch)
 #   MAX_SECONDS=… generation time budget (default 6000)
 set -euo pipefail
 
@@ -69,7 +71,15 @@ fi
 # 3) Generate the problems into data/.
 # WORKERS>1 runs board-level parallel workers (each holds a ~1.2 GB engine);
 # 0 = auto (min(3, cpus)). Default 3 to match the 4-core reference box.
-SEED="${SEED:-$(( $(date +%s) / 86400 ))000}"
+#
+# Default seed is UNIQUE PER RUN (epoch seconds, ×1000 for spacing). A day- or
+# hour-flattened default made every re-run on the same day/hour re-derive the
+# SAME boards -> identical problem ids -> the Firestore push skipped all of
+# them ("uploaded 0"), so the pool never grew. Board scanning walks
+# SEED..SEED+N, and forge runs take minutes, so consecutive runs sit well
+# beyond that window and share no boards. Pin an explicit SEED for a
+# reproducible batch.
+SEED="${SEED:-$(date +%s)000}"
 MODE="${MODE:-MP}"
 echo ">> forging $COUNT lead problems (mode $MODE, seed $SEED, ${WORKERS:-3} workers)"
 BEN_HOME="$BEN_HOME" "$PY" -m bridge_trainer.app.cli \

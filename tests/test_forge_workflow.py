@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 WF = Path(".github/workflows/forge-leads.yml")
+SCRIPT = Path("scripts/generate_and_push_leads.sh")
 
 
 def _load():
@@ -47,3 +48,16 @@ def test_hourly_schedule_forges_ten_of_each_mode():
     assert "vars.FORGE_COUNT" in text
     # hour-based seeds so consecutive hours forge fresh boards
     assert "HOUR=$(( $(date +%s) / 3600 ))" in text
+
+
+def test_default_seed_is_unique_per_run_not_flattened_to_a_day():
+    """A manual dispatch with a blank seed must NOT reuse the same boards on
+    every run of the same day. The old day-flattened default (date +%s / 86400)
+    produced identical problem ids each day, so the Firestore push skipped them
+    all ("uploaded 0") and the pool never grew. The default must vary per run."""
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert "SEED=" in text
+    # the per-day flattening must be gone from the seed default...
+    assert "/ 86400" not in text
+    # ...and the default must be a per-run (epoch-second) value.
+    assert 'SEED="${SEED:-$(date +%s)000}"' in text
