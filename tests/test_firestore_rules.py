@@ -33,7 +33,8 @@ def _rules() -> str:
 
 def _allowlist() -> set[str]:
     src = _rules()
-    block = src[src.index("hasOnly(["):src.index("])", src.index("hasOnly(["))]
+    fn = src[src.index("function attemptKeys()"):]
+    block = fn[fn.index("["):fn.index("]")]
     return set(re.findall(r"'([A-Za-z]+)'", block))
 
 
@@ -75,3 +76,21 @@ def test_allowlist_fields_are_real_client_fields():
 def test_critical_fields_present():
     for f in ("answer", "score", "correct", "attemptCount", "problemId", "ts"):
         assert f in _allowlist()
+
+
+def test_create_is_strict_but_update_is_legacy_tolerant():
+    """A first-attempt create requires the full grading; a re-answer update
+    must NOT require score (legacy docs predate it) or it would reject the
+    merge that only bumps attemptCount/lastTs."""
+    code = _code()
+    assert "allow create: if owner(uid) && validCreate();" in code
+    assert "allow update: if owner(uid) && validUpdate();" in code
+    # create demands score/answer/correct outright
+    create = code[code.index("function validCreate()"):code.index("function validUpdate()")]
+    assert "d.score is number" in create and "d.answer is string" in create
+    # update only enforces the shared, presence-conditional bounds
+    update = code[code.index("function validUpdate()"):code.index("match /users")]
+    assert "attemptBounds(request.resource.data)" in update
+    # the shared bounds guard score by presence, not unconditionally
+    bounds = code[code.index("function attemptBounds"):code.index("function validCreate")]
+    assert "!('score' in d) || d.score is number" in bounds

@@ -29,44 +29,62 @@ service cloud.firestore {
       return request.auth != null && request.auth.uid == uid;
     }
 
-    // Schema + size validation for an attempt document. The previous rule used
-    // request.resource.size() — NOT a valid API (Resource has no size()), so
-    // the whole condition failed to evaluate. Use request.resource.data.size()
-    // (a FIELD count) with an explicit key allowlist and string/list caps to
-    // bound the document without relying on a byte measure the language does
-    // not offer. The allowlist is the union of every field the web client
-    // writes: web/bt-firebase.js meta()+gradeBidding()+gradeLead()+record().
-    function validAttempt() {
-      let d = request.resource.data;
-      return d.size() < 25
-        && d.keys().hasOnly([
-          'problemId', 'problemVersion', 'scoringForm', 'kind', 'type',
-          'difficultyLevel', 'answer', 'chosenCall', 'correct', 'outcomeClass',
-          'gradedCost', 'score', 'acceptedSet', 'trainingMode', 'rankingMetric',
-          'chosenRank', 'recommendedLead', 'primaryValue', 'isFirstAttempt',
-          'attemptCount', 'ts', 'lastTs'])
-        // type-check only the fields that are never null; the rest may be
-        // null/absent (see meta()/gradeLead), so don't force a type on them.
-        && d.answer is string && d.answer.size() < 16
-        && d.score is number
-        && d.correct is bool
+    // The allowlist of attempt fields: the union of everything the web client
+    // writes (web/bt-firebase.js meta()+gradeBidding()+gradeLead()+record()).
+    function attemptKeys() {
+      return [
+        'problemId', 'problemVersion', 'scoringForm', 'kind', 'type',
+        'difficultyLevel', 'answer', 'chosenCall', 'correct', 'outcomeClass',
+        'gradedCost', 'score', 'acceptedSet', 'trainingMode', 'rankingMetric',
+        'chosenRank', 'recommendedLead', 'primaryValue', 'isFirstAttempt',
+        'attemptCount', 'ts', 'lastTs'];
+    }
+
+    // Structural bounds shared by create and update: a field-count cap and the
+    // key allowlist. The previous rule used request.resource.size() — NOT a
+    // valid API (Resource has no size()), so the whole condition failed to
+    // evaluate; use request.resource.data.size() (a FIELD count) plus explicit
+    // caps instead, since the language offers no byte measure.
+    function attemptBounds(d) {
+      return d.size() < 25 && d.keys().hasOnly(attemptKeys())
         && d.attemptCount is int
         && (!('acceptedSet' in d) || d.acceptedSet.size() < 40)
+        && (!('answer' in d) || (d.answer is string && d.answer.size() < 16))
         && (!('chosenCall' in d) || (d.chosenCall is string
-              && d.chosenCall.size() < 16));
+              && d.chosenCall.size() < 16))
+        && (!('score' in d) || d.score is number)
+        && (!('correct' in d) || d.correct is bool);
+    }
+
+    // A fresh (first-attempt) doc from the current client always carries the
+    // full grading, so create requires score/answer/correct.
+    function validCreate() {
+      let d = request.resource.data;
+      return attemptBounds(d)
+        && d.answer is string && d.score is number && d.correct is bool;
+    }
+
+    // A re-answer is a merge write ({attemptCount, lastTs}); the MERGED doc is
+    // validated. LEGACY docs predate the panel `score` field, so update must
+    // NOT require it (type-checks are presence-conditional in attemptBounds) —
+    // otherwise re-answering an old problem would be rejected. Structural
+    // bounds (field count, key allowlist, attemptCount:int) still apply.
+    function validUpdate() {
+      return attemptBounds(request.resource.data);
     }
 
     // Each user owns their own data: read/write only your own subtree. Only the
     // top-level user doc (a future profile) and the attempts stream are
-    // writable; attempts are schema-validated (validAttempt). No recursive
-    // {doc=**} write rule, so a client can't create arbitrary subcollections.
+    // writable; attempts are schema-validated. No recursive {doc=**} write
+    // rule, so a client can't create arbitrary subcollections.
     match /users/{uid} {
       allow read: if owner(uid);
       allow write: if owner(uid) && request.resource.data.size() < 50;
 
       match /attempts/{pid} {
         allow read: if owner(uid);
-        allow write: if owner(uid) && validAttempt();
+        allow create: if owner(uid) && validCreate();
+        allow update: if owner(uid) && validUpdate();
       }
     }
   }
