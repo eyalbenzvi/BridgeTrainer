@@ -31,6 +31,24 @@ from . import htmlfmt
 from .report import render_report
 from .runner import RunResult, run_problem
 
+# Bumped whenever the rendered HTML/CSS templates change. Each variant's output
+# is stamped with "<seed>:<TEMPLATE_VERSION>"; a re-publish skips re-rendering a
+# variant whose stamp still matches (PERF-D-10), so CI time stays roughly
+# constant instead of growing linearly with grow_per_day. MUST be incremented
+# on any template/CSS edit below, or old HTML would freeze in place.
+TEMPLATE_VERSION = 1
+
+
+def _variant_up_to_date(vdir: Path, stamp: str) -> bool:
+    """True iff both rendered pages exist and the stamp (seed + template
+    version) matches — i.e. re-rendering would reproduce the same files."""
+    try:
+        return ((vdir / ".stamp").read_text(encoding="utf-8") == stamp
+                and (vdir / "index.html").exists()
+                and (vdir / "report.html").exists())
+    except OSError:
+        return False
+
 _BASE_CSS = """
 :root { color-scheme: light dark; }
 * { box-sizing: border-box; }
@@ -338,8 +356,21 @@ def publish(
             total += grown
         if variants_override:
             total = min(variants_override, total)
+        pid = None
         for k in range(total):
             seed_k = seed + k
+            # The stamp must capture everything baked into the page: the seed
+            # (deal), the template version, AND `total` — each variant page
+            # embeds the absolute "deal k/total" counter and V.total (its
+            # nextUnseen bound), so a grown `total` invalidates older pages too.
+            stamp_k = f"{seed_k}:{TEMPLATE_VERSION}:{total}"
+            # Variants share the problem id, learned from v0. For k>0 we can
+            # therefore check for an already-current render and skip the
+            # simulation + rendering + file writes entirely (PERF-D-10). v0
+            # always runs — its result supplies the entry metadata below.
+            if k > 0 and pid is not None \
+                    and _variant_up_to_date(out_dir / pid / f"v{k}", stamp_k):
+                continue
             my_hand = None
             if k > 0:
                 rng = np.random.default_rng([seed_k, 777])
@@ -347,12 +378,14 @@ def publish(
             result = run_problem(path, seed=seed_k, n_override=n_override,
                                  use_cache=use_cache, cache_dir=cache_dir,
                                  budget=budget, my_hand_override=my_hand)
-            vdir = out_dir / result.problem.id / f"v{k}"
+            pid = result.problem.id
+            vdir = out_dir / pid / f"v{k}"
             vdir.mkdir(parents=True, exist_ok=True)
             (vdir / "index.html").write_text(
                 render_quiz(result, k, total), encoding="utf-8")
             (vdir / "report.html").write_text(
                 render_report(result), encoding="utf-8")
+            (vdir / ".stamp").write_text(stamp_k, encoding="utf-8")
             if first is None:
                 first = result
         entry = PublishedEntry(

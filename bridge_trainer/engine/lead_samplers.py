@@ -544,6 +544,22 @@ class ConstraintSampler:
         return ls
 
 
+class PerBoardConstraintSampler:
+    """Adapter: derives auction constraints PER BOARD via the rule engine
+    (ARCH-10 — moved here from the CLI layer so engine logic no longer lives in
+    the interface module).
+
+    The calibration harness calls ``sample(problem, ...)`` with each board's
+    public state; this builds the matching ``ConstraintSampler`` on the fly so a
+    whole real-deal corpus can be calibrated with a single ``--sampler
+    constraint`` flag (each family/board carries its own auction)."""
+    sampling_model = "auction_constraint_bands"
+
+    def sample(self, problem: LeadProblem, requested: int, seed: int) -> LayoutSet:
+        return ConstraintSampler.from_auction(problem).sample(
+            problem, requested, seed)
+
+
 SAMPLERS = {
     "uniform": UniformSampler,
     "current": BenCurrentSampler,

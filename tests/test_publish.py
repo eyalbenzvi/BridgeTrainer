@@ -92,6 +92,64 @@ def test_redirect_page_targets_first_unanswered(site):
     assert 'href="v0/index.html"' in html  # no-JS fallback
 
 
+def test_republish_skips_unchanged_variants(tmp_path, monkeypatch):
+    """PERF-D-10: a second publish re-runs only v0 per problem (needed for the
+    entry metadata); already-stamped k>0 variants are skipped, and bumping
+    TEMPLATE_VERSION forces a full re-render again."""
+    import bridge_trainer.app.publish as pub
+
+    root, cache = tmp_path / "site", tmp_path / "cache"
+    calls = {"n": 0}
+    real = pub.run_problem
+
+    def counting(*a, **k):
+        calls["n"] += 1
+        return real(*a, **k)
+    monkeypatch.setattr(pub, "run_problem", counting)
+
+    entries = publish(PROBLEMS, root, seed=7, n_override=48, cache_dir=cache,
+                      variants_override=2)
+    first = calls["n"]
+    assert first == len(entries) * 2                # v0 + v1 per problem
+
+    v1 = root / entries[0].id / "v1" / "index.html"
+    before = v1.stat().st_mtime_ns
+
+    calls["n"] = 0
+    publish(PROBLEMS, root, seed=7, n_override=48, cache_dir=cache,
+            variants_override=2)
+    assert calls["n"] == len(entries)               # only v0 re-ran; v1 skipped
+    assert v1.stat().st_mtime_ns == before          # v1 not rewritten
+
+    calls["n"] = 0
+    monkeypatch.setattr(pub, "TEMPLATE_VERSION", pub.TEMPLATE_VERSION + 1)
+    publish(PROBLEMS, root, seed=7, n_override=48, cache_dir=cache,
+            variants_override=2)
+    assert calls["n"] == len(entries) * 2           # template bump re-renders all
+
+
+def test_republish_regrows_when_total_changes(tmp_path, monkeypatch):
+    """A grown `total` must re-render existing variants too, since each page
+    bakes the absolute deal counter / nextUnseen bound (PERF-D-10 correctness)."""
+    import bridge_trainer.app.publish as pub
+
+    root, cache = tmp_path / "site", tmp_path / "cache"
+    publish(PROBLEMS, root, seed=7, n_override=48, cache_dir=cache,
+            variants_override=2)
+    v1 = root / "comp_3s_over_3h" / "v1" / "index.html"
+    assert "/ 2</span>" in v1.read_text()           # counter shows total=2
+
+    calls = {"n": 0}
+    real = pub.run_problem
+    monkeypatch.setattr(pub, "run_problem",
+                        lambda *a, **k: (calls.__setitem__("n", calls["n"] + 1),
+                                         real(*a, **k))[1])
+    publish(PROBLEMS, root, seed=7, n_override=48, cache_dir=cache,
+            variants_override=3)                     # total grows 2 -> 3
+    assert calls["n"] > 0                            # not fully skipped
+    assert "/ 3</span>" in v1.read_text()            # v1's counter updated
+
+
 def test_mobile_viewport_everywhere(site):
     root, entries = site
     for page in (root / "index.html",
