@@ -35,8 +35,10 @@ def test_shared_assets_are_emitted_and_equal_the_constants(site):
 @pytest.mark.parametrize("page", PAGES)
 def test_pages_link_and_do_not_inline_shared_assets(site, page):
     html = (site / page).read_text(encoding="utf-8")
-    assert 'href="app.css"' in html          # links the stylesheet
-    assert 'src="bt-shared.js"' in html       # links the shared script
+    # links the stylesheet + shared script, content-versioned (?v=<hash>) so a
+    # returning visitor never pairs new HTML with a stale-cached asset (PERF-F-5)
+    assert 'href="app.css?v=' in html
+    assert 'src="bt-shared.js?v=' in html
     # and no longer inlines the big blobs
     assert _CSS not in html
     assert _SHARED_JS not in html
@@ -46,6 +48,15 @@ def test_pages_link_and_do_not_inline_shared_assets(site, page):
 def test_pages_are_small(site, page):
     kb = len((site / page).read_bytes()) / 1024
     assert kb < 40, f"{page} is {kb:.0f} KB — shared assets may have leaked back"
+
+
+def test_asset_version_tracks_content():
+    # the ?v= tag is a content hash: it changes iff the asset changes, so an
+    # unchanged asset keeps its cache-hitting URL but any edit forces a refetch
+    # (PERF-F-5 — the fix for the post-#76 "REVIEW_MIN is not defined" skew).
+    from bridge_trainer.app.webapp import _asset_ver, _CSS, _SHARED_JS
+    assert _asset_ver(_CSS) == _asset_ver(_CSS)                # stable
+    assert _asset_ver(_SHARED_JS) != _asset_ver(_SHARED_JS + "\n// x")
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")

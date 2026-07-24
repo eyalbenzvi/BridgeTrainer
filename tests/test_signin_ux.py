@@ -53,7 +53,8 @@ def test_settings_signin_onclick_swallows_rejection():
                                      _dashboard_html])
 def test_save_failed_toast_wired_on_every_page(html_fn):
     # every page links the shared bundle that carries the toast + listener
-    assert 'src="bt-shared.js"' in html_fn()
+    # (content-versioned URL; see PERF-F-5 cache-busting)
+    assert 'src="bt-shared.js?v=' in html_fn()
     # ...and the shared bundle wires them (btToast is non-click-blocking)
     assert 'addEventListener("bt-save-failed"' in _SHARED_JS
     assert "function btToast(" in _SHARED_JS

@@ -259,8 +259,8 @@ def test_pages_wire_the_score():
     for page in (p, l, d, i):
         # the shared score module + chip styling now ship as external assets
         # (T2); every page must link them.
-        assert 'src="bt-shared.js"' in page
-        assert 'href="app.css"' in page
+        assert 'src="bt-shared.js?v=' in page
+        assert 'href="app.css?v=' in page
     assert "btScoreOfAttempt" in _SHARED_JS   # shared score module
     assert ".scorechip" in _CSS               # chip styling
     # the session trail and home stats aggregate scores, not correct counts
