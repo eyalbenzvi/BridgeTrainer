@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>(function(){try{var d=document.documentElement,t=localStorage.getItem('bt_theme'),s=localStorage.getItem('bt_scale');if(t&&t!=='system')d.setAttribute('data-theme',t);if(s&&s!=='s')d.setAttribute('data-scale',s);}catch(e){}})();</script>
+<title>בעיית הובלה</title>
+<link rel="stylesheet" href="app.css?v=0a30c460">
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js" crossorigin>
+<link rel="modulepreload" href="bt-logic.js">
+<link rel="modulepreload" href="firebase-config.js">
+<script type="module" src="bt-firebase.js"></script></head><body data-scenario="lead">
+<main id="main" tabindex="-1">
+<div class="topbar"><a href="index.html">&rarr; דף הבית</a><span class="muted" id="meta"></span></div>
+<div class="sessribbon" id="sessribbon" hidden></div>
+<div class="card" id="modebanner"><div class="skl" style="width:45%"></div></div>
+<div id="problem"><div class="skl" style="width:35%"></div><div class="skl" style="width:100%;height:120px"></div><div class="skl" style="width:70%"></div></div>
+<div class="leadgrid" id="grid" role="group" aria-label="בחר קלף להובלה"></div>
+<div id="confirm"></div>
+<div id="verdict" class="card" style="display:none" role="status" aria-live="polite">
+<h2 class="headline" id="headline" tabindex="-1"></h2>
+<div class="scoreline" id="scoreline"></div>
+<p class="muted" id="subhead"></p>
+<div id="resid"></div>
+<div id="bars"></div>
+<p id="lead-expl" style="white-space:pre-line"></p>
+<div class="muted" id="difficulty"></div>
+<button class="big" id="next">ההובלה הבאה &larr;</button>
+<details open><summary>כל 13 ההובלות, מדורגות</summary><table class="plain" id="ltable"></table><p class="footnote">קלפים שווים במדד המוביל — כולם נכונים.</p></details>
+<p class="footnote">ההמלצות מבוססות על הגרלת ידיים נסתרות וניתוח <button type="button" class="gloss" data-gloss="dd">double-dummy</button>; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>
+<details><summary>החלוקה המלאה</summary><div id="fulldeal"></div></details>
+</div>
+</main>
+<script>window.TAXONOMY_HE = {"open_or_pass": ["החלטת פתיחה", "לפתוח יד גבולית, או לפאס — ובאיזו פתיחה?"], "preempt_decision": ["הכרזת מנע", "להפריע או לא — ועד איזו רמה?"], "enter_auction": ["כניסה למכרז", "אוברקול, כפל, או להישאר בחוץ?"], "compete_or_sell": ["קרב חוזה חלקי", "להכריז עוד פעם, לפאס, או לדחוף אותם גבוה יותר?"], "invite_or_game": ["הזמנה או משחק מלא", "לעצור, להזמין, או להכריז משחק מלא?"], "slam_try": ["ניסיון סלם", "להתקדם לסלאם, או להסתפק במשחק מלא?"], "choice_of_strain": ["בחירת שליט", "הרמה סגורה — אבל היכן: איזו סדרה, או ללא־שליט?"], "double_or_bid": ["להכפיל או להכריז", "כפל, להמשיך להכריז, או לפאס?"], "sacrifice_decision": ["הקרבה", "לדרוס את החוזה שלהם במחיר מינוס, או להגן?"], "describe_hand": ["תיאור היד", "איזו הכרזה בונה מתארת הכי טוב את הכוח והצורה?"], "lead_part_score": ["חוזה חלקי", "הובלה נגד חוזה חלקי (מתחת למשחק מלא)."], "lead_3nt": ["3NT", "הובלה נגד משחק ללא שליט."], "lead_suit_game": ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 במייג'ור / 5 במיינור)."], "lead_slam": ["סלם", "הובלה נגד סלם (רמה 6 או 7)."], "lead_doubled": ["חוזה מוכפל", "הובלה נגד חוזה מוכפל."]};</script>
+<script src="bt-shared.js?v=d0206df9"></script>
+<script>
+let P = null, INDEX = null, MODE = "MP", MODE_FALLBACK = false;
+// true while re-attempting an already-answered problem (see the bidding page).
+let RETRYING = false;
+function resetForRetry() {
+  RETRYING = true;
+  document.getElementById("verdict").style.display = "none";
+  const rb = document.getElementById("retry-answer");
+  if (rb) rb.remove();
+  document.querySelectorAll("button.cardbtn").forEach(b => {
+    b.disabled = false;
+    b.classList.remove("good", "near", "bad", "chosen");
+  });
+  const cf = document.getElementById("confirm");
+  if (cf) cf.innerHTML = "";
+  ARMED = null;
+  scrollToEl(document.getElementById("problem"), "center");
+  const first = document.querySelector("button.cardbtn");
+  if (first) first.focus();   // move focus off the now-hidden verdict
+}
+const RANKS = "23456789TJQKA";
+/* ---- training-mode helpers: MP ranks by expected defensive tricks, IMP by
+   expected IMP value. Every metric stays visible in both modes; only the
+   ranking objective (and the emphasized column) changes. ---- */
+function hasImpMetrics(p) {
+  const t = (p.verdict && p.verdict.table) || [];
+  return t.length > 0 && t[0].exp_imps !== undefined;
+}
+function acceptedFor(p, mode) {
+  const bm = p.verdict && p.verdict.by_mode;
+  if (bm && bm[mode] && bm[mode].accepted && bm[mode].accepted.length)
+    return bm[mode].accepted;
+  return (p.verdict && p.verdict.accepted) || [];
+}
+function recommendedFor(p, mode) {
+  const bm = p.verdict && p.verdict.by_mode;
+  if (bm && bm[mode] && bm[mode].recommended) return bm[mode].recommended;
+  return acceptedFor(p, mode)[0];
+}
+function primaryOf(r, mode) {
+  return mode === "IMP" ? r.exp_imps : r.avg_def_tricks;
+}
+function fmtPrimary(v, mode) {
+  if (v === undefined || v === null) return "—";
+  return mode === "IMP"
+    ? (v >= 0 ? "+" : "−") + Math.abs(v).toFixed(2) + " IMP"
+    : (+v).toFixed(2) + " לק׳";  // Hebrew geresh (bidi class R): an
+      // ASCII apostrophe is neutral and flips to the wrong side of the
+      // word inside the forced-LTR metric cells
+}
+/* the mode's ranked rows, best first (stored ranks; legacy rows fall back
+   to the tricks order — legacy records are MP-only by construction) */
+function modeTable(p, mode) {
+  const rows = ((p.verdict && p.verdict.table) || []).slice();
+  const rk = mode === "IMP" ? "rank_imp" : "rank_mp";
+  if (rows.length && rows[0][rk] !== undefined)
+    rows.sort((a, b) => a[rk] - b[rk]);
+  else rows.sort((a, b) => primaryOf(b, mode) - primaryOf(a, mode));
+  return rows;
+}
+/* Label one bar. A group of interchangeable cards (same suit, same result)
+   shows as one line, e.g. "♥ 5/4/3"; a lone card keeps its normal form. */
+function groupLabel(g) {
+  if (g.cards.length === 1) return cardHtml(g.cards[0]);
+  const ranks = g.cards.slice()
+    .sort((a, b) => RANKS.indexOf(b[1]) - RANKS.indexOf(a[1]))
+    .map(c => c[1] === "T" ? "10" : c[1]);
+  return suitHtml(g.suit) + " " + ranks.join("/");
+}
+function reveal(chosen) {
+  const v = P.verdict, acc = acceptedFor(P, MODE);
+  const rows = modeTable(P, MODE);
+  const sp = btScoreLead(P, chosen, MODE);
+  document.querySelectorAll("button.cardbtn").forEach(b => {
+    const a = b.dataset.action;
+    if (acc.includes(a)) b.classList.add("good");
+    else if (a === chosen) b.classList.add(sp.score >= NEAR_MIN ? "near" : "bad");
+    if (a === chosen) b.classList.add("chosen");
+    b.disabled = true;
+  });
+  const ok = acc.includes(chosen);
+  const chip = btScoreChipHtml(sp.score);
+  document.getElementById("headline").innerHTML = ok
+    ? chip + ' הובלה מיטבית — <span class="ltr">' + cardHtml(chosen) + '</span>'
+    : chip + ' ' + BAND_HE[btBandOf(sp.score)] + ' — עדיף היה <span class="ltr">' +
+      acc.map(cardHtml).join(" / ") + '</span>';
+  document.getElementById("scoreline").textContent = btScoreExplain(sp);
+  document.getElementById("subhead").innerHTML = acc.length > 1
+    ? 'טובות באותה מידה: <span class="ltr">' +
+      acc.map(cardHtml).join(", ") + '</span>' : "";
+  // your lead vs the active mode's recommendation, and your rank in it
+  const rec = recommendedFor(P, MODE);
+  const myIdx = rows.findIndex(r => r.card === chosen);
+  document.getElementById("resid").innerHTML =
+    '<div class="resultline">מצב: <b class="ltr">' +
+    glossHtml(MODE === "IMP" ? "imp" : "mp", MODE_INFO[MODE].banner) +
+    '</b> · <span class="modegoal">' + MODE_INFO[MODE].goal + '</span></div>' +
+    '<div class="resultline">ההובלה שלך: <b class="ltr">' + cardHtml(chosen) + '</b></div>' +
+    '<div class="resultline">ההובלה המומלצת (' + MODE_INFO[MODE].title +
+    '): <b class="ltr">' + cardHtml(rec) + '</b></div>' +
+    (myIdx >= 0 ? '<div class="resultline">הדירוג שלך: <b>' + (myIdx + 1) +
+      '</b> מתוך ' + rows.length + '</div>' : "");
+  // Group the ranked cards into per-suit buckets of equal outcome under the
+  // ACTIVE mode's primary metric: cards in the same suit with the same value
+  // are interchangeable, so they collapse into a single line (e.g. "♥ 5/4/3").
+  const groups = [], byKey = {};
+  rows.forEach(r => {
+    const val = primaryOf(r, MODE);
+    if (val === undefined) return;
+    const key = r.card[0] + ":" + (+val).toFixed(2);
+    let g = byKey[key];
+    if (!g) { g = {suit: r.card[0], val: +val, cards: []};
+              byKey[key] = g; groups.push(g); }
+    g.cards.push(r.card);
+  });
+  // Always keep each suit's best line; also surface any higher-ranked
+  // alternative that beats the weakest suit-best — a strong option that would
+  // otherwise stay hidden behind its own suit's top card.
+  const suitBest = {};
+  groups.forEach(g => {
+    if (!suitBest[g.suit] || g.val > suitBest[g.suit].val) suitBest[g.suit] = g;
+  });
+  const bests = Object.keys(suitBest).map(s => suitBest[s]);
+  const bestSet = new Set(bests);
+  const minBest = bests.length ? Math.min.apply(null, bests.map(g => g.val)) : 0;
+  const MAX_BARS = 6;
+  let picked = groups.filter(g => bestSet.has(g) || g.val > minBest);
+  if (picked.length > MAX_BARS) {
+    const extras = picked.filter(g => !bestSet.has(g));
+    picked = bests.concat(extras.slice(0, Math.max(0, MAX_BARS - bests.length)));
+  }
+  const chosenGroup = groups.find(g => g.cards.indexOf(chosen) >= 0);
+  if (chosenGroup && picked.indexOf(chosenGroup) < 0) picked.push(chosenGroup);
+  picked.sort((a, b) => b.val - a.val);
+  // bar widths: normalized to the picked range (IMP values can be negative)
+  const maxv = picked.length ? Math.max.apply(null, picked.map(g => g.val)) : 1;
+  const minv = picked.length ? Math.min.apply(null, picked.map(g => g.val)) : 0;
+  document.getElementById("bars").innerHTML = picked.map(g => {
+    const val = g.val, good = g.cards.some(c => acc.includes(c));
+    const mine = g.cards.indexOf(chosen) >= 0;
+    const pct = maxv > minv
+      ? Math.round(4 + 96 * (val - minv) / (maxv - minv))
+      : 100;
+    // "(שלך)" sits in a fixed-width slot present on EVERY row — a
+    // conditional flex item shortened only the chosen row's track,
+    // leaving its bar misaligned with the others
+    const you = '<span class="byou">' + (mine ? "(שלך)" : "") + '</span>';
+    const mark = good ? '<span class="ok" aria-label="הטוב ביותר">✓</span> ' : "";
+    return '<div class="barrow' + (mine ? " mine" : "") + '"><span class="bl">' + mark +
+      '<span class="ltr">' + groupLabel(g) + '</span></span>' +
+      '<span class="bartrack"><span class="' + (good ? "good" : "") +
+      '" style="width:' + pct + '%"></span></span>' +
+      '<span class="barval">' + fmtPrimary(val, MODE) + '</span>' + you + '</div>';
+  }).join("");
+  // Card explanation, built here in Hebrew from the verdict numbers (the pool
+  // stores an English phrasing we intentionally don't surface).
+  const noteFor = c => {
+    const i = rows.findIndex(r => r.card === c);
+    if (i < 0) return "";
+    const r = rows[i];
+    if (MODE === "IMP") {
+      const a = fmtPrimary(r.exp_imps, "IMP");
+      return acc.includes(c)
+        ? "ההובלה המיטבית ל-IMP — ערך IMP צפוי של " + a +
+          ", גבוה מכל קלף אחר."
+        : "ערך IMP צפוי " + a + " (מדורג " + (i + 1) + " מתוך " +
+          rows.length + ").";
+    }
+    const a = r.avg_def_tricks.toFixed(2);
+    if (acc.includes(c))
+      return "ההובלה המיטבית — ההגנה זוכה בממוצע ב־" + a +
+             " לקיחות, יותר מכל קלף אחר.";
+    const vs = (r.vs_best >= 0 ? "+" : "") + (r.vs_best || 0).toFixed(2);
+    return "בממוצע " + a + " לקיחות בהגנה (" + vs +
+           " מול ההובלה המיטבית · מדורג " + (i + 1) + " מתוך " +
+           rows.length + ").";
+  };
+  let expl = noteFor(acc[0]);
+  if (!ok) { const y = noteFor(chosen); if (y) expl += "\n\n" + y; }
+  document.getElementById("lead-expl").textContent = expl;
+  const lv = (P.classification && P.classification.difficulty_level) || P.difficulty;
+  document.getElementById("difficulty").innerHTML =
+    glossHtml("diff", "רמת קושי") + " " + lv + "/5";
+  // ranked leads table (rows already sorted best-first, so the serial-number
+  // column was dropped to save width): lead / score / expected defensive
+  // tricks / expected IMP value / set probability / BEN policy. The active
+  // mode's own metric column is the leading (emphasized) one; every metric
+  // shows in BOTH modes.
+  const mpEm = MODE === "MP" ? ' class="emph"' : "";
+  const impEm = MODE === "IMP" ? ' class="emph"' : "";
+  let rt = "<tr><th>קלף</th>" +
+    "<th>" + glossHtml("panel", "ציון") + "</th>" +
+    "<th" + mpEm + ">" + glossHtml("tricks", "לקיחות") + "</th>" +
+    "<th" + impEm + ">" + glossHtml("ev", "IMP צפוי") + "</th>" +
+    "<th>" + glossHtml("set", "סיכוי הכשלה") + "</th>" +
+    "<th>" + glossHtml("ben", "BEN") + "</th></tr>";
+  rows.forEach((r, i) => {
+    const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
+    rt += "<tr" + g + '><td><span class="ltr">' +
+      cardHtml(r.card) + '</span></td>' +
+      "<td>" + btScoreChipHtml(btScoreLead(P, r.card, MODE).score, true) +
+      "</td>" +
+      "<td" + mpEm + ">" + r.avg_def_tricks.toFixed(2) + "</td>" +
+      '<td class="ltr' + (MODE === "IMP" ? " emph" : "") + '">' +
+      (r.exp_imps === undefined ? "—"
+        : (r.exp_imps >= 0 ? "+" : "−") + Math.abs(r.exp_imps).toFixed(2)) +
+      "</td><td>" +
+      (r.set_prob === undefined ? "—" : Math.round(r.set_prob * 100) + "%") +
+      "</td><td>" +
+      (r.ben_softmax === undefined ? "—"
+        : Math.round(r.ben_softmax * 100) + "%") +
+      "</td></tr>";
+  });
+  document.getElementById("ltable").innerHTML = rt;
+  if (P.full_deal) {
+    const seats = ["N", "E", "S", "W"];
+    const decl = P.declarer, dummy = seats[(seats.indexOf(decl) + 2) % 4];
+    const pard = seats[(seats.indexOf(P.leader) + 2) % 4];
+    const roles = {};
+    roles[decl] = "decl"; roles[dummy] = "dummy";
+    roles[P.leader] = "lead"; if (!roles[pard]) roles[pard] = "pard";
+    document.getElementById("fulldeal").innerHTML =
+      fullDealHtml(P.full_deal, roles);
+  }
+  document.getElementById("verdict").style.display = "block";
+  if (!document.getElementById("retry-answer")) {
+    const rb = document.createElement("button");
+    rb.type = "button"; rb.className = "big"; rb.id = "retry-answer";
+    rb.style.cssText = "background:var(--card);color:var(--accent);" +
+      "border:1px solid var(--accent)";
+    rb.textContent = "נסה שוב (לא ישפיע על הציון)";
+    rb.onclick = resetForRetry;
+    const vd = document.getElementById("verdict");
+    const nx = document.getElementById("next");
+    if (nx && nx.parentNode === vd) vd.insertBefore(rb, nx);
+    else vd.appendChild(rb);
+  }
+}
+function commit(a) {
+  if (store()[P.id] && !RETRYING) return;
+  reveal(a);
+  const rec = window.BT.gradeLead(P, a, MODE);
+  window.BT.record(P.id, rec);   // updates the cache synchronously
+  if (!RETRYING) bumpSession(rec.score, P.id, "lead");
+  RETRYING = false;
+  const hl = document.getElementById("headline");
+  // land the result at the top of the viewport (focus() alone scrolls
+  // unreliably right after the verdict flips to display:block on mobile)
+  if (hl) { scrollToEl(hl, "start"); hl.focus({preventScroll: true}); }
+  // warm the next problem so the "next" tap navigates instantly (best-effort)
+  (async () => {
+    const ses = getSession();
+    if (ses && (ses.count || 0) >= ses.size) return;   // session done -> no next
+    try { if (!INDEX) INDEX = await fetchIndex(); } catch (e) { return; }
+    const s = getSession();
+    const flt = (s && s.kind === "lead")
+      ? {kind: "lead", mode: s.mode || leadMode(),
+         levels: s.levels, types: s.types}
+      : resolveFilters(INDEX, loadLead(), "lead");
+    prefetchNext(INDEX, flt);
+  })();
+}
+/* two-step selection: first tap arms the card, a second (confirm) tap
+   leads it \\u2014 so one stray tap never locks in a final answer */
+let ARMED = null;
+function arm(btn) {
+  if (store()[P.id] && !RETRYING) return;
+  const a = btn.dataset.action;
+  const box = document.getElementById("confirm");
+  document.querySelectorAll("button.cardbtn")
+    .forEach(b => b.classList.remove("chosen"));
+  if (ARMED === a) { ARMED = null; box.innerHTML = ""; return; }
+  ARMED = a;
+  btn.classList.add("chosen");
+  box.innerHTML = '<div class="card confirmbox"><div class="l1">' +
+    '<span class="bidchip">' + cardHtml(a) + '</span>' +
+    '<span class="shows">להוביל קלף זה?</span></div>' +
+    '<button class="big" id="go">הובל <span class="ltr">' + cardHtml(a) + '</span></button></div>';
+  const go = document.getElementById("go");
+  go.onclick = () => {
+    ARMED = null; box.innerHTML = "";
+    commit(a);
+  };
+  // the confirm step can sit below the keypad — bring it into view and focus
+  // it so the required second tap is obvious and keyboard-reachable
+  scrollToEl(box, "center");
+  go.focus({preventScroll: true});
+}
+/* Escape backs out of an armed (not-yet-confirmed) card. */
+function cancelArm() {
+  if (!ARMED) return;
+  const prev = document.querySelector("button.cardbtn.chosen");
+  ARMED = null;
+  document.getElementById("confirm").innerHTML = "";
+  document.querySelectorAll("button.cardbtn")
+    .forEach(b => b.classList.remove("chosen"));
+  if (prev) prev.focus();
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") cancelArm();
+});
+function loadLead() {
+  try { return JSON.parse(localStorage.getItem("bt_lead_filters")); }
+  catch (e) { return null; }
+}
+async function init() {
+  const q = new URLSearchParams(location.search);
+  const id = q.get("id");
+  try { P = takePrefetch(id) || await window.BT.getProblem(id); }
+  catch (e) {
+    const box = document.getElementById("problem");
+    box.removeAttribute("aria-label");   // was "loading…"; now an error
+    box.innerHTML = loadErrorHtml("retry-load");
+    box.querySelector("#retry-load").onclick = () => init();
+    return;
+  }
+  if (!P) { document.getElementById("problem").innerHTML =
+    '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
+    '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }
+  // active training mode: URL param wins, then the mode this problem was
+  // forged for (each section serves its own generator's pool). A prior
+  // answer replays in the mode it was graded in; a legacy problem without
+  // IMP metrics falls back to MP (it must never be ranked by IMPs).
+  const qm = q.get("mode");
+  MODE = qm === "IMP" || qm === "MP" ? qm : targetModeOf(P);
+  const prevAns = store()[P.id];
+  if (prevAns && (prevAns.trainingMode === "MP" ||
+                  prevAns.trainingMode === "IMP"))
+    MODE = prevAns.trainingMode;
+  if (MODE === "IMP" && !hasImpMetrics(P)) { MODE = "MP"; MODE_FALLBACK = true; }
+  const meanings = (P.explanations && P.explanations.auction) || [];
+  // contract is {level}{denom}{declarer}{doubled}, e.g. 4HE / 3NTWx / 6SSxx —
+  // strip the declarer seat AND any double marker, then show a doubled tag.
+  const cm = /^(\d(?:NT|[CDHS]))[NESW](x{0,2})$/.exec(P.contract);
+  const callPart = cm ? cm[1] : P.contract.slice(0, -1);
+  const dblTag = cm && cm[2] === "xx" ? " כפל כפליים"
+               : cm && cm[2] === "x" ? " כפל" : "";
+  const dblText = cm && cm[2] === "xx" ? "מוכפל כפליים"
+                : cm && cm[2] === "x" ? "מוכפל" : "לא מוכפל";
+  document.getElementById("meta").innerHTML =
+    'חוזה <span class="ltr">' + callHtml(callPart) + '</span>' + dblTag +
+    ' ע"י ' + P.declarer + " · אתה מוביל (" + P.leader + ")";
+  // mode banner: the active mode, its objective, and the deal facts
+  // (contract, declarer, vulnerability, doubling status) — always visible.
+  const info = MODE_INFO[MODE];
+  document.getElementById("modebanner").innerHTML =
+    '<div class="modebanner"><button type="button" class="modechip" ' +
+    'data-gloss="' + (MODE === "IMP" ? "imp" : "mp") + '">' + info.banner +
+    '</button><span class="modegoal">' + info.goal + '</span></div>' +
+    '<div class="ctline">חוזה <b class="ltr">' + callHtml(callPart) +
+    '</b>' + dblTag + ' ע"י <b>' + P.declarer + '</b> · פגיעות: <b>' +
+    vulLabel(P.vul) + '</b> · ' + dblText + '</div>' +
+    (MODE_FALLBACK
+      ? '<div class="fog">מדדי IMP אינם זמינים לבעיה זו (רשומה מדור ' +
+        'קודם) — מוצג מצב MP.</div>' : "");
+  document.getElementById("problem").innerHTML =
+    '<div class="card">' + typeBadgeHtml(P) +
+    completeAuctionTableHtml(P, meanings) +
+    '<div id="bidnote"></div>' +
+    '<p class="muted" style="margin:6px 0 0">הקש על הכרזה כדי לראות את משמעותה · ' +
+    'הקש על קלף למטה כדי להוביל אותו.</p></div>';
+  let openNote = -1;
+  const tbl = document.querySelector("table.bidding");
+  if (tbl) tbl.querySelectorAll(".call.expl").forEach(el => {
+    el.setAttribute("role", "button"); el.setAttribute("tabindex", "0"); });
+  if (tbl) tbl.addEventListener("keydown", ev => {
+    if ((ev.key === "Enter" || ev.key === " ") && ev.target.closest(".call.expl")) {
+      ev.preventDefault(); ev.target.click(); } });
+  if (tbl) tbl.addEventListener("click", ev => {
+    const el = ev.target.closest(".call.expl");
+    const box = document.getElementById("bidnote");
+    document.querySelectorAll(".call.open").forEach(c => c.classList.remove("open"));
+    if (!el || +el.dataset.i === openNote) { openNote = -1; box.innerHTML = ""; return; }
+    openNote = +el.dataset.i;
+    el.classList.add("open");
+    const a = meanings[openNote] || {};
+    // prefer the terse grammar over the raw GIB prose, matching the
+    // bidding page; both stay English by design
+    const note = a.card ? terse(a.card, a.call) : (a.text || "");
+    box.innerHTML = '<div class="bidnote"><b><span class="ltr">' +
+      cardHtml_or_call(a.call) + ' (' + (a.seat || "") + ')</span></b> ' +
+      '<span class="en">' + note + '</span>' +
+      '<button class="x" aria-label="' + HE.close + '">✕</button></div>';
+    box.querySelector(".x").onclick = () => {
+      openNote = -1; box.innerHTML = "";
+      document.querySelectorAll(".call.open").forEach(c => c.classList.remove("open"));
+    };
+  });
+  const parts = P.hand.split(".");
+  document.getElementById("grid").innerHTML = ["S", "H", "D", "C"].map((s, i) => {
+    const btns = (parts[i] || "").split("").map(rk => {
+      const face = rk === "T" ? "10" : rk;
+      return '<button class="cardbtn" aria-label="' + cardLabel(s + rk) +
+        '" data-action="' + s + rk + '">' + face + '</button>';
+    }).join("");
+    return '<div class="suitrow"><span class="s">' + suitHtml(s) + '</span>' +
+      (btns || '<span class="muted">—</span>') + '</div>';
+  }).join("");
+  document.querySelectorAll("button.cardbtn").forEach(b => b.onclick = () => arm(b));
+  document.getElementById("next").onclick = async () => {
+    const s = getSession();
+    if (s && (s.count || 0) >= s.size) { location.href = "index.html?summary=1"; return; }
+    try { if (!INDEX) INDEX = await fetchIndex(); }
+    catch (e) {
+      const box = document.getElementById("problem");
+      box.removeAttribute("aria-label");
+      box.innerHTML = loadErrorHtml("retry-load");
+      box.querySelector("#retry-load").onclick = () => init();
+      return;
+    }
+    const flt = (s && s.kind === "lead")
+      ? {kind: "lead", mode: s.mode || leadMode(),
+         levels: s.levels, types: s.types}
+      : resolveFilters(INDEX, loadLead(), "lead");
+    const pf = readPrefetch();
+    // use the prefetched id only if it still exists, is unseen, and matches the
+    // active filter (it may have gone stale — seen elsewhere, or the filter/
+    // mode changed in another tab since the prefetch).
+    const pfp = pf && pf.id && INDEX.problems.find(p => p.id === pf.id);
+    const nid = (pfp && !store()[pf.id] && matchesFilters(pfp, flt))
+      ? pf.id : pickUnseen(INDEX, flt);
+    if (!nid) { location.href = "index.html?summary=1"; return; }
+    location.href = routeFor("lead", nid);
+  };
+  const prev = store()[P.id];
+  const retryParam = new URLSearchParams(location.search).get("retry") === "1";
+  if (prev && !retryParam) reveal(prev.answer);
+  else {
+    if (prev && retryParam) RETRYING = true;
+    // fresh/answerable problem: make sure the hand keypad is on screen so the
+    // cards are visible without a manual scroll
+    ensureVisible(document.getElementById("grid"), "center");
+  }
+}
+function cardHtml_or_call(tok) { return tok ? callHtml(tok) : ""; }
+window.addEventListener("bt-attempts-synced", () => {
+  if (!P) return;
+  const prev = store()[P.id];
+  const vd = document.getElementById("verdict");
+  if (prev && !RETRYING && !ARMED && (!vd || vd.style.display === "none"))
+    reveal(prev.answer);
+});
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
+</script>
+</body></html>

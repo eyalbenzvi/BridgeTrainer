@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>(function(){try{var d=document.documentElement,t=localStorage.getItem('bt_theme'),s=localStorage.getItem('bt_scale');if(t&&t!=='system')d.setAttribute('data-theme',t);if(s&&s!=='s')d.setAttribute('data-scale',s);}catch(e){}})();</script>
+<title>בעיית הכרזה</title>
+<link rel="stylesheet" href="app.css?v=0a30c460">
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js" crossorigin>
+<link rel="modulepreload" href="bt-logic.js">
+<link rel="modulepreload" href="firebase-config.js">
+<script type="module" src="bt-firebase.js"></script></head>
+<body data-scenario="bidding">
+<main id="main" tabindex="-1">
+<div class="topbar">
+<a href="index.html">&rarr; דף הבית</a>
+<span id="meta"></span>
+</div>
+<div class="sessribbon" id="sessribbon" hidden></div>
+<div id="problem"><div class="card" aria-label="טוען את הבעיה">
+<div class="skl" style="width:35%"></div>
+<div class="skl" style="width:100%;height:120px"></div>
+<div class="skl" style="width:70%"></div>
+</div></div>
+<div class="candidates" id="cands" role="group" aria-label="בחר הכרזה"></div>
+<div id="confirm"></div>
+<div id="verdict" class="card" role="status" aria-live="polite">
+<h2 class="headline" id="headline" tabindex="-1"></h2>
+<div class="scoreline" id="scoreline"></div>
+<div class="subline" id="subline"></div>
+<div class="diffline" id="diffline"></div>
+<div id="fog"></div>
+<div class="legend"><i style="background:var(--win)"></i><button
+type="button" class="gloss" data-gloss="win">זכייה</button>
+<i style="background:var(--push)"></i><button type="button" class="gloss"
+data-gloss="win">שוויון</button>
+<i style="background:var(--loss)"></i><button type="button" class="gloss"
+data-gloss="win">הפסד</button></div>
+<div id="opts"></div>
+<details class="notes" id="more-box" style="display:none" open>
+<summary>כל האפשרויות שנבדקו</summary><div id="opts-more"></div></details>
+<div class="footnote" id="footnote"></div>
+<div class="footnote" id="source"></div>
+<button class="big" id="next">הבעיה הבאה &larr;</button>
+<details class="notes" id="deal-box"><summary>החלוקה המלאה</summary>
+<div id="fulldeal"></div></details>
+<details class="notes" id="review-box" style="display:none">
+<summary>סקירת המכרז, הכרזה אחר הכרזה</summary><ul id="review"></ul></details>
+<details class="notes" id="meanings-box"><summary>משמעויות ההכרזות
+במכרז</summary><ul id="meanings"></ul></details>
+<details class="notes" id="prose-box" style="display:none">
+<summary>ניתוח מלא</summary><div id="explanation"
+style="white-space:pre-line;font-size:13px"></div></details>
+<details class="notes" id="cmp-box" style="display:none" open>
+<summary>טבלת השוואה: כל ההכרזות שנבדקו</summary>
+<table id="ctable" class="plain"></table>
+<p class="footnote">הציון בסולם הפאנל (0-100); עמודת ה־IMP היא הפער מול
+ההכרזה המיטבית, לאחר תיקון single-dummy; עמודת BEN — הסיכוי שמנוע ההכרזות
+היה בוחר בהכרזה זו.</p></details>
+<details class="notes" id="raw-box"><summary>נתוני double-dummy גולמיים</summary>
+<table id="rtable" class="plain"></table></details>
+</div>
+</main>
+<script>window.TAXONOMY_HE = {"open_or_pass": ["החלטת פתיחה", "לפתוח יד גבולית, או לפאס — ובאיזו פתיחה?"], "preempt_decision": ["הכרזת מנע", "להפריע או לא — ועד איזו רמה?"], "enter_auction": ["כניסה למכרז", "אוברקול, כפל, או להישאר בחוץ?"], "compete_or_sell": ["קרב חוזה חלקי", "להכריז עוד פעם, לפאס, או לדחוף אותם גבוה יותר?"], "invite_or_game": ["הזמנה או משחק מלא", "לעצור, להזמין, או להכריז משחק מלא?"], "slam_try": ["ניסיון סלם", "להתקדם לסלאם, או להסתפק במשחק מלא?"], "choice_of_strain": ["בחירת שליט", "הרמה סגורה — אבל היכן: איזו סדרה, או ללא־שליט?"], "double_or_bid": ["להכפיל או להכריז", "כפל, להמשיך להכריז, או לפאס?"], "sacrifice_decision": ["הקרבה", "לדרוס את החוזה שלהם במחיר מינוס, או להגן?"], "describe_hand": ["תיאור היד", "איזו הכרזה בונה מתארת הכי טוב את הכוח והצורה?"], "lead_part_score": ["חוזה חלקי", "הובלה נגד חוזה חלקי (מתחת למשחק מלא)."], "lead_3nt": ["3NT", "הובלה נגד משחק ללא שליט."], "lead_suit_game": ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 במייג'ור / 5 במיינור)."], "lead_slam": ["סלם", "הובלה נגד סלם (רמה 6 או 7)."], "lead_doubled": ["חוזה מוכפל", "הובלה נגד חוזה מוכפל."]};</script>
+<script src="bt-shared.js?v=d0206df9"></script>
+<script>
+let P = null, INDEX = null, NOTES = [], OPTSHOWS = {};
+// true while re-attempting an already-answered problem: the re-answer is
+// recorded (attemptCount++) but keeps the first-attempt score and does NOT
+// count toward the practice session.
+let RETRYING = false;
+function resetForRetry() {
+  RETRYING = true;
+  document.getElementById("verdict").style.display = "none";
+  const rb = document.getElementById("retry-answer");
+  if (rb) rb.remove();
+  document.querySelectorAll("button.cand").forEach(b => {
+    b.disabled = false;
+    b.classList.remove("good", "near", "bad", "off", "chosen");
+  });
+  const cf = document.getElementById("confirm");
+  if (cf) cf.innerHTML = "";
+  const turn = document.querySelector("table.bidding td.turn");
+  if (turn) turn.innerHTML = "?";
+  ARMED = null;
+  scrollToEl(document.getElementById("cands"), "center");
+  const first = document.querySelector("button.cand");
+  if (first) first.focus();   // move focus off the now-hidden verdict
+}
+function stripNoise(t) {
+  return (t || "").replace(/Next call is usually[^]*?%\)\.\s*/g, "")
+                  .replace(/most common continuation:[^]*?%\)\.\s*/g, "");
+}
+function evHtml(row, isTop) {
+  const ci = row.ci !== undefined ?
+    ` <small>\u00b1${(+row.ci).toFixed(1)}</small>` : "";
+  const ev = (+row.ev).toFixed(1);
+  if (isTop) {
+    return `<span class="best">הטוב</span>` +
+           (row.ev > 0 ? ` +${ev}${ci}` : "");
+  }
+  return `${row.ev >= 0 ? "+" : "\u2212"}${Math.abs(+ev).toFixed(1)}${ci}`;
+}
+function chipsHtml(row) {
+  const bits = [];
+  const n = (P.quality && P.quality.n_samples) ||
+            (P.generator && P.generator.n_deals) || 0;
+  const seats = ["N", "E", "S", "W"];
+  const partner = seats[(seats.indexOf(P.seat) + 2) % 4];
+  for (const [tok, cnt] of (row.contracts || []).slice(0, 3)) {
+    const share = n ? cnt / n : 0;
+    if (share < 0.02) continue;
+    const decl = tok.slice(-1);
+    const ours = decl === P.seat || decl === partner;
+    bits.push(`<span class="chip${ours ? "" : " them"}">` +
+              `${contractHtml(tok)} ${pct(share)}</span>`);
+  }
+  if (row.policy !== undefined)
+    bits.push(`<span>${glossHtml("ben", HE.engine)} ` +
+              `${pct(row.policy)}</span>`);
+  bits.push(`<span>${glossHtml("win", HE.wins)} ` +
+            `${pct(row.p_gain)}</span>`);
+  return `<div class="chips">${bits.join("")}</div>`;
+}
+function optRowHtml(row, i, chosen, accepted) {
+  const dead = (P.verdict.dead_options || []).some(d => d.bid === row.bid);
+  const push = row.p_push !== undefined ? row.p_push
+             : Math.max(0, 1 - row.p_gain - row.p_loss);
+  const tags = (accepted.includes(row.bid)
+                  ? '<span class="tag best">הטוב</span>' : "") +
+               (row.bid === chosen ? '<span class="tag you">שלך</span>' : "");
+  const shows = row.shows ? `<span class="shows en">${row.shows}</span>`
+                          : '<span class="shows"></span>';
+  // widths clamp missing probabilities to 0 (safeNum) and labels show an em
+  // dash rather than "NaN%" (pct) — BUG-5.
+  const gw = safeNum(row.p_gain) * 100, lw = safeNum(row.p_loss) * 100;
+  const bar = `<div class="wpl" role="img" aria-label="זכייה ` +
+    `${pct(row.p_gain)}, שוויון ${pct(push)}, הפסד ${pct(row.p_loss)}">` +
+    `<span class="w" style="width:${gw}%">${gw > 12 ? pct(row.p_gain) : ""}</span>` +
+    `<span class="l" style="width:${lw}%">${lw > 12 ? pct(row.p_loss) : ""}</span></div>`;
+  const mine = row.bid === chosen && !accepted.includes(row.bid);
+  return `<div class="opt${mine ? " mine" : ""}">` +
+    `<div class="l1"><span class="bidchip">${callHtml(row.bid)}` +
+    `${dead ? "\u2020" : ""}</span>${tags}${shows}` +
+    `<span class="ev">${evHtml(row, i === 0)}</span></div>` +
+    `${bar}${chipsHtml(row)}</div>`;
+}
+function reveal(chosen) {
+  const v = P.verdict;
+  const sp = btScoreBidding(P, chosen);
+  document.querySelectorAll("button.cand").forEach(b => {
+    const a = b.dataset.action;
+    if (v.accepted.includes(a)) b.classList.add("good");
+    else if (a === chosen) b.classList.add(sp.score >= NEAR_MIN ? "near" : "bad");
+    else b.classList.add("off");
+    if (a === chosen) b.classList.add("chosen");
+    b.disabled = true;
+  });
+  const turn = document.querySelector("table.bidding td.turn");
+  if (turn) turn.innerHTML = callHtml(chosen);
+  const ok = v.accepted.includes(chosen);
+  const rows = v.corrected || [];
+  const chip = btScoreChipHtml(sp.score);
+  const band = BAND_HE[btBandOf(sp.score)];
+  let head;
+  if (v.toss_up) {
+    head = `${chip} ${band} — שקול: ` +
+      `<span class="ltr">${v.accepted.map(callHtml).join(" / ")}</span> שניהם טובים`;
+  } else if (ok) {
+    head = `${chip} הכרזה מיטבית — ` +
+           `<span class="ltr">${callHtml(chosen)}</span>`;
+  } else {
+    const mine = rows.find(r => r.bid === chosen);
+    const gap = mine ? ` (${(+mine.ev).toFixed(1)} IMP)` : "";
+    head = `${chip} ${band} — עדיף היה ` +
+           `<span class="ltr">${callHtml(v.accepted[0])}${gap}</span>, בחרת ` +
+           `<span class="ltr">${callHtml(chosen)}</span>`;
+  }
+  document.getElementById("headline").innerHTML = head;
+  document.getElementById("scoreline").textContent = btScoreExplain(sp);
+  const n = (P.quality && P.quality.n_samples) ||
+            (P.generator && P.generator.n_deals) || 0;
+  document.getElementById("subline").innerHTML =
+    glossHtml("imp", "IMP") + " \u00b7 " + glossHtml("sd", "תוצאה מתוקנת") +
+    (n ? ` \u00b7 ${n} חלוקות מדומות` : "");
+  document.getElementById("diffline").innerHTML = diffLineHtml(P);
+  if (v.fog) document.getElementById("fog").innerHTML =
+    '<div class="fog">\u26a0 שתי שיטות ההערכה חלוקות כאן (\u201cערפל ' +
+    'double-dummy\u201d) \u2014 הוודאות נמוכה יותר.</div>';
+  // learn-first: the best option and YOUR option up front, the rest folded
+  const idx = rows.map((r, i) => ({r, i}));
+  const main = idx.filter(x => x.i === 0 || x.r.bid === chosen);
+  const rest = idx.filter(x => x.i !== 0 && x.r.bid !== chosen);
+  document.getElementById("opts").innerHTML =
+    main.map(x => optRowHtml(x.r, x.i, chosen, v.accepted)).join("");
+  if (rest.length) {
+    document.getElementById("opts-more").innerHTML =
+      rest.map(x => optRowHtml(x.r, x.i, chosen, v.accepted)).join("");
+    document.getElementById("more-box").style.display = "block";
+  }
+  const feet = [];
+  if ((v.dead_options || []).length)
+    feet.push("\u2020 לא ניצחה באף חלוקה מדומה.");
+  if ((v.flags || []).includes("doubled_heavy"))
+    feet.push("חלק ניכר מהמרווח בהכפלה מניח הגנת double-dummy \u2014 " +
+              "התייחס למספר המדויק בזהירות.");
+  if (P.explanations && P.explanations.note) {
+    const note = P.explanations.note;
+    // an unmapped engine note stays English — isolate it so its final
+    // period doesn't jump to the front of the RTL line
+    feet.push(NOTE_HE[note.toLowerCase().trim()] ||
+              `<span class="en">${esc(note[0].toUpperCase() + note.slice(1))}.</span>`);
+  }
+  document.getElementById("footnote").innerHTML = feet.join(" ");
+  if (P.source) {
+    const s = P.source;
+    document.getElementById("source").innerHTML =
+      `יד אמיתית: <b class="en">${esc(s.teams)}</b>, ` +
+      `<span class="en">${esc(s.event)}</span>, לוח ${esc(s.board)}.`;
+  }
+  // bid-by-bid review from the same terse grammar as the tap notes
+  const items = [];
+  const seats = ["N", "E", "S", "W"];
+  let seat = P.dealer;
+  P.auction.forEach((tok, j) => {
+    const who = seat === P.seat ? "אתה" : seat;
+    if (NOTES[j])
+      items.push(`<li><b>${who} <span class="ltr">${callHtml(tok)}` +
+                 `</span></b> \u2014 ` +
+                 `<span class="en">${NOTES[j]}</span></li>`);
+    seat = seats[(seats.indexOf(seat) + 1) % 4];
+  });
+  if (items.length) {
+    document.getElementById("review").innerHTML = items.join("");
+    document.getElementById("review-box").style.display = "block";
+  }
+  // legacy prose analysis (authored problems), noise stripped
+  if (P.explanation && !(P.generator && P.generator.engine)) {
+    document.getElementById("explanation").textContent =
+      stripNoise(P.explanation);
+    document.getElementById("prose-box").style.display = "block";
+  }
+  if (P.meanings && P.meanings.length) {
+    document.getElementById("meanings").innerHTML = P.meanings.map(m =>
+      `<li><b>${esc(m.seat)}</b>: ${esc(m.meaning)}</li>`).join("");
+  } else {
+    document.getElementById("meanings-box").style.display = "none";
+  }
+  if (P.full_deal) {
+    const seats = ["N", "E", "S", "W"];
+    const pard = seats[(seats.indexOf(P.seat) + 2) % 4];
+    const roles = {};
+    roles[P.seat] = "you"; roles[pard] = "pard";
+    document.getElementById("fulldeal").innerHTML =
+      fullDealHtml(P.full_deal, roles);
+  } else {
+    document.getElementById("deal-box").style.display = "none";
+  }
+  // comparison table: rank / bid / panel score / IMP gap / win / push /
+  // loss for EVERY candidate — mirrors the ranked-leads table on the
+  // lead page
+  if (rows.length) {
+    const pct = x => (x === undefined || Number.isNaN(x))
+      ? "\u2014" : Math.round(x * 100) + "%";
+    let ct = "<tr><th>#</th><th>הכרזה</th>" +
+      "<th>" + glossHtml("panel", "ציון") + "</th>" +
+      '<th class="emph">' + glossHtml("ev", "IMP צפוי") + "</th>" +
+      "<th>" + glossHtml("win", "זכייה") + "</th>" +
+      "<th>" + glossHtml("win", "שוויון") + "</th>" +
+      "<th>" + glossHtml("win", "הפסד") + "</th>" +
+      "<th>" + glossHtml("ben", "BEN") + "</th></tr>";
+    rows.forEach((r, i) => {
+      const push = r.p_push !== undefined ? r.p_push
+        : (r.p_gain !== undefined && r.p_loss !== undefined
+            ? Math.max(0, 1 - r.p_gain - r.p_loss) : undefined);
+      const dead = (v.dead_options || []).some(d => d.bid === r.bid);
+      const tags = (v.accepted.includes(r.bid)
+                      ? ' <span class="tag best">הטוב</span>' : "") +
+        (r.bid === chosen ? ' <span class="tag you">שלך</span>' : "");
+      const ci = r.ci !== undefined ?
+        ` <small>\u00b1${(+r.ci).toFixed(1)}</small>` : "";
+      const ev = (r.ev === undefined || r.ev === null) ? "\u2014"
+        : (r.ev >= 0 ? "+" : "\u2212") + Math.abs(+r.ev).toFixed(1) + ci;
+      ct += `<tr${r.bid === chosen ? ' class="mine"' : ""}` +
+        `${v.accepted.includes(r.bid) ? ' style="font-weight:700"' : ""}>` +
+        `<td>${i + 1}</td>` +
+        `<td><span class="ltr">${callHtml(r.bid)}` +
+        `${dead ? "\u2020" : ""}</span>${tags}</td>` +
+        `<td>${btScoreBidding(P, r.bid).score}</td>` +
+        `<td class="ltr emph">${ev}</td>` +
+        `<td>${pct(r.p_gain)}</td><td>${pct(push)}</td>` +
+        `<td>${pct(r.p_loss)}</td><td>${pct(r.policy)}</td></tr>`;
+    });
+    document.getElementById("ctable").innerHTML = ct;
+    document.getElementById("cmp-box").style.display = "block";
+  }
+  const rbox = document.getElementById("rtable");
+  if (v.raw && v.raw.length) {
+    let h = "<tr><th>הכרזה</th><th>" + glossHtml("ev", "EV (IMP)") +
+            "</th><th>" + glossHtml("win", "זכייה") + "</th>" +
+            "<th>" + glossHtml("win", "הפסד") + "</th></tr>";
+    for (const c of v.raw)
+      h += `<tr><td><span class="ltr">${callHtml(c.bid)}</span></td>` +
+           `<td>${c.ev >= 0 ? "+" : ""}` +
+           `${c.ev} \u00b1 ${c.ci}</td>` +
+           `<td>${pct(c.p_gain)}</td>` +
+           `<td>${pct(c.p_loss)}</td></tr>`;
+    rbox.innerHTML = h;
+  } else document.getElementById("raw-box").style.display = "none";
+  document.getElementById("verdict").style.display = "block";
+  // let the user re-attempt an answered problem (the "review" loop). The
+  // re-answer keeps the first score and doesn't touch the session.
+  if (!document.getElementById("retry-answer")) {
+    const rb = document.createElement("button");
+    rb.type = "button"; rb.className = "big"; rb.id = "retry-answer";
+    rb.style.cssText = "background:var(--card);color:var(--accent);" +
+      "border:1px solid var(--accent)";
+    rb.textContent = "נסה שוב (לא ישפיע על הציון)";
+    rb.onclick = resetForRetry;
+    const vd = document.getElementById("verdict");
+    const nx = document.getElementById("next");
+    if (nx && nx.parentNode === vd) vd.insertBefore(rb, nx);
+    else vd.appendChild(rb);
+  }
+}
+function choose(action) {
+  if (store()[P.id] && !RETRYING) return;
+  reveal(action);
+  const rec = window.BT.gradeBidding(P, action);
+  window.BT.record(P.id, rec);   // updates the cache synchronously (excluded below)
+  if (!RETRYING) bumpSession(rec.score, P.id, "bidding");
+  RETRYING = false;
+  const hl = document.getElementById("headline");
+  // land the result at the top of the viewport (focus() alone scrolls
+  // unreliably right after the verdict flips to display:block on mobile)
+  if (hl) { scrollToEl(hl, "start"); hl.focus({preventScroll: true}); }
+  // warm the next problem so the "next" tap navigates instantly (best-effort)
+  (async () => {
+    const ses = getSession();
+    if (ses && (ses.count || 0) >= ses.size) return;   // session done -> no next
+    try { if (!INDEX) INDEX = await fetchIndex(); } catch (e) { return; }
+    const s = getSession();
+    const flt = (s && s.kind === "bidding")
+      ? {kind: "bidding", levels: s.levels, types: s.types}
+      : resolveFilters(INDEX, loadFilters(), "bidding");
+    prefetchNext(INDEX, flt);
+  })();
+}
+/* two-step selection: first tap shows what the bid means, a second
+   (confirm) tap locks the answer in */
+let ARMED = null;
+function arm(btn) {
+  if (store()[P.id] && !RETRYING) return;
+  const a = btn.dataset.action;
+  const box = document.getElementById("confirm");
+  document.querySelectorAll("button.cand")
+    .forEach(b => b.classList.remove("chosen"));
+  if (ARMED === a) { ARMED = null; box.innerHTML = ""; return; }
+  ARMED = a;
+  btn.classList.add("chosen");
+  const shows = OPTSHOWS[a];
+  box.innerHTML = `<div class="card confirmbox"><div class="l1">` +
+    `<span class="bidchip">${callHtml(a)}</span>` +
+    (shows ? `<span class="shows en">${shows}</span>`
+           : `<span class="shows">אין תיאור</span>`) + `</div>` +
+    `<button class="big" id="go">הכרז <span class="ltr">${callHtml(a)}</span></button></div>`;
+  const go = document.getElementById("go");
+  go.onclick = () => {
+    ARMED = null; box.innerHTML = "";
+    choose(a);
+  };
+  // the confirm step can render below the fold under a tall candidate grid —
+  // bring it into view and move focus onto it so the required second tap is
+  // obvious and keyboard-reachable
+  scrollToEl(box, "center");
+  go.focus({preventScroll: true});
+}
+/* Escape backs out of an armed (not-yet-confirmed) choice — a stray first tap
+   never traps you in the confirm step. */
+function cancelArm() {
+  if (!ARMED) return;
+  const prev = document.querySelector("button.cand.chosen");
+  ARMED = null;
+  document.getElementById("confirm").innerHTML = "";
+  document.querySelectorAll("button.cand")
+    .forEach(b => b.classList.remove("chosen"));
+  if (prev) prev.focus();
+}
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape") cancelArm();
+});
+function normalize() {
+  const v = P.verdict;
+  // tolerant of every stored accepted shape, with empties dropped so
+  // callHtml(v.accepted[0]) in reveal() never crashes on undefined (BUG-4).
+  v.accepted = normAccepted(v);
+  v.fog = v.fog || (v.flags || []).includes("dd_fog");
+  const policy = {};
+  for (const c of P.candidates || []) {
+    if (c.call) policy[c.call] = c.policy;
+  }
+  const cards = {};
+  for (const o of (P.explanations && P.explanations.options) || []) {
+    if (o.card) cards[o.bid] = o.card;
+    // what the bid shows, terse; older records only baked prose like
+    // "5\u2663 \u2014 11-21 HCP. Next call ..." \u2014 take the first
+    // clause and strip the wordiness
+    let m = o.card ? terse(o.card, o.bid) : "";
+    const first = o.text ? o.text.split(". ")[0] : "";
+    if (!m && first.includes("\u2014")) {
+      m = first.replace(/^[^\u2014]*\u2014\s*/, "").replace(/\.$/, "")
+        .replace(/^limited \u2014 at most (\d+) HCP$/, "0-$1")
+        .replace(/\s*HCP\b/g, "");
+    }
+    OPTSHOWS[o.bid] = m;
+  }
+  if (v.table && !v.corrected) {
+    v.corrected = v.table.map(r => ({
+      bid: r.bid, ev: r.ev_imp_vs_top, ci: r.ci,
+      p_gain: r.p_gain,
+      // derive p_loss only when both inputs are present; otherwise leave it
+      // undefined (pct/safeNum render that as "—"/0) rather than emit NaN when
+      // p_push is missing — BUG-5.
+      p_loss: r.p_loss !== undefined ? r.p_loss
+            : (r.p_gain !== undefined && r.p_push !== undefined
+                 ? Math.max(0, 1 - r.p_gain - r.p_push) : undefined),
+      p_push: r.p_push,
+      // Firestore forbids nested arrays, so the uploader wraps each
+      // [contract, count] pair as {items: [...]}; unwrap it back here.
+      // Static-file records keep the plain [contract, count] shape.
+      contracts: (r.top_contracts || []).map(
+        x => (x && x.items) ? x.items : x),
+      policy: policy[r.bid],
+      shows: OPTSHOWS[r.bid] || "",
+    }));
+    v.raw = [];
+  } else if (v.corrected) {
+    // legacy authored-problem records ({action, ev, ...})
+    v.corrected = v.corrected.map(r => ({
+      bid: r.bid || r.action, ev: r.ev, ci: r.ci,
+      p_gain: r.p_gain, p_loss: r.p_loss, p_push: r.p_push,
+      contracts: [], policy: policy[r.bid || r.action], shows: "",
+    }));
+    v.raw = (v.raw || []).map(r => ({
+      bid: r.bid || r.action, ev: r.ev, ci: r.ci,
+      p_gain: r.p_gain, p_loss: r.p_loss }));
+  }
+  if (P.generator)
+    P.generator.n_deals = P.generator.n_deals || P.generator.samples;
+  // tap-note per stem call, from the engine card (terse grammar);
+  // fall back to the baked text minus its "1♦ (W): " prefix
+  NOTES = P.auction.map((tok, j) => {
+    const e = P.explanations && P.explanations.stem &&
+              P.explanations.stem[j];
+    if (!e) return "";
+    const t = e.card ? terse(e.card, tok) : "";
+    if (t) return t;
+    return (e.text || "").replace(/^[^:]*:\s*/, "");
+  });
+}
+async function init() {
+  const id = new URLSearchParams(location.search).get("id");
+  try { P = takePrefetch(id) || await window.BT.getProblem(id); }
+  catch (e) {
+    const box = document.getElementById("problem");
+    box.removeAttribute("aria-label");   // was "loading…"; now an error
+    box.innerHTML = loadErrorHtml("retry-load");
+    box.querySelector("#retry-load").onclick = () => init();
+    return;
+  }
+  if (!P) { document.getElementById("problem").innerHTML =
+    '<div class="card state"><div class="em">הבעיה לא נמצאה.</div>' +
+    '<a class="big" href="index.html">חזרה לתרגול</a></div>'; return; }
+  normalize();
+  document.getElementById("meta").textContent =
+    `IMP \u00b7 מחלק ${P.dealer} \u00b7 אתה ${P.seat}`;
+  document.getElementById("problem").innerHTML =
+    `<div class="card">${typeBadgeHtml(P)}${auctionTableHtml(P, NOTES)}` +
+    `<div id="bidnote"></div>` +
+    // parity with the lead page's guidance (UX-I-4): tell new users the calls
+    // in the auction are tappable
+    `<p class="muted" style="margin:6px 0 0">הקש הכרזה במכרז כדי לראות ` +
+    `את משמעותה.</p>` +
+    `<div class="hand">${handHtml(P.hand)}</div></div>`;
+  // tap a bid -> alert-style explanation strip under the auction
+  let openNote = -1;
+  document.querySelectorAll(".call.expl").forEach(el => {
+    el.setAttribute("role", "button"); el.setAttribute("tabindex", "0");
+  });
+  document.querySelector("table.bidding").addEventListener("keydown", ev => {
+    if ((ev.key === "Enter" || ev.key === " ") && ev.target.closest(".call.expl")) {
+      ev.preventDefault(); ev.target.click();
+    }
+  });
+  document.querySelector("table.bidding").addEventListener("click", ev => {
+    const el = ev.target.closest(".call.expl");
+    const box = document.getElementById("bidnote");
+    document.querySelectorAll(".call.open")
+      .forEach(c => c.classList.remove("open"));
+    if (!el || +el.dataset.i === openNote) {
+      openNote = -1; box.innerHTML = ""; return;
+    }
+    openNote = +el.dataset.i;
+    el.classList.add("open");
+    const seats = ["N", "E", "S", "W"];
+    const seat = seats[(seats.indexOf(P.dealer) + openNote) % 4];
+    box.innerHTML = `<div class="bidnote"><b><span class="ltr">` +
+      `${callHtml(P.auction[openNote])} (${seat})</span></b> ` +
+      `<span class="en">${NOTES[openNote]}</span>` +
+      `<button class="x" aria-label="${HE.close}">\u2715</button></div>`;
+    box.querySelector(".x").onclick = () => {
+      openNote = -1; box.innerHTML = "";
+      document.querySelectorAll(".call.open")
+        .forEach(c => c.classList.remove("open"));
+    };
+  });
+  const cands = document.getElementById("cands");
+  const list = P.candidates.map(c => c.call || c)
+    .sort((a, b) => candOrder(a) - candOrder(b));
+  for (const c of list) {
+    const b = document.createElement("button");
+    b.className = "cand" +
+      (c === "P" ? " p" : c === "X" ? " x" : c === "XX" ? " xx" : "");
+    b.dataset.action = c;
+    b.innerHTML = callHtml(c);
+    b.setAttribute("aria-label", callLabel(c));
+    b.onclick = () => arm(b);
+    cands.appendChild(b);
+  }
+  document.getElementById("next").onclick = async () => {
+    const s = getSession();
+    if (s && (s.count || 0) >= s.size) { location.href = "index.html?summary=1"; return; }
+    try { if (!INDEX) INDEX = await fetchIndex(); }
+    catch (e) {
+      const box = document.getElementById("problem");
+      box.removeAttribute("aria-label");
+      box.innerHTML = loadErrorHtml("retry-load");
+      box.querySelector("#retry-load").onclick = () => init();
+      return;
+    }
+    const flt = (s && s.kind === "bidding")
+      ? {kind: "bidding", levels: s.levels, types: s.types}
+      : resolveFilters(INDEX, loadFilters(), "bidding");
+    // use the prefetched next id if it's still unseen; else pick fresh
+    const pf = readPrefetch();
+    // use the prefetched id only if it still exists, is unseen, and matches the
+    // active filter (it may have gone stale — seen elsewhere, or the filter/
+    // mode changed in another tab since the prefetch).
+    const pfp = pf && pf.id && INDEX.problems.find(p => p.id === pf.id);
+    const nid = (pfp && !store()[pf.id] && matchesFilters(pfp, flt))
+      ? pf.id : pickUnseen(INDEX, flt);
+    if (!nid) { location.href = "index.html?summary=1"; return; }
+    location.href = "p.html?id=" + encodeURIComponent(nid);
+  };
+  const prev = store()[P.id];
+  const retryParam = new URLSearchParams(location.search).get("retry") === "1";
+  // ?retry=1 (from the dashboard "review" links) lands on a clean, answerable
+  // problem instead of replaying the prior answer.
+  if (prev && !retryParam) reveal(prev.answer);
+  else {
+    if (prev && retryParam) RETRYING = true;
+    // fresh/answerable problem: make sure the bidding box is on screen so the
+    // hand + answer controls are visible without a manual scroll
+    ensureVisible(document.getElementById("cands"), "center");
+  }
+}
+// if the background sync (T4) brings in an answer (e.g. from another device)
+// after we've already rendered, reveal it — unless the user is mid-retry or
+// the verdict is already showing.
+window.addEventListener("bt-attempts-synced", () => {
+  if (!P) return;
+  const prev = store()[P.id];
+  const vd = document.getElementById("verdict");
+  if (prev && !RETRYING && !ARMED && (!vd || vd.style.display === "none"))
+    reveal(prev.answer);
+});
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
+</script>
+</body></html>

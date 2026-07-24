@@ -1,0 +1,665 @@
+
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  /* light theme tokens */
+  --felt: #2E6B4F; --felt-deep: #24573F;
+  --on-felt: #ffffff; --on-felt-muted: #D9E7DE;
+  --card: #ffffff; --fg: #1C2B24; --muted: #5C6B62; --line: #D9E0DA;
+  --accent: #2B6CB0; --accent-tint: #2B6CB014;
+  --vul: #B3252F; --nonvul: #E6F4EA; --on-nonvul: #1C5C34;
+  --sp: #2838C8; --he: #C8102E; --di: #BC5A00; --cl: #1A7A1A;
+  --win: #1A7A43; --loss: #C8102E; --push: #A9B3AC;
+  --on-accent: #ffffff; --on-win: #ffffff; --on-loss: #ffffff;
+  --gold: #EAB84C; --on-gold: #2A2410;
+  --warn-bg: #FDF3DF; --warn-fg: #7A5312; --warn-line: #E3C87F;
+  font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+               sans-serif;
+  max-width: 640px; margin: 0 auto; padding: 12px;
+  background: radial-gradient(120% 90% at 50% 0%, var(--felt),
+                              var(--felt-deep)) fixed;
+  color: var(--fg); font-size: 15px; line-height: 1.45;
+}
+@media (prefers-color-scheme: dark) {
+  body {
+    --felt: #10241A; --felt-deep: #0B1A13;
+    --on-felt: #E9F0EB; --on-felt-muted: #9FB4A8;
+    --card: #1B2620; --fg: #E8EDEA; --muted: #97A79D; --line: #33413A;
+    --accent: #6CA6DD; --accent-tint: #6CA6DD1F;
+    --vul: #A62630; --nonvul: #2E4A38; --on-nonvul: #BFE3CC;
+    --sp: #8C96FF; --he: #FF7B72; --di: #FFAB40; --cl: #57C957;
+    --win: #3BB273; --loss: #E5665F; --push: #5B6961;
+  --on-accent: #0B1A13; --on-win: #0B1A13; --on-loss: #0B1A13;
+    --gold: #D9A93E; --on-gold: #241F0C;
+    --warn-bg: #2E2612; --warn-fg: #E7C97E; --warn-line: #6B5A2A;
+  }
+}
+h1 { font-size: 20px; font-weight: 700; color: var(--on-felt); margin: .4em 0; }
+.card { background: var(--card); color: var(--fg); border-radius: 14px;
+        padding: 16px; margin: 12px 0;
+        box-shadow: 0 1px 3px #0003, 0 4px 14px #0000001f; }
+@media (prefers-color-scheme: dark) { .card { border: 1px solid var(--line);
+                                              box-shadow: none; } }
+a { color: var(--accent); }
+.topbar, .meta { display: flex; justify-content: space-between;
+                 align-items: baseline; gap: 8px;
+                 color: var(--on-felt-muted); font-size: 12px; }
+.topbar a { color: var(--on-felt); }
+/* meta text (e.g. the contract line) rides on the green felt, not a card, so
+   it needs the on-felt muted tone — the card --muted is too dark to read. */
+.topbar .muted, .meta .muted { color: var(--on-felt-muted); }
+.muted { color: var(--muted); font-size: 13px; }
+.pill { display: inline-block; border-radius: 999px; padding: 1px 8px;
+        font-size: 12px; border: 1px solid #ffffff55; }
+/* homepage practice filters: difficulty (segmented) + problem type (list),
+   both multi-select and everything selected by default. Each option carries
+   the number of problems it holds. */
+.fgroup { margin: 0 0 16px; }
+.fgroup:last-child { margin-bottom: 0; }
+.grow { display: flex; justify-content: space-between; align-items: baseline;
+        margin: 0 0 8px; }
+.glabel { font-size: 12px; font-weight: 700; text-transform: uppercase;
+          letter-spacing: .05em; color: var(--muted); }
+.alllink { background: none; border: 0; font: inherit; font-size: 12px;
+           font-weight: 600; color: var(--accent); cursor: pointer;
+           /* >=24px tap target (WCAG 2.5.8) without growing the visual text */
+           display: inline-flex; align-items: center;
+           min-height: 24px; padding: 4px 6px; }
+.alllink:hover { text-decoration: underline; }
+/* in-panel guidance when a filter axis is emptied (UX-I-5): tells the user how
+   to leave the "0 problems" dead end instead of only greying the CTA */
+.fhint { font-size: 12px; font-weight: 600; color: var(--loss); margin-top: 6px; }
+/* segmented difficulty control (ordinal, so it reads as one scale) */
+.seg { display: grid; grid-template-columns: repeat(var(--n, 5), 1fr);
+       border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.seg button { font: inherit; border: 0; border-left: 1px solid var(--line);
+              background: var(--card); color: var(--muted); cursor: pointer;
+              padding: 8px 2px 7px; display: flex; flex-direction: column;
+              align-items: center; gap: 2px; line-height: 1.1; }
+.seg button:first-child { border-left: 0; }
+.seg button .sname { font-size: 11px; font-weight: 600; }
+.seg button .scount { font-size: 13px; font-weight: 700;
+                      font-variant-numeric: tabular-nums; }
+.seg button.active { background: var(--accent-tint); color: var(--accent);
+  /* non-colour selection cue (UX-A-8): an inset underline, so the state
+     doesn't rely on the subtle tint/hue alone */
+  box-shadow: inset 0 -3px 0 var(--accent); font-weight: 700; }
+/* problem-type toggle rows: name + proportional volume bar + count */
+.typelist { display: flex; flex-direction: column; gap: 6px; }
+button.typerow { display: flex; align-items: center; gap: 10px; width: 100%;
+                 font: inherit; text-align: left; background: var(--card);
+                 color: var(--fg); border: 1px solid var(--line);
+                 border-radius: 10px; padding: 9px 12px; cursor: pointer; }
+button.typerow .tick { flex: 0 0 auto; width: 18px; height: 18px;
+                       border-radius: 5px; border: 1.5px solid var(--accent);
+                       background: var(--accent); color: var(--on-accent);
+                       display: grid;
+                       place-items: center; font-size: 11px; }
+button.typerow .tick::after { content: "\2713"; }
+button.typerow .tname { flex: 0 0 auto; font-size: 14px; font-weight: 600; }
+button.typerow .tbar { flex: 1 1 auto; height: 6px; border-radius: 999px;
+                       background: var(--line); overflow: hidden; }
+button.typerow .tbar > span { display: block; height: 100%; border-radius: 999px;
+                              background: var(--accent); }
+button.typerow .tcount { flex: 0 0 auto; min-width: 1.6em; text-align: right;
+                         font-weight: 700; font-variant-numeric: tabular-nums; }
+button.typerow[aria-pressed="false"] { color: var(--muted); }
+button.typerow[aria-pressed="false"] .tick { background: transparent;
+                       border-color: var(--line); color: transparent; }
+button.typerow[aria-pressed="false"] .tbar > span { background: var(--push); }
+a.big.off { background: var(--push); color: var(--fg); cursor: not-allowed; }
+/* collapsible filter: a tap bar that folds the two groups away by default */
+.fbar { display: flex; align-items: center; gap: 10px; width: 100%;
+        background: none; border: 0; font: inherit; color: var(--fg);
+        cursor: pointer; padding: 0; text-align: left; min-height: 24px; }
+.fbar .fbar-main { font-size: 15px; font-weight: 700; }
+.fbar .fbar-sub { margin-left: auto; font-size: 13px; color: var(--muted);
+                  font-variant-numeric: tabular-nums; }
+.fbar.on .fbar-sub { color: var(--accent); font-weight: 700; }
+.fbar .fbar-chev { color: var(--muted); font-size: 12px; width: 1em;
+                   text-align: center; transition: transform .15s; }
+.fbar[aria-expanded="true"] .fbar-chev { transform: rotate(180deg); }
+.fbody { margin-top: 14px; }
+.fbody[hidden] { display: none; }
+/* problem-type badge (classification.type), shown with the problem */
+.typebadge { display: inline-block; font-size: 11px; font-weight: 700;
+             letter-spacing: .08em; text-transform: uppercase;
+             color: var(--accent); background: var(--accent-tint);
+             border: 1px solid var(--accent); border-radius: 999px;
+             padding: 3px 10px; margin-bottom: 10px; cursor: help; }
+/* difficulty stars (classification.difficulty_level), revealed with the
+   verdict only — never before the user answers */
+.diffline { display: flex; align-items: center; gap: 8px; font-size: 13px;
+            color: var(--muted); margin: 0 0 10px; }
+.diffline .stars { font-size: 15px; letter-spacing: 2px; line-height: 1; }
+.diffline .stars .on { color: var(--gold); }
+.diffline .stars .off { color: var(--line); }
+.diffline b { color: var(--fg); }
+/* four-color suits (BBO default deck) */
+.ss { color: var(--sp); } .sh { color: var(--he); }
+.sd { color: var(--di); } .sc { color: var(--cl); }
+/* belt-and-braces with the VS15 in SUITS: force text (not emoji) rendering so
+   the four-colour suit scheme's `color` always applies (UX-A-6) */
+.ss, .sh, .sd, .sc { font-variant-emoji: text; }
+/* ---- auction diagram: fixed W N E S, vul on the seat plates ---- */
+table.bidding { width: 100%; border-collapse: collapse; font-size: 17px;
+                border-radius: 10px; overflow: hidden; }
+table.bidding th { padding: 5px 4px 4px; font-weight: 600; font-size: 14px;
+                   width: 25%; border: 0; }
+table.bidding th.v  { background: var(--vul); color: #fff; }
+table.bidding th.nv { background: var(--nonvul); color: var(--on-nonvul); }
+table.bidding th.me { box-shadow: inset 0 -3px 0 var(--gold); }
+table.bidding th small { display: block; font-weight: 400; font-size: 10px;
+                         text-transform: uppercase; letter-spacing: .07em;
+                         opacity: .85; }
+table.bidding th sup.d { font-size: 9px; border: 1px solid currentColor;
+                         border-radius: 999px; padding: 0 3px;
+                         margin-left: 3px; vertical-align: super; }
+table.bidding td { text-align: center; padding: 0;
+                   border-top: 1px solid var(--line); }
+table.bidding td .call { display: block; min-height: 36px;
+                         line-height: 36px; font-weight: 600; }
+table.bidding td .call.expl { text-decoration: underline dotted 1.5px;
+                              text-underline-offset: 4px; cursor: pointer; }
+table.bidding td .call.open { background: var(--accent-tint); }
+table.bidding td.turn { background: var(--accent-tint); color: var(--accent);
+                        font-weight: 700; font-size: 19px; }
+@media (prefers-reduced-motion: no-preference) {
+  table.bidding td.turn { animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 50% { background: transparent; } }
+}
+.bidnote { margin-top: 8px; padding: 10px 40px 10px 12px; border-radius: 8px;
+           background: var(--accent-tint); font-size: 13px; line-height: 1.4;
+           position: relative; }
+.bidnote b { font-size: 15px; white-space: nowrap; margin-right: 6px; }
+.bidnote .x { position: absolute; right: 0; top: 0; width: 44px;
+              height: 100%; min-height: 40px; border: 0; background: none;
+              color: var(--muted); font-size: 16px; cursor: pointer; }
+/* ---- hand diagram ---- */
+.hand { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line);
+        font-size: 21px; }
+.hand .srow { line-height: 1.5; }
+.hand .cd { margin-right: .18em; }
+/* ---- full deal, placed by table position (N top, W/E sides, S bottom),
+   with a felt compass in the middle \u2014 the classic bridge diagram ---- */
+.fulldeal { display: grid; grid-template-columns: 1fr 1fr 1fr;
+            grid-template-areas: ".  n  ." "w  c  e" ".  s  ."; gap: 7px;
+            align-items: center; margin: 10px 0 2px; }
+.fd-n { grid-area: n; } .fd-e { grid-area: e; }
+.fd-s { grid-area: s; } .fd-w { grid-area: w; }
+.fdhand { border: 1px solid var(--line); border-radius: 8px; padding: 5px 8px;
+          font-size: 13px; line-height: 1.4; background: var(--card); }
+.fdhand.hero { border-color: var(--gold);
+               box-shadow: inset 0 0 0 1px var(--gold); }
+.fdhand .lbl { display: flex; justify-content: space-between; gap: 6px;
+               font-size: 10px; font-weight: 700; letter-spacing: .04em;
+               color: var(--muted); margin-bottom: 3px; }
+.fdhand .lbl .role { font-weight: 700; text-transform: uppercase;
+                     color: var(--accent); }
+.fdhand.hero .lbl .role { color: var(--gold); }
+.fdrow { line-height: 1.45; }
+.fdrow .cd { margin-right: .12em; }
+.fdcompass { grid-area: c; justify-self: center; width: 58px; height: 58px;
+             border-radius: 8px; color: var(--on-felt);
+             background: radial-gradient(circle at 50% 42%, var(--felt),
+                                         var(--felt-deep));
+             display: grid; grid-template-columns: 1fr 1fr 1fr;
+             grid-template-areas: ".  cn  ." "cw  .  ce" ".  cs  .";
+             place-items: center; font-size: 10px; font-weight: 700; }
+.fdcompass .cn { grid-area: cn; } .fdcompass .cw { grid-area: cw; }
+.fdcompass .ce { grid-area: ce; } .fdcompass .cs { grid-area: cs; }
+/* on phones, wide analysis tables scroll inside their own box so the page
+   itself doesn't scroll horizontally (UX-A-9); scoped to <=600px so desktop
+   keeps the normal full-width table layout (display:block would otherwise
+   shrink-wrap the columns) */
+@media (max-width: 600px) {
+  #ctable, #rtable, #ltable { display: block; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; }
+}
+/* narrow phones (<=380px): tighten table cells and stack the full-deal diagram
+   into two columns (W/E under N, compass below) so nothing overflows */
+@media (max-width: 380px) {
+  table.plain th, table.plain td { padding: 6px 5px; }
+  .fulldeal { grid-template-columns: 1fr 1fr;
+              grid-template-areas: "n n" "w e" "c c" "s s"; }
+}
+/* ---- bidding-box candidates ---- */
+.candidates { display: grid; gap: 8px; margin: 12px 0;
+              grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
+button.cand { min-height: 56px; border-radius: 10px; font-size: 20px;
+              font-weight: 700; background: var(--card); color: var(--fg);
+              border: 1px solid var(--line); box-shadow: 0 1px 2px #00000026;
+              cursor: pointer; position: relative;
+              display: flex; align-items: center; justify-content: center; }
+button.cand:active { transform: translateY(1px); box-shadow: none; }
+button.cand span { margin-left: 2px; }
+button.cand.p { color: var(--win); }
+button.cand.x { color: var(--loss); }
+button.cand.xx { color: var(--accent); }
+button.cand.good { border: 2px solid var(--win); background: #E7F4EC; }
+button.cand.bad { border: 2px solid var(--loss); background: #FAE8E9; }
+button.cand.chosen { outline: 2px solid var(--accent); outline-offset: 2px; }
+button.cand.off { color: var(--muted); box-shadow: none; }
+button.cand.good::after, button.cand.bad::after {
+  position: absolute; top: 2px; right: 6px; font-size: 13px; }
+button.cand.good::after { content: "\2713"; color: var(--win); }
+button.cand.bad::after { content: "\2717"; color: var(--loss); }
+/* a near-miss (panel score 65-84): gold, neither the green check nor the
+   red cross */
+button.cand.near { border: 2px solid var(--gold);
+  background: color-mix(in srgb, var(--gold) 14%, var(--card)); }
+button.cand.near::after { position: absolute; top: 2px; right: 6px;
+  font-size: 13px; content: "\2248"; color: var(--gold); }
+@media (prefers-color-scheme: dark) {
+  button.cand.good { background: #24382C; }
+  button.cand.bad { background: #3A2626; }
+}
+/* ---- verdict: outcome-first option rows ---- */
+#verdict { display: none; }
+.subline { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
+/* panel-score chip (verdict headline, dashboard rows) + its breakdown line */
+.scorechip { display: inline-flex; align-items: center;
+  justify-content: center; min-width: 46px; height: 34px;
+  border-radius: 10px; padding: 0 9px; font-size: 20px; font-weight: 800;
+  color: #fff; vertical-align: middle; font-variant-numeric: tabular-nums; }
+.scorechip.tone-win { background: var(--win); color: var(--on-win); }
+.scorechip.tone-gold { background: var(--gold); color: var(--on-gold); }
+.scorechip.tone-loss { background: var(--loss); color: var(--on-loss); }
+.scorechip.sm { min-width: 36px; height: 24px; font-size: 14px;
+                border-radius: 7px; font-weight: 700; }
+.scoreline { font-size: 13px; color: var(--muted); margin: 0 0 8px; }
+.legend { font-size: 11px; color: var(--muted); margin: 8px 0 2px; }
+.legend i { display: inline-block; width: 8px; height: 8px;
+            border-radius: 2px; margin: 0 3px 0 10px; }
+.legend i:first-child { margin-left: 0; }
+.opt { padding: 12px 4px; border-top: 1px solid var(--line); }
+/* "your pick" tint follows the --loss token in every theme (UX-A-10) instead
+   of a hardcoded light-theme red-with-alpha that stayed put in dark mode */
+.opt.mine { background: color-mix(in srgb, var(--loss) 4%, transparent);
+  border-radius: 8px; }
+table.plain tr.mine td {
+  background: color-mix(in srgb, var(--loss) 4%, transparent); }
+.opt .l1 { display: flex; align-items: center; gap: 8px; }
+.bidchip { min-width: 40px; height: 32px; border-radius: 6px;
+           border: 1px solid var(--line); font-size: 16px; font-weight: 700;
+           display: inline-flex; align-items: center; justify-content: center;
+           padding: 0 6px; background: var(--card); }
+.tag { font-size: 10px; font-weight: 700; letter-spacing: .05em;
+       color: #fff; border-radius: 999px; padding: 2px 7px; }
+.tag.best { background: var(--win); color: var(--on-win); }
+.tag.you { background: var(--accent); color: var(--on-accent); }
+.opt .shows { color: var(--muted); font-size: 13px; flex: 1;
+              overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.opt .ev { font-size: 16px; font-weight: 700;
+           font-variant-numeric: tabular-nums; white-space: nowrap;
+           /* signed EV like "-1.2 +/-0.3": isolate LTR so the leading minus
+              (U+2212) doesn't reorder to the right in the RTL page (UX-A-5) */
+           direction: ltr; unicode-bidi: isolate; }
+.opt .ev small { font-size: 12px; font-weight: 400; color: var(--muted); }
+.opt .ev .best { color: var(--win); }
+.wpl { display: flex; justify-content: space-between; height: 10px;
+       border-radius: 5px; overflow: hidden; background: var(--push);
+       margin: 8px 0 6px; }
+.wpl .w { background: var(--win); color: var(--on-win); }
+.wpl .l { background: var(--loss); color: var(--on-loss); }
+.chips { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap;
+         gap: 6px; align-items: center;
+         font-variant-numeric: tabular-nums; }
+.chip { background: var(--nonvul); color: var(--on-nonvul);
+        border: 1px solid var(--line); border-radius: 999px; padding: 2px 8px;
+        white-space: nowrap; }
+.chip.them { background: transparent; color: var(--muted); }
+.confirmbox .l1 { display: flex; align-items: center; gap: 10px;
+                  min-height: 32px; }
+.confirmbox .shows { color: var(--muted); font-size: 14px; }
+.confirmbox .big { margin: 12px 0 0; }
+.fog { background: var(--warn-bg); color: var(--warn-fg);
+       border: 1px solid var(--warn-line); border-radius: 8px;
+       padding: 8px 12px; font-size: 13px; margin: 10px 0; }
+.footnote { font-size: 12px; color: var(--muted); margin: 8px 0 0; }
+a.big, button.big { display: block; width: 100%; text-align: center;
+  font-size: 17px; font-weight: 700; padding: 15px; border-radius: 12px;
+  margin: 14px 0 6px; background: var(--gold); color: var(--on-gold);
+  text-decoration: none; border: none; cursor: pointer; min-height: 52px; }
+details { margin: 6px 0 0; }
+/* summaries must LOOK tappable: link color + an explicit chevron (the
+   flex display below removes the native disclosure triangle) */
+details summary { cursor: pointer; color: var(--accent); font-size: 13px;
+                  font-weight: 600;
+                  min-height: 40px; display: flex; align-items: center; }
+details summary::before { content: "\25C2"; color: var(--accent);
+                          font-size: 11px; margin-inline-end: 7px;
+                          flex: 0 0 auto; }
+details[open] > summary::before { content: "\25BE"; }
+.notes ul { margin: 4px 0 8px; padding-left: 18px; font-size: 13px; }
+.notes li { margin: 6px 0; line-height: 1.4; }
+table.plain { border-collapse: collapse; width: 100%; font-size: 13px;
+              font-variant-numeric: tabular-nums; }
+table.plain th, table.plain td { border-top: 1px solid var(--line);
+  padding: 6px 8px; text-align: left; }
+table.plain th { color: var(--muted); font-weight: 600; border-top: 0; }
+/* opening-lead answer grid: the hand IS the keypad, one row per suit */
+.leadgrid { margin: 12px 0; }
+.suitrow { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 5px 0; }
+.suitrow .s { width: 1.4em; font-size: 20px; text-align: center; }
+button.cardbtn { min-width: 44px; min-height: 48px; font-size: 17px; font-weight: 600;
+  border: 2px solid var(--line); border-radius: 9px; background: var(--card);
+  color: var(--fg); cursor: pointer; }
+button.cardbtn.chosen { border-color: var(--accent); }
+button.cardbtn.good { border-color: var(--win);
+  background: color-mix(in srgb, var(--win) 16%, var(--card)); }
+button.cardbtn.bad { border-color: var(--loss);
+  background: color-mix(in srgb, var(--loss) 16%, var(--card)); }
+button.cardbtn.near { border-color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 16%, var(--card)); }
+/* reveal: per-suit bar comparison instead of a wall of decimals */
+.barrow { display: flex; align-items: center; gap: 8px; margin: 5px 0; font-size: 14px; }
+.barrow .bl { width: 3.4em; }
+.bartrack { flex: 1; height: 14px; border-radius: 99px; background: var(--line);
+  overflow: hidden; }
+.bartrack span { display: block; height: 100%; background: var(--accent); }
+.bartrack span.good { background: var(--win); }
+.barval { width: 6.2em; text-align: right; font-variant-numeric: tabular-nums;
+  color: var(--muted); font-size: 12px;
+  /* signed values like "-0.50 IMP": isolate LTR so the sign stays left (UX-A-5) */
+  direction: ltr; unicode-bidi: isolate; }
+/* fixed-width "(שלך)" slot on every row keeps all tracks the same length */
+.barrow .byou { flex: 0 0 auto; width: 2.9em; font-size: 12px;
+  color: var(--muted); }
+.barrow.mine { background: color-mix(in srgb, var(--loss) 4%, transparent);
+  border-radius: 8px; }
+#bid-meaning { min-height: 1.2em; margin: 6px 0 0; }
+/* single source for the verdict headline (BUG-10: was defined 3x, the 24px v2
+   rule winning) */
+.headline { font-size: 24px; font-weight: 800; margin: 4px 0; }
+.headline .ok { color: var(--win); } .headline .no { color: var(--loss); }
+
+/* ===== redesign layer (v2): type scale, theming, nav, a11y, RTL ===== */
+/* base uplift + room for the fixed bottom nav */
+body { font-size: 16px; line-height: 1.55; padding-bottom: 84px;
+       padding-inline: 12px; }
+h1 { font-size: 26px; font-weight: 800; }
+h2 { font-size: 19px; font-weight: 700; color: var(--fg); margin: 0; }
+
+/* manual theme override (wins over prefers-color-scheme) */
+html[data-theme="light"] body {
+  --felt: #2E6B4F; --felt-deep: #24573F; --on-felt: #ffffff;
+  --on-felt-muted: #D9E7DE; --card: #ffffff; --fg: #1C2B24; --muted: #5C6B62;
+  --line: #D9E0DA; --accent: #2B6CB0; --accent-tint: #2B6CB014;
+  --vul: #B3252F; --nonvul: #E6F4EA; --on-nonvul: #1C5C34;
+  --sp: #2838C8; --he: #C8102E; --di: #BC5A00; --cl: #1A7A1A;
+  --win: #1A7A43; --loss: #C8102E; --push: #A9B3AC;
+  --on-accent: #ffffff; --on-win: #ffffff; --on-loss: #ffffff;
+  --gold: #EAB84C; --on-gold: #2A2410;
+  --warn-bg: #FDF3DF; --warn-fg: #7A5312; --warn-line: #E3C87F; }
+html[data-theme="dark"] body {
+  --felt: #10241A; --felt-deep: #0B1A13; --on-felt: #E9F0EB;
+  --on-felt-muted: #9FB4A8; --card: #1B2620; --fg: #E8EDEA; --muted: #97A79D;
+  --line: #33413A; --accent: #6CA6DD; --accent-tint: #6CA6DD1F;
+  --vul: #A62630; --nonvul: #2E4A38; --on-nonvul: #BFE3CC;
+  --sp: #8C96FF; --he: #FF7B72; --di: #FFAB40; --cl: #57C957;
+  --win: #3BB273; --loss: #E5665F; --push: #5B6961;
+  --on-accent: #0B1A13; --on-win: #0B1A13; --on-loss: #0B1A13;
+  --gold: #D9A93E; --on-gold: #241F0C;
+  --warn-bg: #2E2612; --warn-fg: #E7C97E; --warn-line: #6B5A2A; }
+html[data-theme="dark"] .card { border: 1px solid var(--line); box-shadow: none; }
+
+/* text-size control */
+html[data-scale="l"] body { font-size: 18px; }
+html[data-scale="xl"] body { font-size: 20px; }
+
+/* visible focus for everyone */
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px;
+                 border-radius: 6px; }
+/* ===== problem-page usability (UX round: less scrolling, clearer flow) =====
+   Tighten the vertical rhythm on the two problem pages so the hand and the
+   answer controls sit higher — the auction + banner used to push the cards
+   below the fold on a phone, forcing a scroll before you could even see your
+   hand. Scoped to pages that carry data-scenario so the home/dashboard cards
+   keep their roomier spacing. */
+body[data-scenario] .card { margin: 8px 0; }
+body[data-scenario] #problem .card,
+body[data-scenario] #modebanner.card { padding: 12px 14px; }
+body[data-scenario] .leadgrid,
+body[data-scenario] .candidates { margin: 8px 0; }
+/* leave room above scroll/focus targets so they never land flush against the
+   top edge when brought into view (scrollToEl/ensureVisible + focus()) */
+.headline, #problem, #confirm, #verdict,
+button.cardbtn, button.cand { scroll-margin-top: 12px; }
+/* once an answer is in, the keypad/bidding box is locked — make that legible
+   (dimmed, no pointer) instead of leaving live-looking buttons that ignore
+   taps */
+button.cardbtn:disabled, button.cand:disabled { cursor: default; }
+button.cardbtn:disabled:not(.good):not(.near):not(.bad),
+button.cand:disabled.off { opacity: .55; }
+/* skip link */
+.skip { position: absolute; inset-inline-start: -9999px; top: 8px; z-index: 200;
+        background: var(--card); color: var(--fg); padding: 8px 14px;
+        border-radius: 8px; border: 1px solid var(--line); }
+.skip:focus { inset-inline-start: 12px; }
+
+/* RTL: flip shell text/spacing to logical props (bridge diagrams stay LTR
+   via dir="ltr" on their containers) */
+.fbar { text-align: start; }
+.fbar-sub { margin-left: 0; margin-inline-start: auto; }
+.seg button { border-left: 0; border-inline-start: 1px solid var(--line); }
+.seg button:first-child { border-inline-start: 0; }
+button.typerow { text-align: start; }
+.bidnote { padding: 10px 12px; padding-inline-end: 40px; }
+.bidnote b { margin-right: 0; margin-inline-end: 6px; }
+.bidnote .x { right: auto; inset-inline-end: 0; }
+.notes ul { padding-left: 0; padding-inline-start: 18px; }
+table.plain th, table.plain td { text-align: start; }
+.legend i { margin: 0; margin-inline-start: 10px; margin-inline-end: 3px; }
+.legend i:first-child { margin-inline-start: 0; }
+button.typerow .tcount { text-align: end; }
+.barrow .barval { text-align: start; }
+/* bridge diagrams are LTR islands */
+.hand, .fulldeal, .leadgrid, table.bidding, .candidates,
+.wpl, .bartrack, .fdcompass { direction: ltr; }
+/* bid/contract tokens are Latin — pin their internal order too */
+.bidchip, .chip { direction: ltr; unicode-bidi: isolate; }
+.ltr { direction: ltr; unicode-bidi: isolate; display: inline-block; }
+/* engine explanations are English (or English-heavy) — render them LTR and
+   left-aligned so number ranges and prose don't reorder in the RTL page */
+.en { direction: ltr; unicode-bidi: isolate; text-align: left; }
+#explanation, #meanings { direction: ltr; unicode-bidi: isolate;
+  text-align: left; }
+
+
+/* non-color cue inside the win/push/loss bar */
+.wpl { position: relative; height: 16px; }
+.wpl span { display: flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 800; color: #fff; overflow: hidden; }
+
+/* ===== global bottom navigation ===== */
+.gnav { position: fixed; inset-inline: 0; bottom: 0; z-index: 90;
+        display: flex; justify-content: center; gap: 4px;
+        background: var(--card); border-top: 1px solid var(--line);
+        padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+        box-shadow: 0 -2px 12px #0000001a; }
+.gnav .navwrap { display: flex; gap: 4px; width: 100%; max-width: 640px; }
+.gnav a, .gnav button.navbtn { flex: 1; background: none; border: 0; cursor: pointer;
+        font: inherit; color: var(--muted); text-decoration: none;
+        display: flex; flex-direction: column; align-items: center; gap: 2px;
+        padding: 6px 4px; border-radius: 10px; min-height: 48px;
+        font-size: 11px; font-weight: 700; }
+.gnav a .ico, .gnav button .ico { font-size: 20px; line-height: 1; }
+.gnav a[aria-current="page"] { color: var(--accent); background: var(--accent-tint); }
+
+/* settings sheet */
+.sheet { position: fixed; inset: 0; z-index: 120; display: none;
+         align-items: flex-end; justify-content: center;
+         background: #0007; }
+.sheet.open { display: flex; }
+.sheet .panel { background: var(--card); color: var(--fg); width: 100%;
+        max-width: 640px; border-radius: 16px 16px 0 0; padding: 20px 18px 28px;
+        box-shadow: 0 -4px 24px #0005; }
+.sheet h2 { margin-bottom: 12px; }
+.setrow { display: flex; align-items: center; justify-content: space-between;
+          gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); }
+.setrow:first-of-type { border-top: 0; }
+.segctl { display: inline-flex; border: 1px solid var(--line); border-radius: 10px;
+          overflow: hidden; }
+.segctl button { font: inherit; border: 0; background: var(--card);
+          color: var(--muted); padding: 8px 14px; cursor: pointer;
+          border-inline-start: 1px solid var(--line); font-weight: 700; }
+.segctl button:first-child { border-inline-start: 0; }
+.segctl button[aria-pressed="true"] { background: var(--accent);
+  color: var(--on-accent); }
+.sheet .closebtn { width: 100%; margin-top: 16px; padding: 12px; border-radius: 10px;
+          border: 1px solid var(--line); background: var(--card); color: var(--fg);
+          font: inherit; font-weight: 700; cursor: pointer; }
+
+/* session ribbon (recedes; never outshines the hand/auction) */
+.sessribbon { display: flex; align-items: center; justify-content: space-between;
+          gap: 8px; font-size: 12px; color: var(--on-felt-muted); margin: 2px 0 8px; }
+.sessribbon .prog { flex: 1; height: 6px; border-radius: 99px;
+          background: #ffffff2e; overflow: hidden; }
+.sessribbon .prog > span { display: block; height: 100%; background: var(--gold); }
+
+/* designed empty/error state */
+.state { text-align: center; padding: 8px 4px; }
+.state .em { font-size: 15px; color: var(--fg); font-weight: 700; margin-bottom: 4px; }
+
+/* ===== opening-lead training modes: MP / IMP selection + banner ===== */
+button.modecard { font: inherit; text-align: start; background: var(--card);
+  color: var(--fg); border: 2px solid var(--line); border-radius: 12px;
+  padding: 12px; cursor: pointer; display: flex; flex-direction: column;
+  gap: 4px; min-height: 64px; }
+button.modecard b { font-size: 17px; }
+button.modecard small { color: var(--muted); font-size: 12px;
+  line-height: 1.35; }
+button.modecard[aria-pressed="true"] { border-color: var(--accent);
+  background: var(--accent-tint); }
+button.modecard[aria-pressed="true"] b { color: var(--accent); }
+.modebanner { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.modechip { display: inline-block; font-size: 12px; font-weight: 800;
+  letter-spacing: .08em; color: var(--on-accent); background: var(--accent);
+  border-radius: 999px; padding: 3px 10px; }
+/* the goal sentence is Hebrew with embedded Latin jargon (IMP/MP) — keep an
+   RTL base direction and isolate it, or the whole sentence scrambles */
+.modegoal { font-size: 13px; color: var(--muted); direction: rtl;
+  unicode-bidi: isolate; }
+/* the MP and IMP goal strings differ in length and wrapped to different
+   heights, making the selector box jump on every MP<->IMP toggle. Reserve a
+   constant two-line slot so switching modes never reflows. Scoped to the home
+   div by id; the problem page reuses .modegoal as an inline banner, unaffected. */
+#modegoal { min-height: 2.9em; }
+.ctline { font-size: 14px; margin-top: 6px; }
+/* the active mode's primary metric is visually emphasized */
+table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
+  font-weight: 700; }
+/* ranked-leads table reads as a stat grid: center every column so the score
+   chips, decimals and percentages sit under their headers (both MP and IMP —
+   same markup, only the emph column differs). Sized to FIT the card width
+   with no horizontal scroll: tight padding, and multi-word HEADERS may wrap
+   to two lines (narrow columns) while the numeric DATA stays on one line. */
+#ltable { table-layout: fixed; }
+#ltable th, #ltable td { text-align: center; vertical-align: middle;
+  padding: 6px 3px; }
+#ltable th { white-space: normal; line-height: 1.2; font-size: 12px; }
+#ltable td { white-space: nowrap; }
+/* the two decimal-metric columns (tricks / IMP) are the widest data — give
+   them a snug fixed share and shrink their digits slightly so six columns
+   clear a narrow phone */
+#ltable td:nth-child(3), #ltable td:nth-child(4) { font-size: 12px; }
+.resultline { font-size: 14px; margin: 3px 0; }
+.resultline b { font-variant-numeric: tabular-nums; }
+
+/* ===== makeover layer (v3): Hebrew-first chrome, home cards, learn-first
+   verdicts, skeletons, dashboard tabs ===== */
+/* Hebrew text carries no uppercase tracking — zero the Latin-era spacing */
+.glabel, .typebadge, .tag, .modechip, table.bidding th small,
+.fdhand .lbl .role { letter-spacing: 0; text-transform: none; }
+/* home: two scenario cards replace the segmented control */
+.scengrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+            margin: 0 0 12px; align-items: stretch; }
+/* both cards use OPAQUE backgrounds (a translucent tint would let the felt
+   bleed through and make the SELECTED card look muddy). Unselected recedes
+   via reduced opacity; selected pops with a solid accent border + ring. */
+.scencard { background: var(--card); color: var(--fg);
+  border: 2px solid var(--line); border-radius: 14px; padding: 14px 12px;
+  cursor: pointer; display: flex; flex-direction: column; gap: 4px;
+  opacity: .72; transition: opacity .12s, box-shadow .12s; }
+.scencard > b { font-size: 17px; }
+.scencard > small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.scencard .sccount { font-size: 12px; color: var(--muted); margin-top: 2px;
+                     font-variant-numeric: tabular-nums; }
+.scencard[aria-checked="true"] { opacity: 1; border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--card));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+.scencard[aria-checked="true"] > b { color: var(--accent); }
+.modepills { display: flex; gap: 6px; margin-top: 8px; }
+.modepills button.modecard { flex: 1; min-height: 0; padding: 8px;
+  border-radius: 10px; background: var(--card); border: 1px solid var(--line);
+  opacity: .8; }
+.modepills button.modecard b { font-size: 15px; }
+/* selected pill: solid accent fill + white text — unambiguous on the card */
+.modepills button.modecard[aria-pressed="true"] { opacity: 1;
+  background: var(--accent); border-color: var(--accent); }
+.modepills button.modecard[aria-pressed="true"] b,
+.modepills button.modecard[aria-pressed="true"] small { color: var(--on-accent); }
+/* MP/IMP selector now sits below the scenario cards (UX-A-7); the reserved
+   #modegoal height keeps its own box from jumping on an MP<->IMP toggle */
+.modewrap { margin: 0 0 8px; }
+.modewrap .modegoal { margin-top: 6px; }
+/* loading skeletons */
+.skl { height: 12px; border-radius: 6px; background: var(--line);
+       margin: 12px 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .skl { animation: shimmer 1.2s ease-in-out infinite; }
+  @keyframes shimmer { 50% { opacity: .45; } }
+}
+/* inline Hebrew jargon explainer */
+.infot { display: inline-block; margin-inline-start: 4px; color: var(--accent);
+         font-style: normal; font-size: 13px; position: relative;
+         background: none; border: 0; padding: 0; cursor: pointer; }
+/* expand the tap target to ~24px without changing the glyph's size (UX-A-10) */
+.infot::after { content: ""; position: absolute; inset: -8px; }
+/* tap-to-explain: a dotted underline marks any term that opens a gloss
+   card on tap — the same visual cue as tappable auction calls */
+button.gloss { background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: inherit; cursor: pointer; position: relative;
+  text-decoration: underline dotted 1.5px; text-underline-offset: 3px;
+  text-decoration-color: var(--accent); }
+/* taller tap target for the inline glossary term without shifting text layout */
+button.gloss::after { content: ""; position: absolute; inset: -8px -2px; }
+.scorechip[data-gloss] { cursor: pointer; }
+button.typebadge { font: inherit; cursor: pointer; }
+button.modechip { border: 0; font: inherit; cursor: pointer;
+  font-size: 12px; font-weight: 800; }
+#glossbox { position: fixed; inset-inline: 12px; z-index: 120;
+  bottom: calc(76px + env(safe-area-inset-bottom)); }
+.glosscard { background: var(--card); color: var(--fg);
+  border: 1px solid var(--accent); border-radius: 12px;
+  padding: 12px 14px; padding-inline-end: 46px; font-size: 14px;
+  line-height: 1.5; box-shadow: 0 6px 24px #0005; position: relative; }
+.glosscard b { margin-inline-end: 6px; }
+.glosscard b:empty { display: none; }
+.glosscard .x { position: absolute; inset-inline-end: 0; top: 0; width: 44px;
+  height: 44px; border: 0; background: none; color: var(--muted);
+  font-size: 16px; cursor: pointer; }
+/* confirm sheet stays reachable above the bottom nav */
+#confirm .confirmbox { position: sticky; bottom: 92px; z-index: 60;
+                       box-shadow: 0 6px 24px #0004; }
+/* verdict entrance */
+@media (prefers-reduced-motion: no-preference) {
+  #verdict { animation: rise .25s ease-out; }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+}
+/* dashboard tabs */
+.tabs { display: flex; margin: 0 0 12px; width: 100%; background: var(--card); }
+.tabs button { flex: 1; padding: 10px 6px; }
+.tabs button[aria-selected="true"] { background: var(--accent);
+  color: var(--on-accent); }
+.dtab[hidden] { display: none; }
+/* tappable recent-miss rows */
+ul.misslist { list-style: none; margin: 4px 0 0; padding: 0; }
+ul.misslist li { border-top: 1px solid var(--line); }
+ul.misslist li:first-child { border-top: 0; }
+a.missrow { display: block; color: inherit; text-decoration: none;
+            padding: 9px 2px; font-size: 13px; line-height: 1.45; }
+a.missrow .go { color: var(--accent); font-weight: 700; white-space: nowrap; }
+/* bottom-nav svg icons */
+.gnav .ico svg { display: block; }

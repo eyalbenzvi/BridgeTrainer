@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>(function(){try{var d=document.documentElement,t=localStorage.getItem('bt_theme'),s=localStorage.getItem('bt_scale');if(t&&t!=='system')d.setAttribute('data-theme',t);if(s&&s!=='s')d.setAttribute('data-scale',s);}catch(e){}})();</script>
+<title>ההתקדמות שלי</title>
+<link rel="stylesheet" href="app.css?v=0a30c460">
+<style>
+.statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.stat { text-align: center; }
+.stat b { font-size: 26px; display: block; line-height: 1.1; }
+.catrow { display: grid; grid-template-columns: 9em 1fr auto; gap: 8px;
+          align-items: center; margin: 7px 0; font-size: 13px; }
+.dbar { height: 12px; border-radius: 99px; background: var(--line);
+        overflow: hidden; }
+.dbar > span { display: block; height: 100%; background: var(--accent);
+               border-radius: 99px; }
+.scen .subh { font-weight: 700; margin: 13px 0 3px; font-size: 13px; }
+.costline { margin: 6px 0 6px; font-size: 14px; }
+.costline b { font-size: 21px; }
+.band { display: flex; height: 22px; border-radius: 99px; overflow: hidden;
+        background: var(--line); margin: 4px 0 5px; }
+.band .bseg { display: flex; align-items: center; justify-content: center;
+              font-size: 11px; font-weight: 700; color: #fff; min-width: 0;
+              box-shadow: inset -1px 0 0 rgba(0,0,0,.15); }
+.band .bseg.opt { background: var(--win); color: var(--on-win); }
+.band .bseg.near { background: var(--gold); color: var(--on-gold); }
+.band .bseg.bl { background: var(--loss); color: var(--on-loss); }
+.blegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px;
+           color: var(--muted); }
+.blegend i.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block;
+                margin-inline-end: 4px; vertical-align: middle; }
+.blegend i.opt { background: var(--win); } .blegend i.near { background: var(--gold); }
+.blegend i.bl { background: var(--loss); }
+.catrow { direction: rtl; }
+.catrow .dbar { direction: ltr; }
+.drill { border-top: 1px solid var(--line); }
+/* drill rows are data rows, not captions — keep the text tone and let the
+   accent chevron alone signal that they expand */
+.drill > summary { cursor: pointer; padding: 2px 0; color: var(--fg);
+                   font-weight: 400; }
+.drill > summary .catrow { margin: 5px 0; }
+.drill .drillbody { padding: 0 1.6em 6px; }
+/* #dash content rides directly on the green felt: its cards reset to their own
+   --fg, but the loading placeholder, the load-error line and the closing
+   footnote are loose text. Default #dash to the on-felt tone (and the footnote
+   to the muted on-felt tone) so they aren't dark-green-on-green — unreadable in
+   light mode. */
+#dash { color: var(--on-felt); }
+#dash .dtab > .footnote { color: var(--on-felt-muted); }
+</style>
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js" crossorigin>
+<link rel="modulepreload" href="bt-logic.js">
+<link rel="modulepreload" href="firebase-config.js">
+<script type="module" src="bt-firebase.js"></script></head><body data-nav="progress">
+<main id="main" tabindex="-1">
+<div class="topbar"><a href="index.html">&rarr; דף הבית</a><span class="muted">ההתקדמות שלי</span></div>
+<h1>ההתקדמות שלי</h1>
+<div id="dash" class="muted">טוען&hellip;</div>
+<script>window.TAXONOMY_HE = {"open_or_pass": ["החלטת פתיחה", "לפתוח יד גבולית, או לפאס — ובאיזו פתיחה?"], "preempt_decision": ["הכרזת מנע", "להפריע או לא — ועד איזו רמה?"], "enter_auction": ["כניסה למכרז", "אוברקול, כפל, או להישאר בחוץ?"], "compete_or_sell": ["קרב חוזה חלקי", "להכריז עוד פעם, לפאס, או לדחוף אותם גבוה יותר?"], "invite_or_game": ["הזמנה או משחק מלא", "לעצור, להזמין, או להכריז משחק מלא?"], "slam_try": ["ניסיון סלם", "להתקדם לסלאם, או להסתפק במשחק מלא?"], "choice_of_strain": ["בחירת שליט", "הרמה סגורה — אבל היכן: איזו סדרה, או ללא־שליט?"], "double_or_bid": ["להכפיל או להכריז", "כפל, להמשיך להכריז, או לפאס?"], "sacrifice_decision": ["הקרבה", "לדרוס את החוזה שלהם במחיר מינוס, או להגן?"], "describe_hand": ["תיאור היד", "איזו הכרזה בונה מתארת הכי טוב את הכוח והצורה?"], "lead_part_score": ["חוזה חלקי", "הובלה נגד חוזה חלקי (מתחת למשחק מלא)."], "lead_3nt": ["3NT", "הובלה נגד משחק ללא שליט."], "lead_suit_game": ["משחק בשליט", "הובלה נגד משחק מלא בשליט (4 במייג'ור / 5 במיינור)."], "lead_slam": ["סלם", "הובלה נגד סלם (רמה 6 או 7)."], "lead_doubled": ["חוזה מוכפל", "הובלה נגד חוזה מוכפל."]};</script>
+<script src="bt-shared.js?v=d0206df9"></script>
+<script>
+const MIN_N = 5, MIN_TREND = 8;
+// cost-line units differ by scenario AND, for leads, by training mode
+// (MP costs are tricks below best; IMP costs are IMPs below best). The
+// distribution band itself groups by the panel score, not by raw cost.
+const COST = { bidding: {unit: "IMP"}, lead: {unit: "לקיחה"},
+               leadIMP: {unit: "IMP"} };
+const SUIT_NAME = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
+const RANKS = "AKQJT98765432";
+function num(x) { return typeof x === "number" ? x : (parseFloat(x) || 0); }
+function median(xs) {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+/* mean panel score with a 95% CI on the mean (replaces the Wilson
+   proportion — the aggregate is now an average of 0-100 scores) */
+function meanCI(xs) {
+  const n = xs.length;
+  const m = xs.reduce((s, x) => s + x, 0) / n;
+  const sd = n > 1
+    ? Math.sqrt(xs.reduce((s, x) => s + (x - m) * (x - m), 0) / (n - 1)) : 0;
+  const h = 1.96 * sd / Math.sqrt(n);
+  return {m, lo: Math.max(0, m - h), hi: Math.min(100, m + h)};
+}
+function tsMillis(a) {
+  if (!a || !a.ts) return 0;
+  if (typeof a.ts.toMillis === "function") return a.ts.toMillis();
+  if (a.ts.seconds) return a.ts.seconds * 1000;
+  return 0;
+}
+// Order first-attempts by their FIRST-attempt time. A re-answer now bumps `ts`
+// (so incremental cross-device sync notices attemptCount updates — DB-M-9), but
+// `firstTs` is written once at the first attempt and never moves. Fall back to
+// `ts` for legacy docs that predate firstTs — there `ts` is still the first
+// attempt's time, so ordering is unchanged for them.
+function firstMs(a) { return tsMillis(a && a.firstTs ? {ts: a.firstTs} : a); }
+// Ids still present in the pool index; attempts whose problem was deleted are
+// marked "removed" instead of linking to a dead page (DB-M-9). null = unknown
+// (index unavailable) -> treat every attempt as live, as before.
+let LIVE_IDS = null;
+function row(label, scores) {
+  const n = scores.length;
+  if (n < MIN_N)
+    return `<div class="catrow"><span>${label}</span>` +
+      `<span class="muted">אין מספיק נתונים</span>` +
+      `<span class="muted">n=${n}</span></div>`;
+  const c = meanCI(scores);
+  return `<div class="catrow"><span>${label}</span>` +
+    `<span class="dbar"><span style="width:${c.m}%"></span></span>` +
+    `<span>${Math.round(c.m)} <span class="muted">(${Math.round(c.lo)}–` +
+    `${Math.round(c.hi)}, n=${n})</span></span></div>`;
+}
+function diffRows(list) {
+  const by = {};
+  list.forEach(a => { const d = a.difficultyLevel || 0;
+    (by[d] ??= []).push(btScoreOfAttempt(a)); });
+  const out = [1, 2, 3, 4, 5].filter(d => by[d])
+    .map(d => row(DIFF_NAMES[d] || ("רמה " + d), by[d])).join("");
+  return out || '<div class="muted">אין נתונים</div>';
+}
+function typeRows(list) {
+  const by = {};
+  list.forEach(a => { const t = a.type || "—";
+    (by[t] ??= []).push(btScoreOfAttempt(a)); });
+  const es = Object.entries(by).sort((a, b) => b[1].length - a[1].length);
+  return es.length
+    ? es.map(([t, s]) => row((TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t, s)).join("")
+    : '<div class="muted">אין נתונים</div>';
+}
+function costBand(list, kind) {
+  const cfg = COST[kind] || COST.bidding, n = list.length;
+  if (!n) return "";
+  let opt = 0, near = 0, bl = 0; const costs = [];
+  list.forEach(a => { costs.push(num(a.gradedCost));
+    const sc = btScoreOfAttempt(a);
+    if (sc >= REVIEW_MIN) opt++; else if (sc >= ERROR_MIN) near++; else bl++; });
+  const mean = costs.reduce((s, c) => s + c, 0) / n, med = median(costs), u = cfg.unit;
+  const seg = (cls, v) => v
+    ? `<span class="bseg ${cls}" style="width:${(v / n * 100).toFixed(1)}%">` +
+      `${Math.round(v / n * 100)}%</span>` : "";
+  const uHtml = u === "IMP" ? glossHtml("imp", "IMP") : u;
+  return `<div class="costline">ממוצע <b>${mean.toFixed(1)}</b> ${uHtml} מתחת למיטבי ` +
+    `<span class="muted">(חציון ${med.toFixed(1)})</span></div>` +
+    `<div class="band" role="img" aria-label="מיטבי או קרוב ${opt}, סטייה ${near}, ` +
+    `כשל ${bl} מתוך ${n}">` + seg("opt", opt) + seg("near", near) + seg("bl", bl) +
+    '</div><div class="blegend">' +
+    '<span><i class="sw opt"></i>מיטבי או קרוב (ציון 85+)</span>' +
+    '<span><i class="sw near"></i>סטייה (40–84)</span>' +
+    '<span><i class="sw bl"></i>כשל (0–39)</span></div>';
+}
+function suitRows(list) {
+  const suits = {S: {all: [], c: {}}, H: {all: [], c: {}},
+                 D: {all: [], c: {}}, C: {all: [], c: {}}};
+  list.forEach(a => { const card = a.chosenCall || "", st = card[0], s = suits[st];
+    if (!s) return;
+    const sc = btScoreOfAttempt(a);
+    s.all.push(sc);
+    (s.c[card] ??= []).push(sc); });
+  const order = ["S", "H", "D", "C"].filter(st => suits[st].all.length);
+  if (!order.length) return '<div class="muted">אין נתונים</div>';
+  return order.map(st => {
+    const s = suits[st], label = suitHtml(st) + " " + SUIT_NAME[st];
+    const cards = Object.keys(s.c)
+      .sort((a, b) => RANKS.indexOf(a[1]) - RANKS.indexOf(b[1]))
+      .map(c => row(cardHtml(c), s.c[c])).join("");
+    return '<details class="drill"><summary>' + row(label, s.all) + '</summary>' +
+      '<div class="drillbody">' + cards + '</div></details>';
+  }).join("");
+}
+function scenarioCard(title, list, kind, costKey) {
+  if (!list.length) return "";
+  const cfg = COST[costKey || kind] || COST.bidding;
+  let html = '<div class="card scen"><b>' + title + '</b> ' +
+    '<span class="muted">' + (kind === "lead" && cfg.unit !== "IMP"
+      ? "לקיחות" : glossHtml("imp", "IMP")) +
+    ' · n=' + list.length + '</span>' +
+    costBand(list, costKey || kind) +
+    '<div class="subh">לפי דרגת קושי</div>' + diffRows(list);
+  if (kind === "lead") {
+    html += '<div class="subh">לפי סוג חוזה</div>' + typeRows(list) +
+      '<div class="subh">לפי סדרת ההובלה</div>' + suitRows(list) +
+      '<div class="muted" style="font-size:12px;margin-top:4px">' +
+      'הקש סדרה כדי לראות את הקלפים.</div>';
+  } else {
+    html += '<div class="subh">לפי סוג בעיה</div>' + typeRows(list);
+  }
+  return html + '</div>';
+}
+function weakArea(scen) {
+  let worst = null;
+  const mean = xs => xs.reduce((s, x) => s + x, 0) / xs.length;
+  const bt = {};
+  scen.bidding.forEach(a => { const t = a.type; if (!t) return;
+    (bt[t] ??= []).push(btScoreOfAttempt(a)); });
+  for (const [t, xs] of Object.entries(bt)) if (xs.length >= MIN_N) {
+    const m = mean(xs);
+    if (!worst || m < worst.m) worst = {m, kind: "bidding",
+      label: (TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t,
+      href: "index.html?kind=bidding&type=" + t};
+  }
+  const ld = {};
+  scen.lead.forEach(a => { const d = a.difficultyLevel; if (!d) return;
+    (ld[d] ??= []).push(btScoreOfAttempt(a)); });
+  for (const [d, xs] of Object.entries(ld)) if (xs.length >= MIN_N) {
+    const m = mean(xs);
+    if (!worst || m < worst.m) worst = {m, kind: "lead",
+      label: "הובלה — " + (DIFF_NAMES[d] || d),
+      href: "index.html?kind=lead&lv=" + d};
+  }
+  return worst;
+}
+const OUTCOME_HE = {winner: "מנצחת", "accepted-alt": "חלופה קבילה",
+  dead: "מתה", suboptimal: "לא אופטימלית"};
+function render(attempts) {
+  const el = document.getElementById("dash");
+  if (!attempts.length) {
+    el.innerHTML = '<div class="card state"><div class="em">עוד אין נתונים</div>' +
+      '<a class="big" href="index.html">ענה על בעיה כדי להתחיל &larr;</a></div>';
+    return;
+  }
+  const first = attempts.filter(a => a.isFirstAttempt !== false);
+  const n = first.length;
+  const avgAll = n
+    ? first.reduce((s, a) => s + btScoreOfAttempt(a), 0) / n : 0;
+  const recent = [...first].sort((a, b) => firstMs(b) - firstMs(a));
+  let streak = 0;
+  for (const a of recent) { if (btScoreOfAttempt(a) >= 100) streak++; else break; }
+  // split first-attempts by scenario, and leads further by training mode
+  // (cost units differ: MP grades in tricks, IMP in IMPs)
+  const scen = {bidding: [], lead: []};
+  for (const a of first) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
+  const leadMP = scen.lead.filter(a => a.trainingMode !== "IMP");
+  const leadIMP = scen.lead.filter(a => a.trainingMode === "IMP");
+  const byKind = {};
+  for (const a of first) { const kd = a.kind || "bidding";
+    (byKind[kd] ??= []).push(btScoreOfAttempt(a)); }
+  const chrono = [...first].sort((a, b) => firstMs(a) - firstMs(b));
+  let trend = "";
+  if (chrono.length >= MIN_TREND) {
+    let cum = 0; const pts = [];
+    chrono.forEach((a, i) => { cum += btScoreOfAttempt(a); pts.push(cum / (i + 1)); });
+    const W = 300, H = 60, step = W / (pts.length - 1);
+    const path = pts.map((y, i) =>
+      `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
+    const last = Math.round(pts[pts.length - 1]);
+    // cumulative mean score plus a rolling window: the cumulative line
+    // flattens and hides recent change, so overlay a last-min(20, n/2) window
+    const win = Math.max(MIN_TREND, Math.min(20, Math.round(chrono.length / 2)));
+    const roll = chrono.map((a, i) => {
+      const lo = Math.max(0, i - win + 1);
+      let s = 0; for (let j = lo; j <= i; j++) s += btScoreOfAttempt(chrono[j]);
+      return s / (i - lo + 1);
+    });
+    const rpath = roll.map((y, i) =>
+      `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
+    trend = '<div class="card"><b>ציון לאורך זמן</b> ' +
+      '<span class="muted">(ניסיון ראשון)</span><br>' +
+      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ציון לאורך זמן, כעת ${last}" style="width:100%;height:auto;margin-top:6px">` +
+      `<line x1="0" y1="${H - 30}" x2="${W}" y2="${H - 30}" stroke="#8884" ` +
+      'stroke-dasharray="3"></line>' +
+      `<path d="${rpath}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 3"></path>` +
+      `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"></path>` +
+      '</svg><div class="muted">' +
+      '<span style="color:var(--accent)">■</span> מצטבר · ' +
+      '<span>▨</span> חלון אחרון (' + win + ') · קו מקווקו = ציון 50 · כעת ' +
+      last + '</div></div>';
+  }
+  const badge = m => {
+    const t = TYPE_NAMES[m.type];
+    const d = m.difficultyLevel;
+    return (t ? `<span class="typebadge" style="margin:0">${t[0]}</span> ` : "") +
+      (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
+        `${"★".repeat(d)}</span><span class="off">${"★".repeat(5 - d)}</span></span>` : "");
+  };
+  const misses = recent.filter(a => btScoreOfAttempt(a) < REVIEW_MIN).slice(0, 10);
+  const missList = misses.length
+    ? '<div class="card"><b>לשיפור — החלטות מתחת ל־' + REVIEW_MIN + '</b> <span class="muted">(הקש לחזרה)</span>' +
+      '<ul class="misslist">' + misses.map(m => {
+        // attempt fields are user-owned free text -> esc() before innerHTML
+        // (SEC-A-6). A problem deleted from the pool becomes a non-link
+        // "removed" row instead of a dead retry link (DB-M-9).
+        const gone = LIVE_IDS && !LIVE_IDS.has(m.problemId);
+        const body =
+          `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
+          `<div style="margin-top:4px">בחרת <b class="ltr">${esc(m.chosenCall)}</b> — ` +
+          `${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}` +
+          (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
+          (m.acceptedSet && m.acceptedSet.length
+            ? `. מיטבי: <span class="ltr">${esc(m.acceptedSet.join(", "))}</span>` : "") +
+          (gone ? ` <span class="go muted">בעיה שהוסרה</span></div>`
+                : ` <span class="go">חזור לתרגל &larr;</span></div>`);
+        return gone
+          ? `<li><div class="missrow">${body}</div></li>`
+          : `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">${body}</a></li>`;
+      }).join("") + "</ul></div>"
+    : "";
+  const weak = weakArea(scen);
+  const weakCard = weak
+    ? '<div class="card"><b>מה כדאי לתרגל</b>' +
+      `<div style="margin:6px 0 8px">הנקודה החלשה שלך: <b>${weak.label}</b> ` +
+      `(ציון ממוצע ${Math.round(weak.m)}).</div>` +
+      `<a class="big" href="${weak.href}">תרגל ${SESSION_SIZE} כאלה &larr;</a></div>`
+    : "";
+  const statCard =
+    '<div class="card"><div class="statgrid">' +
+    `<div class="stat"><b>${n < MIN_N ? "—" : Math.round(avgAll)}</b>` +
+    `<span class="muted">${glossHtml("panel", "ציון ממוצע")}</span></div>` +
+    `<div class="stat"><b>${streak}</b>` +
+    `<span class="muted">${glossHtml("streak", "רצף מיטבי")}</span></div>` +
+    `<div class="stat"><b>${n}</b><span class="muted">בעיות שנענו</span></div>` +
+    `<div class="stat"><b>${attempts.length}</b><span class="muted">סה"כ ניסיונות</span></div>` +
+    '</div></div>';
+  const byKindCard = '<div class="card"><b>לפי תרחיש</b>' +
+    Object.keys(byKind).map(kd =>
+      row(kd === "lead" ? "הובלה" : "הכרזה", byKind[kd])).join("") +
+    '</div>';
+  const footnote =
+    '<p class="footnote">ניסיון ראשון בלבד. לכל החלטה ציון 0–100: ' +
+    '100 = הפעולה המיטבית (או שקולה לה), 0 = אפשרות שלא ניצחה באף חלוקה, ' +
+    'ובתווך הציון יורד עם העלות מול הפעולה המיטבית — IMP בהכרזה ובהובלת ' +
+    'IMP, לקיחות בהובלת MP — בסולם המותאם לתנודת הלוח. ' +
+    'ממוצעים מוסתרים עד לפחות ' + MIN_N + ' ניסיונות; הטווח בסוגריים הוא ' +
+    'רווח בר־סמך 95% של הממוצע. “מתחת למיטבי” = העלות הגולמית; ' +
+    'תשובה מיטבית נספרת כאפס.</p>';
+  // three tabbed panels: overview / bidding / leads
+  const tabs = [
+    ["overview", "סקירה"], ["bidding", "הכרזה"], ["lead", "הובלה"],
+  ];
+  el.innerHTML =
+    '<div class="segctl tabs" role="tablist">' + tabs.map(([id, lbl], i) =>
+      `<button role="tab" data-tab="${id}" aria-selected="${i === 0}">${lbl}` +
+      `</button>`).join("") + '</div>' +
+    `<div class="dtab" data-panel="overview">` +
+      statCard + weakCard + trend + byKindCard + missList + footnote + '</div>' +
+    `<div class="dtab" data-panel="bidding" hidden>` +
+      (scenarioCard("הכרזה", scen.bidding, "bidding") ||
+       '<div class="card muted">עוד אין נתוני הכרזה.</div>') + '</div>' +
+    `<div class="dtab" data-panel="lead" hidden>` +
+      (scenarioCard("הובלה · MP", leadMP, "lead") +
+       scenarioCard("הובלה · IMP", leadIMP, "lead", "leadIMP") ||
+       "") +
+      (leadMP.length || leadIMP.length ? ""
+        : '<div class="card muted">עוד אין נתוני הובלה.</div>') + '</div>';
+  el.querySelector(".tabs").addEventListener("click", ev => {
+    const b = ev.target.closest("button[data-tab]");
+    if (!b) return;
+    el.querySelectorAll(".tabs button").forEach(x =>
+      x.setAttribute("aria-selected", x === b ? "true" : "false"));
+    el.querySelectorAll(".dtab").forEach(p =>
+      p.hidden = p.dataset.panel !== b.dataset.tab);
+  });
+}
+async function init() {
+  try {
+    // Learn which problems still exist so deleted ones can be flagged in the
+    // miss list (DB-M-9). Cheap: the index is stamp-cached (T10). If it fails,
+    // LIVE_IDS stays null and every attempt is treated as live (prior behavior).
+    try {
+      const idx = await window.BT.fetchIndex();
+      LIVE_IDS = new Set((idx.problems || []).map(p => p.id));
+    } catch (e) { LIVE_IDS = null; }
+    render(await window.BT.allAttempts());
+  } catch (e) {
+    const el = document.getElementById("dash");
+    el.innerHTML = 'לא ניתן לטעון את הנתונים שלך: <span class="en"></span>';
+    el.querySelector(".en").textContent = e.message;
+  }
+}
+// refresh the dashboard once the background sync (T4) lands
+window.addEventListener("bt-attempts-synced", async () => {
+  try { render(await window.BT.allAttempts()); } catch (e) { /* keep prior */ }
+});
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
+</script>
+</body></html>
