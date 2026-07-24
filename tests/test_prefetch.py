@@ -73,7 +73,10 @@ def test_answer_triggers_prefetch_and_init_consumes_it(html_fn):
 
 
 @pytest.mark.parametrize("html_fn", [_problem_html, _lead_html])
-def test_next_prefers_prefetched_id_when_still_unseen(html_fn):
+def test_next_prefers_prefetched_id_when_still_unseen_and_in_filter(html_fn):
     js = html_fn()
     assert "const pf = readPrefetch();" in js
-    assert "(pf && !store()[pf.id]) ? pf.id : pickUnseen(INDEX, flt)" in js
+    # the prefetched id is used only if it still exists, is unseen, AND matches
+    # the active filter (guards a stale free-play filter/mode change)
+    assert "INDEX.problems.find(p => p.id === pf.id)" in js
+    assert "!store()[pf.id] && matchesFilters(pfp, flt)" in js

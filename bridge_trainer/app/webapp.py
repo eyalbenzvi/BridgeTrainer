@@ -2265,6 +2265,8 @@ function choose(action) {{
   if (hl) hl.focus();
   // warm the next problem so the "next" tap navigates instantly (best-effort)
   (async () => {{
+    const ses = getSession();
+    if (ses && (ses.count || 0) >= ses.size) return;   // session done -> no next
     try {{ if (!INDEX) INDEX = await fetchIndex(); }} catch (e) {{ return; }}
     const s = getSession();
     const flt = (s && s.kind === "bidding")
@@ -2441,7 +2443,12 @@ async function init() {{
       : resolveFilters(INDEX, loadFilters(), "bidding");
     // use the prefetched next id if it's still unseen; else pick fresh
     const pf = readPrefetch();
-    const nid = (pf && !store()[pf.id]) ? pf.id : pickUnseen(INDEX, flt);
+    // use the prefetched id only if it still exists, is unseen, and matches the
+    // active filter (it may have gone stale — seen elsewhere, or the filter/
+    // mode changed in another tab since the prefetch).
+    const pfp = pf && pf.id && INDEX.problems.find(p => p.id === pf.id);
+    const nid = (pfp && !store()[pf.id] && matchesFilters(pfp, flt))
+      ? pf.id : pickUnseen(INDEX, flt);
     if (!nid) {{ location.href = "index.html?summary=1"; return; }}
     location.href = "p.html?id=" + encodeURIComponent(nid);
   }};
@@ -2709,6 +2716,8 @@ function commit(a) {
   if (hl) hl.focus();
   // warm the next problem so the "next" tap navigates instantly (best-effort)
   (async () => {
+    const ses = getSession();
+    if (ses && (ses.count || 0) >= ses.size) return;   // session done -> no next
     try { if (!INDEX) INDEX = await fetchIndex(); } catch (e) { return; }
     const s = getSession();
     const flt = (s && s.kind === "lead")
@@ -2853,7 +2862,12 @@ async function init() {
          levels: s.levels, types: s.types}
       : resolveFilters(INDEX, loadLead(), "lead");
     const pf = readPrefetch();
-    const nid = (pf && !store()[pf.id]) ? pf.id : pickUnseen(INDEX, flt);
+    // use the prefetched id only if it still exists, is unseen, and matches the
+    // active filter (it may have gone stale — seen elsewhere, or the filter/
+    // mode changed in another tab since the prefetch).
+    const pfp = pf && pf.id && INDEX.problems.find(p => p.id === pf.id);
+    const nid = (pfp && !store()[pf.id] && matchesFilters(pfp, flt))
+      ? pf.id : pickUnseen(INDEX, flt);
     if (!nid) { location.href = "index.html?summary=1"; return; }
     location.href = routeFor("lead", nid);
   };
