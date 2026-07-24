@@ -117,6 +117,13 @@ a { color: var(--accent); }
 /* meta text (e.g. the contract line) rides on the green felt, not a card, so
    it needs the on-felt muted tone — the card --muted is too dark to read. */
 .topbar .muted, .meta .muted { color: var(--on-felt-muted); }
+/* keep the problem meta and the report flag paired at the felt's inline end */
+.topbar-end { display: inline-flex; align-items: baseline; gap: 10px; }
+/* report-a-problem flag: discreet, rides on the felt, never a primary CTA */
+.reportbtn { font: inherit; font-size: 16px; line-height: 1; border: 0;
+             background: none; color: var(--on-felt-muted); cursor: pointer;
+             padding: 2px 4px; border-radius: 8px; }
+.reportbtn:hover, .reportbtn:focus-visible { color: var(--on-felt); }
 .muted { color: var(--muted); font-size: 13px; }
 .pill { display: inline-block; border-radius: 999px; padding: 1px 8px;
         font-size: 12px; border: 1px solid #ffffff55; }
@@ -579,6 +586,21 @@ button.typerow .tcount { text-align: end; }
 .sheet .closebtn { width: 100%; margin-top: 16px; padding: 12px; border-radius: 10px;
           border: 1px solid var(--line); background: var(--card); color: var(--fg);
           font: inherit; font-weight: 700; cursor: pointer; }
+
+/* report-a-problem sheet: fault-type chips + free-text, reuses .sheet/.panel */
+.repchips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.repchip { font: inherit; font-size: 14px; border: 1px solid var(--line);
+           background: var(--card); color: var(--fg); border-radius: 999px;
+           padding: 8px 14px; cursor: pointer; }
+.repchip[aria-pressed="true"] { background: var(--accent);
+           color: var(--on-accent); border-color: var(--accent); }
+.reptext { width: 100%; margin-top: 8px; font: inherit; padding: 10px;
+           border: 1px solid var(--line); border-radius: 10px;
+           background: var(--card); color: var(--fg); resize: vertical; }
+.sheet .sendbtn { width: 100%; margin-top: 16px; padding: 12px; border-radius: 10px;
+           border: 0; background: var(--accent); color: var(--on-accent);
+           font: inherit; font-weight: 700; cursor: pointer; }
+.sheet .sendbtn:disabled { opacity: .5; cursor: not-allowed; }
 
 /* session ribbon (recedes; never outshines the hand/auction) */
 .sessribbon { display: flex; align-items: center; justify-content: space-between;
@@ -1057,6 +1079,9 @@ const HE = {
   guestNote: "לא מחובר — התחבר כדי לשמור התקדמות",
   signIn: "התחבר עם Google", signOut: "התנתק", connected: "מחובר",
   close: "סגור", selectAll: "בחר הכל", clear: "נקה", problems: "בעיות",
+  reportOpen: "דווח על תקלה", reportTitle: "דיווח על תקלה בבעיה",
+  reportChoose: "מה לא תקין?", reportDetail: "פירוט נוסף (רשות)",
+  reportSend: "שלח בוואטסאפ", reportOpened: "נפתח וואטסאפ לשליחת הדיווח",
   you: "אתה", partner: "שותף", leader: "מוביל", declarer: "מכריז",
   dummy: "דומם", vul: "פגיע", notVul: "לא פגיע",
   best: "הטוב", yours: "שלך", engine: "מנוע", wins: "זכייה",
@@ -1600,6 +1625,115 @@ function diffLineHtml(p) {
     `<span class="on">${"\\u2605".repeat(lv)}</span>` +
     `<span class="off">${"\\u2605".repeat(5 - lv)}</span></span>` +
     `<b>${DIFF_NAMES[lv]} (${lv}/5)</b>`;
+}
+
+/* ===== report a problem =====
+   A discreet flag in the topbar of every problem page opens a bottom sheet
+   (reusing the .sheet/.panel pattern) where the user picks a fault type,
+   optionally adds free text, and sends the report over WhatsApp. No backend:
+   we build a wa.me deep link and open it. Both scenarios (bidding/lead) wire
+   the same openReport() from their init(), passing a context getter so the
+   currently-chosen answer (if any) is captured at open time. */
+const REPORT_PHONE = "972547918413";
+const REPORT_REASONS = [
+  "הכרזה לא הגיונית",
+  "הסבר לא מתאים להכרזה",
+  "חסרה אפשרות הכרזה",
+  "ניקוד לא הגיוני",
+  "ניתוח יד לא הגיוני",
+  "באג בתוכנה",
+];
+/* scenario + Hebrew classification label, e.g. "הכרזה · יד גבולית" */
+function reportTypeLabel(p) {
+  const scen = kindOf(p) === "lead" ? "הובלה" : "הכרזה";
+  const t = (p.classification && p.classification.type) || p.type;
+  const nm = TYPE_NAMES[t];
+  return nm ? scen + " \\u00b7 " + nm[0] : scen;
+}
+let _reportSheet = null, _reportCtx = null, _reportReason = null;
+function buildReportSheet() {
+  if (_reportSheet) return _reportSheet;
+  const sheet = document.createElement("div");
+  sheet.className = "sheet"; sheet.id = "report";
+  sheet.setAttribute("role", "dialog"); sheet.setAttribute("aria-modal", "true");
+  sheet.setAttribute("aria-label", HE.reportTitle);
+  const chips = REPORT_REASONS.map((r, i) =>
+    `<button type="button" class="repchip" data-i="${i}" ` +
+    `aria-pressed="false">${r}</button>`).join("");
+  sheet.innerHTML =
+    '<div class="panel">' +
+    '<h2>' + HE.reportTitle + '</h2>' +
+    '<p class="muted" id="rep-meta"></p>' +
+    '<div class="setrow" style="flex-direction:column;align-items:stretch">' +
+    '<span>' + HE.reportChoose + '</span>' +
+    '<div class="repchips" id="rep-chips">' + chips + '</div></div>' +
+    '<label class="setrow" style="flex-direction:column;align-items:stretch">' +
+    '<span>' + HE.reportDetail + '</span>' +
+    '<textarea id="rep-text" class="reptext" rows="3"></textarea></label>' +
+    '<button type="button" class="sendbtn" id="rep-send" disabled>' +
+    HE.reportSend + '</button>' +
+    '<button type="button" class="closebtn" id="rep-close">' + HE.close +
+    '</button></div>';
+  document.body.appendChild(sheet);
+  const chipsEl = sheet.querySelector("#rep-chips");
+  const sendBtn = sheet.querySelector("#rep-send");
+  function close() { sheet.classList.remove("open"); }
+  chipsEl.addEventListener("click", ev => {
+    const b = ev.target.closest(".repchip"); if (!b) return;
+    _reportReason = REPORT_REASONS[+b.dataset.i];
+    chipsEl.querySelectorAll(".repchip").forEach(x =>
+      x.setAttribute("aria-pressed", x === b ? "true" : "false"));
+    sendBtn.disabled = false;
+  });
+  sheet.querySelector("#rep-close").onclick = close;
+  sheet.addEventListener("click", ev => { if (ev.target === sheet) close(); });
+  addEventListener("keydown", ev => {
+    if (ev.key === "Escape" && sheet.classList.contains("open")) close();
+  });
+  sendBtn.onclick = () => {
+    if (!_reportReason || !_reportCtx) return;
+    const c = _reportCtx;
+    const lines = [
+      "דיווח על תקלה \\u2014 " + HE.brand,
+      "מזהה בעיה: " + c.id,
+      "סוג הבעיה: " + c.type,
+    ];
+    if (c.answer) lines.push("התשובה שנבחרה: " + c.answer);
+    lines.push("התקלה: " + _reportReason);
+    const extra = (sheet.querySelector("#rep-text").value || "").trim();
+    if (extra) lines.push("פירוט: " + extra);
+    lines.push("קישור: " + c.url);
+    const url = "https://wa.me/" + REPORT_PHONE + "?text=" +
+      encodeURIComponent(lines.join("\\n"));
+    window.open(url, "_blank", "noopener");
+    close();
+    btToast(HE.reportOpened);
+  };
+  _reportSheet = sheet;
+  return sheet;
+}
+/* ctx: {id, type, url, answer} or a function returning it (evaluated on open,
+   so the chosen answer reflects the current attempt state). */
+function openReport(ctx) {
+  const sheet = buildReportSheet();
+  _reportCtx = (typeof ctx === "function") ? ctx() : ctx;
+  _reportReason = null;
+  sheet.querySelector("#rep-send").disabled = true;
+  sheet.querySelectorAll(".repchip").forEach(x =>
+    x.setAttribute("aria-pressed", "false"));
+  sheet.querySelector("#rep-text").value = "";
+  sheet.querySelector("#rep-meta").textContent = "מזהה: " + _reportCtx.id;
+  sheet.classList.add("open");
+}
+/* reveal the topbar report flag (hidden until a problem loads) and wire it to
+   the given context getter. Called from each problem page's init(). */
+function wireReport(ctxFn) {
+  const btn = document.getElementById("report-open");
+  if (!btn) return;
+  btn.hidden = false;
+  btn.setAttribute("aria-label", HE.reportOpen);
+  btn.setAttribute("title", HE.reportOpen);
+  btn.onclick = () => openReport(ctxFn);
 }
 
 /* ===== app chrome: theme/text-size, global nav, settings sheet =====
@@ -2274,7 +2408,8 @@ def _problem_html() -> str:
 <main id="main" tabindex="-1">
 <div class="topbar">
 <a href="index.html">&rarr; דף הבית</a>
-<span id="meta"></span>
+<span class="topbar-end"><span id="meta"></span>
+<button type="button" class="reportbtn" id="report-open" hidden>&#9873;</button></span>
 </div>
 <div class="sessribbon" id="sessribbon" hidden></div>
 <div id="problem"><div class="card" aria-label="טוען את הבעיה">
@@ -2325,6 +2460,9 @@ style="white-space:pre-line;font-size:13px"></div></details>
 <script src="{_SHARED_SRC}"></script>
 <script>
 let P = null, INDEX = null, NOTES = [], OPTSHOWS = {{}};
+// the call the user chose (or a replayed prior answer); fed into a problem
+// report so the WhatsApp message names the answer the fault relates to
+let LAST_ANSWER = null;
 // true while re-attempting an already-answered problem: the re-answer is
 // recorded (attemptCount++) but keeps the first-attempt score and does NOT
 // count toward the practice session.
@@ -2406,6 +2544,7 @@ function optRowHtml(row, i, chosen, accepted) {{
     `${{bar}}${{chipsHtml(row)}}</div>`;
 }}
 function reveal(chosen) {{
+  LAST_ANSWER = chosen;
   const v = P.verdict;
   const sp = btScoreBidding(P, chosen);
   document.querySelectorAll("button.cand").forEach(b => {{
@@ -2734,6 +2873,9 @@ async function init() {{
   normalize();
   document.getElementById("meta").textContent =
     `IMP \\u00b7 מחלק ${{P.dealer}} \\u00b7 אתה ${{P.seat}}`;
+  wireReport(() => ({{
+    id: P.id, type: reportTypeLabel(P), url: location.href, answer: LAST_ANSWER,
+  }}));
   document.getElementById("problem").innerHTML =
     `<div class="card">${{typeBadgeHtml(P)}}${{auctionTableHtml(P, NOTES)}}` +
     `<div id="bidnote"></div>` +
@@ -2842,6 +2984,8 @@ else addEventListener("bt-ready", () => window.BT.start(init), {{once: true}});
 
 _LEAD_JS = r"""
 let P = null, INDEX = null, MODE = "MP", MODE_FALLBACK = false;
+// the lead the user chose (or a replayed prior answer); fed into a report
+let LAST_ANSWER = null;
 // true while re-attempting an already-answered problem (see the bidding page).
 let RETRYING = false;
 function resetForRetry() {
@@ -2910,6 +3054,7 @@ function groupLabel(g) {
   return suitHtml(g.suit) + " " + ranks.join("/");
 }
 function reveal(chosen) {
+  LAST_ANSWER = chosen;
   const v = P.verdict, acc = acceptedFor(P, MODE);
   const rows = modeTable(P, MODE);
   const sp = btScoreLead(P, chosen, MODE);
@@ -3182,6 +3327,9 @@ async function init() {
   document.getElementById("meta").innerHTML =
     'חוזה <span class="ltr">' + callHtml(callPart) + '</span>' + dblTag +
     ' ע"י ' + P.declarer + " · אתה מוביל (" + P.leader + ")";
+  wireReport(() => ({
+    id: P.id, type: reportTypeLabel(P), url: location.href, answer: LAST_ANSWER,
+  }));
   // mode banner: the active mode, its objective, and the deal facts
   // (contract, declarer, vulnerability, doubling status) — always visible.
   const info = MODE_INFO[MODE];
@@ -3298,7 +3446,9 @@ def _lead_html() -> str:
         '<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-scenario="lead">\n<main id="main" tabindex="-1">\n'
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
-        '<span class="muted" id="meta"></span></div>\n'
+        '<span class="topbar-end"><span class="muted" id="meta"></span>'
+        '<button type="button" class="reportbtn" id="report-open" hidden>'
+        '&#9873;</button></span></div>\n'
         '<div class="sessribbon" id="sessribbon" hidden></div>\n'
         # loading skeletons (UX-I-4): match p.html so lead.html shows structure
         # instead of an empty felt while auth+Firestore resolve
