@@ -160,12 +160,30 @@ function gate(mode) {
     return;
   }
   g.innerHTML =
-    "<div><h1 style='color:inherit'>&spades; Bridge Trainer</h1>" +
-    "<p>התחבר כדי לשמור ולעקוב אחר ההתקדמות שלך.</p>" +
+    "<div style='max-width:30em;line-height:1.6'>" +
+    "<h1 style='color:inherit'>&spades; Bridge Trainer</h1>" +
+    "<p>מאמן הכרזה והובלה בברידג' \\u2014 תרגול בעיות אמת עם משוב מיידי, " +
+    "ניקוד 0\\u2013100 ומעקב התקדמות.</p>" +
     "<button id='bt-signin' style='font-size:17px;font-weight:700;" +
     "padding:14px 22px;border:0;border-radius:12px;background:#EAB84C;" +
-    "color:#2A2410;cursor:pointer'>התחבר עם Google</button></div>";
-  document.getElementById("bt-signin").onclick = () => doSignIn();
+    "color:#2A2410;cursor:pointer'>התחבר עם Google</button>" +
+    "<p style='font-size:13px;opacity:.85;margin-top:10px'>" +
+    "ההתקדמות נשמרת לחשבון שלך ומסתנכרנת בין המכשירים.</p>" +
+    "<p id='bt-signin-err' role='alert' " +
+    "style='color:#FFB4A8;min-height:1.2em;margin-top:6px'></p></div>";
+  const btn = document.getElementById("bt-signin");
+  btn.onclick = () => {
+    const err = document.getElementById("bt-signin-err");
+    if (err) err.textContent = "";
+    btn.disabled = true;
+    // doSignIn resolves quietly on user-cancel and rejects only on a real
+    // failure (see classifySignInError); surface that instead of an
+    // unhandled rejection, and re-enable the button to retry.
+    doSignIn()
+      .catch(() => { if (err) err.textContent =
+        "ההתחברות נכשלה. בדוק את החיבור ונסה שוב."; })
+      .finally(() => { btn.disabled = false; });
+  };
 }
 function ungate() { const g = document.getElementById("bt-gate"); if (g) g.remove(); }
 

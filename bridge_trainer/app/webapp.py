@@ -829,6 +829,30 @@ function loadErrorHtml(retryId) {
     '<div style="margin-top:8px"><a href="index.html">חזרה לתרגול</a></div>' +
     '</div>';
 }
+/* transient toast for a background failure (e.g. an attempt save that didn't
+   reach the server, dispatched as bt-save-failed by web/bt-firebase.js).
+   Non-blocking and auto-dismissing — the save is retried automatically. */
+function btToast(msg) {
+  let t = document.getElementById("bt-toast");
+  if (!t) {
+    t = document.createElement("div");
+    t.id = "bt-toast";
+    t.setAttribute("role", "status");
+    t.style.cssText = "position:fixed;bottom:16px;inset-inline:0;margin:auto;" +
+      "width:max-content;max-width:90%;z-index:9998;padding:10px 16px;" +
+      "border-radius:10px;font-size:14px;background:var(--fg,#222);" +
+      "color:var(--card,#fff);box-shadow:0 2px 10px rgba(0,0,0,.3);" +
+      "transition:opacity .3s";
+    document.body.appendChild(t);
+  }
+  t.textContent = msg;
+  t.style.opacity = "1";
+  clearTimeout(btToast._t);
+  btToast._t = setTimeout(() => { t.style.opacity = "0"; }, 4000);
+}
+if (typeof window !== "undefined")
+  window.addEventListener("bt-save-failed",
+    () => btToast("השמירה נכשלה — ננסה שוב אוטומטית."));
 /* ===== central Hebrew string table: UI chrome strings live here, so new
    features add a key instead of an inline literal ===== */
 const HE = {
@@ -838,7 +862,7 @@ const HE = {
   theme: "ערכת נושא", themeSystem: "מערכת", themeLight: "בהיר",
   themeDark: "כהה", textSize: "גודל טקסט", sizeS: "רגיל", sizeL: "גדול",
   sizeXL: "ענק", guest: "אורח",
-  guestNote: "אורח — ההתקדמות נשמרת מקומית",
+  guestNote: "לא מחובר — התחבר כדי לשמור התקדמות",
   signIn: "התחבר עם Google", signOut: "התנתק", connected: "מחובר",
   close: "סגור", selectAll: "בחר הכל", clear: "נקה", problems: "בעיות",
   you: "אתה", partner: "שותף", leader: "מוביל", declarer: "מכריז",
@@ -1455,7 +1479,12 @@ function initChrome() {
     if (guest) {
       nameEl.textContent = HE.guestNote;
       btn.textContent = HE.signIn;
-      btn.onclick = () => window.BT && window.BT.signIn();
+      // swallow the rejection doSignIn() now throws on a real failure so it
+      // isn't an unhandled rejection (the gate shows its own error UI).
+      btn.onclick = () => {
+        const p = window.BT && window.BT.signIn();
+        if (p && p.catch) p.catch(() => {});
+      };
       if (navLbl) navLbl.textContent = HE.account;
     } else {
       const u = window.BT.user();
