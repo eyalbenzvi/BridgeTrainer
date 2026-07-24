@@ -33,11 +33,12 @@ def _local_pool(pids):
 
 class _FakeRemote:
     """Minimal stand-in for FirestorePool exercising push_local_pool's paths."""
-    def __init__(self):
+    def __init__(self, always_conflict=False):
         self.problems = {}       # pid -> index entry (the "server" index)
         self.gen = 0
         self.uploaded = {}       # pid -> doc body
         self.write_calls = 0
+        self.always_conflict = always_conflict
         self._db = self
         self._col = self
 
@@ -59,6 +60,9 @@ class _FakeRemote:
 
     def write_index(self, index, expect_generation=None):
         self.write_calls += 1
+        if self.always_conflict:
+            self.gen += 1          # a concurrent writer wins every round
+            raise IndexConflict(f"{expect_generation} != {self.gen}")
         if self.write_calls == 1:
             # a concurrent producer commits an entry + bumps the generation
             # right before our first write lands.
@@ -85,14 +89,16 @@ def test_push_retries_on_conflict_and_preserves_all_entries(monkeypatch):
     assert "p1" in remote.uploaded and "p2" in remote.uploaded
 
 
-def test_cas_pointer_raises_on_stale_generation():
-    """A stale expected-generation must be refused (drives the retry)."""
-    remote = _FakeRemote()
-    remote.gen = 5
-    remote.write_calls = 1     # skip the "concurrent bump" branch
+def test_push_gives_up_after_max_retries(monkeypatch):
+    """If every index write loses the race, push raises after the retry budget
+    (docs are uploaded; the operator re-runs). Exercises the real retry loop."""
+    monkeypatch.setattr(fs.time, "sleep", lambda *_: None)
+    remote = _FakeRemote(always_conflict=True)
+    raised = False
     try:
-        remote.write_index({"problems": []}, expect_generation=4)
-        raised = False
+        push_local_pool(_local_pool(["p1"]), remote=remote)
     except IndexConflict:
         raised = True
     assert raised
+    assert remote.write_calls == fs._MAX_INDEX_CAS_RETRIES  # tried the budget
+    assert "p1" in remote.uploaded                          # doc still uploaded

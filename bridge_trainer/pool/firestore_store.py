@@ -248,18 +248,32 @@ class FirestorePool:
 
         shards = [entries[i:i + SHARD_MAX_ENTRIES]
                   for i in range(0, len(entries), SHARD_MAX_ENTRIES)]
-        shard_ids = [f"{SHARD_PREFIX}{i}" for i in range(len(shards))]
+        # Version the shard ids per write (unique token) instead of reusing
+        # fixed index_shard_<i> in place. Fixed ids let a concurrent reader load
+        # the OLD pointer but the NEW shard content (torn read), and a lost CAS
+        # left the winner's pointer over our shard bodies. With unique ids: new
+        # shards are written first, the pointer CAS publishes them atomically,
+        # and the OLD shards are deleted only after the CAS commits — so a
+        # reader's pointer and shards always agree. A lost CAS cleans up its own
+        # just-written shards so they don't orphan.
+        token = f"{time.time_ns():x}"
+        shard_ids = [f"{SHARD_PREFIX}{token}_{i}" for i in range(len(shards))]
         batch = self._db.batch()
         for sid, chunk in zip(shard_ids, shards):
             batch.set(self._meta.document(sid),
                       _firestore_safe({"problems": chunk}))
-        _retry_transient(batch.commit)             # shards first
+        _retry_transient(batch.commit)             # new shards first
         ptr = {k: v for k, v in index.items()
                if k not in ("problems", "generation")}
         ptr["shards"] = shard_ids
         ptr["count"] = len(entries)
-        new_gen = self._cas_pointer(ptr, expect_generation)   # pointer last
-        for sid in old_shards - set(shard_ids):
+        try:
+            new_gen = self._cas_pointer(ptr, expect_generation)   # pointer last
+        except IndexConflict:
+            for sid in shard_ids:      # we lost the race; don't orphan our shards
+                _retry_transient(self._meta.document(sid).delete)
+            raise
+        for sid in old_shards:         # pointer now references the new shards
             _retry_transient(self._meta.document(sid).delete)
         return new_gen
 
@@ -328,7 +342,13 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
                 break
             except IndexConflict:
                 if attempt == _MAX_INDEX_CAS_RETRIES - 1:
-                    raise
+                    # docs are uploaded but the index write kept losing the
+                    # race; surface it so the operator can re-run (a re-push or
+                    # rebuild_index reconciles — the set() writes are idempotent).
+                    raise IndexConflict(
+                        f"index update lost the race {_MAX_INDEX_CAS_RETRIES}x; "
+                        f"{uploaded} docs uploaded but not yet indexed — re-run "
+                        f"push (idempotent) or rebuild_index")
                 time.sleep(0.5 * (attempt + 1))
     return {"uploaded": uploaded, "skipped": skipped, "total": len(local.ids())}
 
@@ -347,6 +367,10 @@ def backfill_lead_training(key_path: str | None = None,
     app's IMP tab filters on. Bidding docs are read but never written.
 
     Returns {lead_total, updated, total}. ``dry_run`` reports without writing.
+
+    Rebuilds the index from a full snapshot (unconditional write), so run
+    it when no producer is actively pushing — a concurrent push committed
+    after this read would be dropped from the rebuilt index (T11).
     """
     from ..scoring.lead_metrics import legacy_training_block
     from .store import build_index
@@ -385,6 +409,10 @@ def backfill_lead_types(key_path: str | None = None,
     scan). Bidding docs are read but never written.
 
     Returns {lead_total, updated, total}. ``dry_run`` reports without writing.
+
+    Rebuilds the index from a full snapshot (unconditional write), so run
+    it when no producer is actively pushing — a concurrent push committed
+    after this read would be dropped from the rebuilt index (T11).
     """
     from ..engine.lead_classify import classify_lead_record
     from .store import build_index
