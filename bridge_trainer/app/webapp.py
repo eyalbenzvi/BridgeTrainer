@@ -2063,7 +2063,7 @@ data-gloss="win">הפסד</button></div>
 <details class="notes" id="prose-box" style="display:none">
 <summary>ניתוח מלא</summary><div id="explanation"
 style="white-space:pre-line;font-size:13px"></div></details>
-<details class="notes" id="cmp-box" style="display:none">
+<details class="notes" id="cmp-box" style="display:none" open>
 <summary>טבלת השוואה: כל ההכרזות שנבדקו</summary>
 <table id="ctable" class="plain"></table>
 <p class="footnote">הציון בסולם הפאנל (0-100); עמודת ה־IMP היא הפער מול
