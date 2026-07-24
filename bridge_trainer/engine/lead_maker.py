@@ -16,7 +16,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from ..pool.store import ProblemPool
+from .batch_state import BatchState
 from ..scoring.lead_metrics import (TRAINING_MODES, compute_lead_metrics,
                                     mode_rankings, training_block)
 from .conventions import (SEATS, contract_str, final_contract,
@@ -327,20 +327,16 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
 PROGRESS_EVERY = 5      # ACCEPTED boards between status lines (CI tracing)
 
 
-class _LeadBatchState:
-    """Aggregation shared by the sequential and parallel lead paths
-    (mirrors maker._BatchState)."""
+class _LeadBatchState(BatchState):
+    """Lead-batch aggregation (shared core in engine/batch_state.py). Unlike
+    the bidding batch it logs only a progress line every PROGRESS_EVERY accepts
+    (no per-board detail) and tracks vul/difficulty quotas. Kept as
+    _LeadBatchState — parallel.py imports it by that name."""
 
-    def __init__(self, pool_dir: str, count: int, log):
-        self.pool = ProblemPool(pool_dir)
-        self.existing = set(self.pool.ids())
-        self.count = count
-        self.log = log
-        self.made: list[str] = []
-        self.rejections = Counter()
-        self.stage_totals = Counter()
+    boards_key = "boards_bid"
+
+    def _init_quotas(self) -> None:
         self.quotas = {"vuls": Counter(), "difficulty": Counter()}
-        self.boards = 0
         self.t0 = time.perf_counter()
 
     def _progress(self) -> None:
@@ -354,38 +350,15 @@ class _LeadBatchState:
                  f"{self.boards} boards scanned [{mins:.1f} min]"
                  + (f"; top rejections: {top}" if top else ""))
 
-    def absorb(self, out: LeadOutcome, tag: str = "") -> None:
-        self.boards += 1
-        for k, x in out.timings.items():
-            self.stage_totals[k] += x
-        if out.status in ("rejected", "error"):
-            self.rejections[out.reason] += 1
-            return
-        rec = out.rec
-        if rec["id"] in self.existing:
-            self.rejections["duplicate"] += 1
-            return
-        self.pool.add(rec)
-        self.pool.rebuild_index()
-        self.existing.add(rec["id"])
-        self.made.append(rec["id"])
+    def _on_accept(self, out: LeadOutcome, rec, tag: str) -> None:
         self.quotas["vuls"][rec["vul"]] += 1
         self.quotas["difficulty"][rec["difficulty"]] += 1
         if len(self.made) % PROGRESS_EVERY == 0:
             self._progress()
 
-    def summary(self, wall: float) -> dict:
-        return {
-            "made": self.made, "count": len(self.made),
-            "wall_s": round(wall, 1), "boards_bid": self.boards,
-            "rejections": dict(self.rejections),
-            "stage_totals_s": {s: round(x, 1)
-                               for s, x in self.stage_totals.items()},
-            "per_accepted_s": round(wall / len(self.made), 1)
-            if self.made else None,
-            "mix": {"vuls": dict(self.quotas["vuls"]),
-                    "difficulty": dict(self.quotas["difficulty"])},
-        }
+    def _mix(self) -> dict:
+        return {"vuls": dict(self.quotas["vuls"]),
+                "difficulty": dict(self.quotas["difficulty"])}
 
 
 def forge_lead_batch(pool_dir: str, count: int, base_seed: int,
