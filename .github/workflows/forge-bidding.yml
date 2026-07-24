@@ -148,8 +148,10 @@ jobs:
             echo "## Bidding forge — $HEAD"
             echo
             echo '```'
-            grep -E "^>> |^Done:|progress: |type-classified|uploaded " \
-              forge.log | tail -60 || true
+            # "<id>: level N type <cat>" is printed per classified problem, so
+            # this lists every id created this run and the category it got.
+            grep -E "^>> |^Done:|progress: |type-classified|uploaded |: level [0-9]+ type " \
+              forge.log | tail -80 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
