@@ -154,7 +154,10 @@
 > הבלוקים `html[data-theme]`** ש-test_contrast תלוי בהם.
 
 > **תלות בין-גלית:** 74 (גל D) מגדיר `SESSION_SIZE` שבו משתמש 64 (גל E). לכן גל
-> D מתבצע לפני החלק של 64 בגל E. שאר הגלים בלתי-תלויים.
+> D מתבצע לפני החלק של 64 בגל E. בנוסף, 56 (גל D) משכתב את פונקציות ה-facet/stats
+> ב-`_index_html` (`updateScenCounts` 1699, `facetCounts` 1740, `renderStats`
+> 1815) שגם 69/63/64 (גל E) עורכים — לכן 69/63/64 **נכתבים על גבי** מבנה ה-`COUNTS`
+> של 56 (גל D לפני גל E, כמתוכנן). שאר הגלים בלתי-תלויים.
 
 ---
 
@@ -183,10 +186,16 @@
 - **גישה:** פונקציה טהורה `client_view(rec)` ב-`firestore_store.py` (או ב-
   `store.py` כדי להיות בר-בדיקה בלי firebase) שמסירה `policy_trail` ו-
   `engine_auction_complete`, ומצמצמת את `quality` ל-`{n_samples, stakes}` בלבד
-  (אם קיימים). מוחל **רק בנתיב ההעלאה** (`writer.set(..., client_view(rec))`),
-  כך שהפול המקומי שומר את הרשומה המלאה. לאמת שאף כלי ענן לא קורא את השדות: ה-
-  backfills משתמשים ב-projection מפורש (`fields=[...]`, firestore_store.py:474,
-  516) שאינו כולל אותם. `index_entry` לא נוגע בהם.
+  (אם קיימים). מוחל **רק בנתיב ההעלאה**.
+  **⚠ קריטי (ביקורת):** חובה לשמר את `_firestore_safe` — הוא עוטף מערכים מקוננים
+  ל-`{items:[...]}` (חוקי ב-Firestore, מהופך ב-`unwrapFirestore` בקריאה). לכן
+  הקריאה היא `writer.set(..., _firestore_safe(client_view(rec)))` — לא
+  `client_view(rec)` לבד (זה יעלה מערכים מקוננים לא-חוקיים וישבור את הקריאה).
+  הסדר: קודם `client_view` (מסיר שדות מתים, ביניהם `policy_trail` שהוא list-of-
+  lists), ואז `_firestore_safe` על מה שנשאר. הפול המקומי שומר את הרשומה המלאה.
+  לאמת: ה-backfills משתמשים ב-projection מפורש (firestore_store.py:474, 516)
+  שאינו כולל את השדות המתים; `candidates` (maker.py:55) הוא שדה **נפרד** שהקליינט
+  קורא (_SCORE_JS:710) — לא להסירו; `index_entry` לא נוגע בהם.
 - **בדיקות:** `tests/test_client_view.py` — `client_view` על רשומת maker
   מדומה: `policy_trail`/`engine_auction_complete` הוסרו, `quality` צומצם,
   ושדות שהקליינט קורא (`verdict`, `classification`, `kind`, `contract`,
@@ -265,23 +274,30 @@
   `docs/firebase_setup.md:64-67` (profile מתועד אך לא קיים); `_DASHBOARD_JS`
   miss-list + `init` (3250, 3316).
 - **גישה:**
-  1. **multi-device:** בעדכון חוזר להוסיף `ts: serverTimestamp()` לצד ה-
-     `attemptCount`/`lastTs`, כך שהסנכרון האינקרמנטלי (`where("ts",">",...)`)
-     יתפוס עדכוני `attemptCount` ממכשיר אחר. **שים לב** לחוזה `attemptKeys`
-     ב-rules — `ts` ו-`lastTs` כבר ברשימה (firestore.rules:40), אז ה-merge
-     תקין. לוודא שלא נשבר `validUpdate`. (`isFirstAttempt`/`score` נשמרים
-     מה-doc הקיים — merge לא מוחק.)
+  1. **multi-device (מתוקן לפי ביקורת — הימנעות מרגרסיית מיון):** **אסור** פשוט
+     להזיז את `ts` בעדכון חוזר — כרגע `ts` = זמן הניסיון הראשון, והדשבורד ממיין
+     *הכול* לפי `tsMillis(a)` (recent 3196, chrono 3208, streak 3197-3198, trend
+     3210+, misses 3246 — כולם "ניסיון ראשון בלבד"). בימפ של `ts` יקפיץ בעיה
+     שנענתה-מחדש ל"האחרון" וישבור streak/trend. **הפתרון (גישת ה-`firstTs`, כפי
+     שהממצא עצמו מציע):** בניסיון ראשון לכתוב **גם** `firstTs` (= אותו ערך כמו
+     `ts`); בעדכון חוזר לכתוב `ts: serverTimestamp()` (כדי שהסנכרון האינקרמנטלי
+     `where("ts",">",...)` יתפוס אותו) **תוך שימור `firstTs`** (merge לא מוחקו).
+     הדשבורד ימיין/יסנן לפי `firstTs || ts` (fallback ל-legacy שאין בו `firstTs`
+     — נכון תמיד: legacy `ts` הוא זמן הניסיון הראשון). להוסיף `firstTs` ל-
+     `attemptKeys()` ב-firestore.rules (אחרת `validCreate`/`validUpdate` יידחו).
   2. **orphan attempts:** ב-`init` של הדשבורד לקרוא את האינדקס (`fetchIndex`,
      זול — cached ב-T10) ולבנות `Set` של ids חיים; להעביר ל-`render`. בבניית
      ה-miss-list, אם `m.problemId` אינו ב-Set → להציג "בעיה שהוסרה" (ללא קישור)
      במקום קישור שבור. ליפול בחן אם `fetchIndex` נכשל (להתייחס לכל ה-ids כחיים).
   3. **profile doc:** למחוק את אזכור ה-profile מ-`docs/firebase_setup.md`
      (סכמה מתה) — מתואם עם צמצום החוק ב-80.
-- **בדיקות:** `run_logic`/פונקציה טהורה חדשה ב-bt-logic `isOrphan(pid, liveIds)`
-  או בדיקת string-assert ב-`_DASHBOARD_JS` שה-miss-row מתנה על ה-liveIds set.
-  `test_bt_logic.py`/`test_push_reliability.py` — string-assert ש-re-answer
-  כותב `ts: serverTimestamp()`. בדיקת מחרוזת שה-doc אינו מזכיר profile.
-- **סיכון:** נמוך.
+- **בדיקות:** פונקציה טהורה `firstTsMillis(a)` ב-bt-logic + `run_logic` (fallback
+  `firstTs||ts`); string-assert ש-record ניסיון-ראשון כותב `firstTs`, ושעדכון
+  חוזר כותב `ts: serverTimestamp()`; string-assert שהדשבורד ממיין לפי firstTs.
+  string-assert ש-`firstTs` ב-`attemptKeys()`. orphan: string-assert שה-miss-row
+  מתנה על ה-liveIds set. בדיקת מחרוזת שה-doc אינו מזכיר profile.
+- **סיכון:** נמוך-בינוני (נגיעה במיון הדשבורד — legacy fallback חובה). **קוד
+  ריוויו** בסוף.
 
 #### 85 (SEC-C-8) — ניקוי localStorage בהתנתקות
 - **מיקום:** `bt-firebase.js` ענף sign-out ב-`onAuthStateChanged` (521-526).
@@ -304,7 +320,10 @@
   `_syncAttempts` (258, 286, 321), `loadCacheState`.
 - **גישה:** לעטוף את ה-`localStorage.setItem` של ה-cache ב-scheduler שדוחה ל-
   `requestIdleCallback`/`setTimeout(0)` עם debounce (כתיבה אחת לרצף). ATTEMPTS
-  בזיכרון + הכתיבה ל-Firestore כבר מבטיחים שאין אובדן מידע. **חובה flush סינכרוני
+  בזיכרון + הכתיבה ל-Firestore כבר מבטיחים שאין אובדן מידע.
+  **⚠ גבול (ביקורת):** רק `saveCache` (91-97) נדחה. `savePending` (105-108)
+  **חייב להישאר סינכרוני** — הוא רושם כתיבות ניסיון-ראשון שנכשלו שאסור ל-reconcile
+  לאבד. **חובה flush סינכרוני
   על `visibilitychange`/`pagehide`** (כדי לא לאבד את הכתיבה האחרונה בסגירת טאב/
   ניווט — האתר multi-page!). הלוגיקה הטהורה של ה-debounce (מתי לכתוב) יכולה
   להיבדק, אך המימוש כאן קטן; לשמור על `saveCache` הסינכרוני כ-`flushCache`
@@ -324,23 +343,30 @@
 ### גל D
 
 #### 74 (BUG-9) — ריכוז מספרי קסם לקבועים
-- **מיקום (מאומת):** `_SCORE_JS` `SCORE_CAP=95` (653), הבנדים (668-670: `>=100`
-  best, `>=85` near, `>=65` minor), clamp `1,94` (714,764,783); `_SHARED_JS`
-  `bumpSession`/`bt_session` `size:10`/`>=100` (1412-1426); inline `sp.score>=65`
-  ב-`_problem_html` (2142) ו-`_LEAD_JS` (2617); `_DASHBOARD_JS` `>=85` (3107),
+- **מיקום (מתוקן לפי ביקורת):** `_SCORE_JS` `SCORE_CAP=95` (653, **כבר קבוע**),
+  הבנדים (668-670: `>=100` best, `>=85` near, `>=65` minor, + קצה `40`),
+  clamp `1,94` (714,764,783); `_SHARED_JS` `bumpSession`/streak `>=100`
+  (1415-1428, **אין בו `size:10`**); **`size: 10`** נמצא ב-`_index_html:1936**
+  (blob יצירת הסבב); inline `sp.score>=65` ב-`_problem_html` (2142) ו-`_LEAD_JS`
+  (2617); `_DASHBOARD_JS` `>=85` (3107) ו-`<85` misslist (3246) ו-"מתחת ל־85"
+  (3248) וקצה `40` (3107, 3119), תוויות בנד קשיחות "85+/40–84/0–39" (3118-3120),
   `>=100` streak (3198), טקסט "תרגל 10" (3265); `resetAll` batch 400
-  (bt-firebase.js:507).
+  (bt-firebase.js:507). **החרגה:** `.slice(0, 10)` ב-3246 הוא מגבלת תצוגה של
+  ה-misslist — **לא** לקשור ל-`SESSION_SIZE`.
 - **גישה:** להגדיר ב-`_SCORE_JS` (DOM-free, בר-בדיקה + מגיע לכל דף):
-  `NEAR_MIN=65`, `REVIEW_MIN=85`, `SESSION_SIZE=10`, `SCORE_MAX_NONBEST=94`,
-  (`SCORE_CAP=95` כבר קיים). לגזור מהם: את בנדי `btBandOf`, את ה-clamps, את
-  `sp.score >= NEAR_MIN` בשני הדפים, את `>=REVIEW_MIN` בדשבורד, את גודל הסבב
-  ואת הטקסט "תרגל {SESSION_SIZE} כאלה". `BATCH_LIMIT=400` הוא ב-bt-firebase.js
-  (מודול נפרד) — להגדיר שם קבוע מקומי `RESET_BATCH_LIMIT=400` עם הערה (מגבלת
-  Firestore 500). לתעד את היחס 94↔95 (`SCORE_MAX_NONBEST` < `SCORE_CAP`).
-- **בדיקות:** `run_js` ש-`btBandOf` משתמש בספים הנכונים (100/85/65) וש-clamp
-  לא עולה על 94; string-assert ש-inline `sp.score >= NEAR_MIN` ולא `65` קשיח;
-  string-assert שהטקסט בדשבורד נגזר מ-`SESSION_SIZE`. `test_scoring_scale.py`
-  קיים עובר.
+  `NEAR_MIN=65`, `REVIEW_MIN=85`, `ERROR_MIN=40`, `SCORE_MAX_NONBEST=94`
+  (`SCORE_CAP=95` כבר קיים). `SESSION_SIZE=10` — ב-`_SHARED_JS` (בתחום ה-
+  `_index_html:1936`, שם `_SHARED_JS` בסקופ). לגזור: את בנדי `btBandOf`, את
+  ה-clamps (`SCORE_MAX_NONBEST`), את `sp.score >= NEAR_MIN` בשני הדפים, את
+  `>=REVIEW_MIN`/`ERROR_MIN` בדשבורד, את `size: SESSION_SIZE` ב-1936 ואת הטקסט
+  "תרגל {SESSION_SIZE} כאלה". תוויות הבנד (3118-3120) — לגזור מהמספרים אם קריא;
+  אחרת להשאיר כמחרוזת ולתעד. `BATCH_LIMIT=400` ב-bt-firebase.js (מודול נפרד) —
+  קבוע מקומי `RESET_BATCH_LIMIT=400` עם הערה (מגבלת Firestore 500). לתעד יחס
+  94↔95.
+- **בדיקות:** `run_js` ש-`btBandOf` משתמש בספים הנכונים (100/85/65/40) וש-clamp
+  לא עולה על `SCORE_MAX_NONBEST`; string-assert ש-inline `sp.score >= NEAR_MIN`;
+  string-assert ש-`size: SESSION_SIZE` והטקסט בדשבורד נגזר מ-`SESSION_SIZE`.
+  `test_scoring_scale.py` קיים עובר.
 - **סיכון:** נמוך (ערכים זהים, רק שמות).
 
 #### 56 (PERF-F-6) — counts מחושב-מראש
@@ -360,7 +386,9 @@
   `kindOf`/`targetModeOf`/`leadMode` שכבר שם). בדיקה דרך `run_shared`.
 - **בדיקות:** `tests/test_home_counts.py` (`run_shared`) — `buildCounts` על index
   fixture, ואז השוואה שהספירות הנגזרות שוות למימוש ה"סורק" הישן על אותו fixture
-  (parity). `test_home_filters.py` קיים עובר.
+  (parity). **הערה (ביקורת):** `TYPE_NAMES` = `window.TAXONOMY_HE || {}` (1363) —
+  ה-harness חייב להזריק `window.TAXONOMY_HE` (או לבדוק ספירות types בלבד) אחרת
+  ספירות ה-types יתמוטטו. `test_home_filters.py` קיים עובר.
 - **סיכון:** נמוך-בינוני. **קוד ריוויו** בסוף.
 
 #### 75 (BUG-10) — קוד מת + .headline כפולה
@@ -369,8 +397,11 @@
   מדויקים בזמן המימוש (מספרי השורות בממצא מסבב לפני סבב 2).
 - **גישה:** למחוק את `saveStore` ואת כל קריאותיה (grep מוודא 0 קריאות); לפשט
   `(it.correct ? 100 : 40)` ל-`typeof it.score === "number" ? it.score : 40`
-  עם הערה; לאחד את הגדרות `.headline` ב-`_CSS` להופעה אחת (לבדוק שהמאוחדת
-  משקפת את ה-override האחרון בפועל — 22px/v2, לא הנדרסת).
+  עם הערה; לאחד את הגדרות `.headline` ב-`_CSS`. **מתוקן לפי ביקורת:** יש **שלוש**
+  הגדרות `font-size` ל-`.headline` — 288 (18px), 393 (22px), 402 (24px, שכבת ה-v2
+  שהיא **המנצחת בפועל**). הכלל המאוחד חייב לשקף **24px + font-weight:800 +
+  margin:4px 0** (הערכים האפקטיביים), לא 22px. לאחד גם את `.headline .ok/.no`
+  הכפולות (289/394).
 - **בדיקות:** string-assert שאין `saveStore` ב-webapp.py; שאין `it.correct`;
   שיש הגדרת `.headline` יחידה (regex count). בדיקות קיימות עוברות.
 - **סיכון:** אפסי.
@@ -381,8 +412,10 @@
 - **גישה:** להסיר את `isGuest` מ-`BT`; לפשט את `refreshAcct` — הענף היחיד הוא
   "מחובר". להשאיר fallback דק בטוח: `const u = window.BT && window.BT.user();`
   ואם אין `u` (מצב טרום-מוכנות/התנתקות מעבר לגייט) — להציג את התווית הנייטרלית
-  `HE.account` בלי הבטחת "אורח". `HE.guest`/`HE.guestNote` נשארים כמחרוזות אם
-  עדיין בשימוש במקום אחר (לבדוק); אחרת להסיר.
+  `HE.account`. **מתוקן לפי ביקורת:** `HE.guest` נמצא בשימוש גם כ-placeholder
+  ההתחלתי ב-`webapp.py:1505` (`<span id="acct-name">' + HE.guest`) — לעדכן גם
+  אותו ל-`HE.account` (אחרת נשאר placeholder "אורח" מיושן). בחלון הטרום-`bt-ready`
+  יוצג רגעית `HE.account` במקום "התחבר" — מקובל.
 - **בדיקות:** string-assert שאין `isGuest` ב-webapp.py/bt-firebase.js;
   `run_shared` שה-`refreshAcct` לא זורק כש-`window.BT.user()` מחזיר null.
 - **סיכון:** אפסי-נמוך.
@@ -429,9 +462,11 @@
   ה-lead); handlers (`setScenario` 1658, keydown 1735-1742, modecard onclick
   1686). `.scengrid`/`.scencard`/`.modepills` ב-`_CSS` (562-588).
 - **גישה:**
-  1. **הוצאת ה-modecard מהכרטיס:** להעביר את `#modes`/`#modegoal` אל **מתחת** ל-
-     `scengrid` (לא בתוך אלמנט ה-radio), מוצג רק כשתרחיש lead נבחר (visibility
-     כפי שכבר נעשה לשימור גובה). כך אין אלמנט אינטראקטיבי בתוך widget אינטראקטיבי.
+  1. **הוצאת ה-modecard מהכרטיס:** להעביר את `#modes` (1607-1613) **וגם**
+     `#modegoal` (1614) אל **מתחת** ל-`scengrid` (מחוץ ל-`role="radio"` שנפתח
+     ב-1603 ונסגר ב-1615), מוצג רק כשתרחיש lead נבחר. **⚠ (ביקורת):** צימוד ה-
+     `visibility:hidden` לשימור-גובה ב-`setScenario` יידרש לבדיקה מחדש אחרי
+     ההעברה. כך אין אלמנט אינטראקטיבי בתוך widget אינטראקטיבי.
   2. **roving tabindex + חצים:** כרטיס נבחר `tabindex=0`, האחר `tabindex=-1`;
      טיפול ב-ArrowLeft/Right/Up/Down שמעביר בחירה+פוקוס; Enter/Space כבר קיים.
 - **סיכון:** בינוני-נמוך (רגרסיית layout). **בדיקות:** `test_hebrew_ui.py`/
@@ -458,7 +493,9 @@
   1. **שטח מגע:** `min-height` ו-padding אנכי ל-`.alllink`/`.infot`/`.gloss`
      (או `::after` עם inset שלילי) — יעד ≥24px (WCAG 2.5.8).
   2. **עוקפי-טוקן:** להחליף `#C8102E0A` ב-`color-mix(in srgb, var(--loss) 4%,
-     transparent)` בשני האתרים, כך שהם עוקבים אחר הגוון בכל תמה.
+     transparent)`. **מתוקן לפי ביקורת:** יש **שלושה** אתרים — `.opt.mine` (307),
+     `table.plain tr.mine td` (308), `.barrow.mine` (391) — לא שניים. כולם מחוץ
+     לבלוקי `html[data-theme] body` (test_contrast לא מושפע).
   3. **דדופ טוקנים — זהיר:** **לשמר** את הבלוקים `html[data-theme="light"] body`
      ו-`html[data-theme="dark"] body` (test_contrast תלוי בהם) ואת נוכחות כל
      הטוקנים בתוכם. הדדופ המעשי: לאחד את הכפילות בין `body` (light) ל-
@@ -495,14 +532,15 @@
 #### 63 (UX-I-5) — מבוי סתום "0 בעיות" אחרי "נקה"
 - **מיקום:** `_index_html` "נקה" ל-levels/types (1803-1812), `persist`
   (1781-1786), `resolveFilters` (1097), CTA "בחר דרגת קושי וסוג" (1880).
-- **גישה:** אחרי "נקה" (שמרוקן ציר), במקום מבוי סתום שקט — להציג מיד בתוך הפאנל
-  הפתוח שורת הנחיה "בחר לפחות דרגה אחת"/"בחר לפחות סוג אחד" (מצב 0). לתקן את
-  חוסר-העקביות persist↔resolveFilters: אם `persist` שומר ציר ריק אך
-  `resolveFilters` מפרש ריק כ"הכל" בטעינה — ליישר כך שהמצב הנשמר == המצב הנטען
-  (או: לא לאפשר לשמור ריק — לשמור "הכל" מפורש). ה-CTA הכבוי `<a href="#">` →
-  `<button disabled>` או `aria-disabled` (לא נגיש בפוקוס במצב מת).
-- **בדיקות:** `run_shared` על `resolveFilters` — ריק↔"הכל" עקבי עם מה ש-`persist`
-  שומר; string-assert על שורת ההנחיה במצב 0. `test_home_filters.py` עובר.
+- **גישה (מתוקן לפי ביקורת):** **לא לגעת** ב-persist↔resolveFilters —
+  `resolveFilters` (1089-1113) **כבר** מרפא ציר ריק ל"הכל" בכוונה (pick מחזיר
+  `all.slice()` על קבוצה ריקה, 1104-1105, מתועד) כדי למנוע את מבוי-הסתום בטעינה.
+  שינוי זה יבטל את הריפוי המכוון. **הפער האמיתי הוא רק המצב הזמנִי בתוך-הסשן**
+  (מיד אחרי "נקה", לפני רענון). לכן: להציג מיד בתוך הפאנל הפתוח שורת הנחיה
+  "בחר לפחות דרגה אחת"/"בחר לפחות סוג אחד" כשנוצר מצב 0; ולהמיר את ה-CTA הכבוי
+  `<a href="#">` ל-`<button disabled>`/`aria-disabled` (לא נגיש בפוקוס במצב מת).
+- **בדיקות:** string-assert על שורת ההנחיה במצב 0 ועל ה-CTA הלא-נגיש;
+  `test_home_filters.py` עובר (מאמת שה-self-heal של resolveFilters נשמר).
 - **סיכון:** נמוך.
 
 #### 64 (UX-I-6) — דליפת מנגנון ה"סבב"
