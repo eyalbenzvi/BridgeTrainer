@@ -208,6 +208,6 @@ def test_web_sections_serve_their_own_generator_pool():
     from bridge_trainer.app.webapp import _index_html, _lead_html, _SHARED_JS
     # targetModeOf / target_mode live in the shared bundle (bt-shared.js)
     for page in (_index_html(), _lead_html()):
-        assert 'src="bt-shared.js"' in page
+        assert 'src="bt-shared.js?v=' in page
     assert "targetModeOf" in _SHARED_JS
     assert "target_mode" in _SHARED_JS

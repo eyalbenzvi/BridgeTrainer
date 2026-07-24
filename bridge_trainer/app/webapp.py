@@ -21,6 +21,7 @@ place of prose.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from importlib import resources
@@ -1748,13 +1749,33 @@ def _taxonomy_script() -> str:
             + _taxonomy_he_json().replace('</', '<\\/') + ';</script>')
 
 
+def _asset_ver(content: str) -> str:
+    """A short content hash used as a cache-busting ``?v=`` query on the
+    Python-generated assets (PERF-F-5). The asset filenames are stable (not
+    content-hashed) and GitHub Pages serves them with a short max-age, so a
+    returning visitor could otherwise pair a freshly-fetched HTML page with a
+    still-cached OLD bt-shared.js/app.css. When Wave D moved score constants
+    (REVIEW_MIN, ...) and shared helpers INTO bt-shared.js, that skew turned
+    into a hard "REVIEW_MIN is not defined" on the dashboard and a stuck home
+    page. Versioning the URL by content makes the pairing atomic: new HTML
+    always requests the exact asset build it was generated with, and an
+    unchanged asset keeps its URL (so the cache still hits)."""
+    return hashlib.sha1(content.encode("utf-8")).hexdigest()[:8]
+
+
+# Query-string versions for the two generated assets every page links. Derived
+# from content, so they only change when the asset changes (see _asset_ver).
+_CSS_HREF = f"app.css?v={_asset_ver(_CSS)}"
+_SHARED_SRC = f"bt-shared.js?v={_asset_ver(_SHARED_JS)}"
+
+
 def _index_html() -> str:
     return f"""<!DOCTYPE html>
 <html lang="he" dir="rtl"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {_theme_head_script()}
 <title>מאמן הברידג' — תרגול</title>
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="{_CSS_HREF}">
 {_head_preloads()}
 <script type="module" src="bt-firebase.js"></script></head><body data-nav="practice">
 <main id="main" tabindex="-1">
@@ -1811,7 +1832,7 @@ def _index_html() -> str:
 </div>
 </main>
 {_taxonomy_script()}
-<script src="bt-shared.js"></script>
+<script src="{_SHARED_SRC}"></script>
 <script>
 let INDEX = null;
 let COUNTS = {{}};   // precomputed pool counts (PERF-F-6); rebuilt when INDEX loads
@@ -2190,7 +2211,7 @@ def _problem_html() -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 {_theme_head_script()}
 <title>בעיית הכרזה</title>
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="{_CSS_HREF}">
 {_head_preloads()}
 <script type="module" src="bt-firebase.js"></script></head><body>
 <main id="main" tabindex="-1">
@@ -2244,7 +2265,7 @@ style="white-space:pre-line;font-size:13px"></div></details>
 </div>
 </main>
 {_taxonomy_script()}
-<script src="bt-shared.js"></script>
+<script src="{_SHARED_SRC}"></script>
 <script>
 let P = null, INDEX = null, NOTES = [], OPTSHOWS = {{}};
 // true while re-attempting an already-answered problem: the re-answer is
@@ -3158,7 +3179,8 @@ def _lead_html() -> str:
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         + _theme_head_script() + '\n'
-        '<title>בעיית הובלה</title>\n<link rel="stylesheet" href="app.css">\n'
+        '<title>בעיית הובלה</title>\n<link rel="stylesheet" href="'
+        + _CSS_HREF + '">\n'
         + _head_preloads() + '\n'
         '<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-scenario="lead">\n<main id="main" tabindex="-1">\n'
@@ -3194,7 +3216,8 @@ def _lead_html() -> str:
         'double-dummy</button>; שיטת החישוב הפעילה קובעת את דירוג ההובלות.</p>\n'
         '<details><summary>החלוקה המלאה</summary>'
         '<div id="fulldeal"></div></details>\n'
-        '</div>\n</main>\n' + _taxonomy_script() + '\n<script src="bt-shared.js"></script>\n<script>'
+        '</div>\n</main>\n' + _taxonomy_script() + '\n<script src="'
+        + _SHARED_SRC + '"></script>\n<script>'
         + _LEAD_JS + '</script>\n</body></html>'
     )
 
@@ -3568,14 +3591,15 @@ def _dashboard_html() -> str:
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         + _theme_head_script() + '\n'
         '<title>ההתקדמות שלי</title>\n'
-        '<link rel="stylesheet" href="app.css">\n<style>' + _DASHBOARD_CSS +
+        '<link rel="stylesheet" href="' + _CSS_HREF + '">\n<style>' + _DASHBOARD_CSS +
         '</style>\n' + _head_preloads() +
         '\n<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-nav="progress">\n<main id="main" tabindex="-1">\n'
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted">ההתקדמות שלי</span></div>\n'
         '<h1>ההתקדמות שלי</h1>\n<div id="dash" class="muted">טוען&hellip;</div>\n'
-        + _taxonomy_script() + '\n<script src="bt-shared.js"></script>\n<script>'
+        + _taxonomy_script() + '\n<script src="'
+        + _SHARED_SRC + '"></script>\n<script>'
         + _DASHBOARD_JS + '</script>\n</body></html>'
     )
 
