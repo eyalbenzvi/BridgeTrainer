@@ -101,6 +101,7 @@
 ### T18 — טקסט "אורח" + חיווי שגיאה (UX-I-2, חופף BUG-8)
 - **היקף (ביקורת #— אושר):** (א) תיקון/הסרת `guestNote` (webapp.py:788) ויישור `BT.isGuest`; (ב) חיווי שגיאה בעברית בשער (נשען על T14) + retry; (ג) שורת תועלת/דוגמה בשער. **מחוץ להיקף:** מצב אורח מלא (localStorage) — סותר "sign-in required", high-risk; נקודת החלטה למשתמש.
 - **בדיקות:** חיווי שגיאה; אין טקסט "אורח" מטעה.
+- **⟹ תלות מ-code review של T14:** `doSignIn` זורק כעת שגיאה אמיתית. חובה לעטוף ב-`.catch` את **שני** אתרי ה-onclick כדי למנוע unhandled rejection: `bt-firebase.js:134` (כפתור השער) ו-`webapp.py:1401` (`BT.signIn` בניווט).
 
 ### T10 — cache אינדקס מבוסס-חותמת (DB-M-4, DB-O-1, PERF-D-1)
 - **קובץ:** `bt-firebase.js:fetchIndex` + `bt-logic.js`.

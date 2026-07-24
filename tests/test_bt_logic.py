@@ -69,9 +69,10 @@ def test_classify_sign_in_error_redirect_only_when_blocked():
         "classifySignInError('auth/network-request-failed')",
         "classifySignInError(undefined)",
     ])
-    # only a genuinely blocked/unsupported popup falls back to redirect
+    # only a genuinely blocked popup falls back to redirect
     assert blocked == "redirect"
-    assert unsupported == "redirect"
+    # "unsupported environment" would fail a redirect too — surface it instead
+    assert unsupported == "error"
     # a user dismissing the popup is a normal cancellation, not a redirect
     assert closed == "cancel"
     assert cancelled == "cancel"

@@ -14,10 +14,13 @@
 //                cancellation, NOT an error to surface or to redirect on.
 //   "error"    — a real failure (network, config, internal); the caller should
 //                surface it to the user.
+// NB: auth/operation-not-supported-in-this-environment is deliberately an
+// "error", not "redirect" — signInWithRedirect needs the very same environment
+// (http/https origin, web storage) the popup was refused for, so redirecting
+// would fail too. Surface it instead.
 export function classifySignInError(code) {
   const REDIRECT = new Set([
     "auth/popup-blocked",
-    "auth/operation-not-supported-in-this-environment",
   ]);
   const CANCEL = new Set([
     "auth/popup-closed-by-user",
