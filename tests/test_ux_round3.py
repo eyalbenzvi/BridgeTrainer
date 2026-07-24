@@ -26,15 +26,20 @@ def test_signed_numbers_are_ltr_isolated():
 # ---- UX-A-8: difficulty segments expose aria-pressed ------------------------
 def test_difficulty_segments_have_aria_pressed():
     idx = _index_html()
-    assert 'aria-pressed="false"' in idx           # built with the attribute
-    assert 'setAttribute("aria-pressed"' in idx    # updated in applyFilterUi
+    # the diff-seg buttons are BUILT with aria-pressed (the finding's change)
+    assert 'data-level="${lv}" aria-pressed="false"' in idx
+    # ...and applyFilterUi keeps it in sync alongside the .active class
+    assert 'b.setAttribute("aria-pressed", on ? "true" : "false")' in idx
     assert "box-shadow: inset 0 -3px 0 var(--accent)" in _CSS  # non-colour cue
 
 
-# ---- UX-A-9: wide tables scroll; a mobile breakpoint exists -----------------
+# ---- UX-A-9: wide tables scroll on phones; desktop keeps full width ---------
 def test_wide_tables_and_breakpoint():
     assert "#ctable, #rtable, #ltable" in _CSS
     assert "overflow-x: auto" in _CSS
+    # the display:block scroll is scoped to a mobile breakpoint (desktop keeps
+    # normal full-width tables)
+    assert "@media (max-width: 600px)" in _CSS
     assert "@media (max-width: 380px)" in _CSS
 
 

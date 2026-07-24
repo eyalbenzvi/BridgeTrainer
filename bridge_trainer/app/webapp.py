@@ -276,10 +276,14 @@ table.bidding td.turn { background: var(--accent-tint); color: var(--accent);
              place-items: center; font-size: 10px; font-weight: 700; }
 .fdcompass .cn { grid-area: cn; } .fdcompass .cw { grid-area: cw; }
 .fdcompass .ce { grid-area: ce; } .fdcompass .cs { grid-area: cs; }
-/* wide analysis tables scroll inside their own box, so a narrow phone doesn't
-   scroll the whole page horizontally (UX-A-9) */
-#ctable, #rtable, #ltable { display: block; overflow-x: auto;
-  -webkit-overflow-scrolling: touch; }
+/* on phones, wide analysis tables scroll inside their own box so the page
+   itself doesn't scroll horizontally (UX-A-9); scoped to <=600px so desktop
+   keeps the normal full-width table layout (display:block would otherwise
+   shrink-wrap the columns) */
+@media (max-width: 600px) {
+  #ctable, #rtable, #ltable { display: block; overflow-x: auto;
+    -webkit-overflow-scrolling: touch; }
+}
 /* narrow phones (<=380px): tighten table cells and stack the full-deal diagram
    into two columns (W/E under N, compass below) so nothing overflows */
 @media (max-width: 380px) {
