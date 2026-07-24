@@ -620,12 +620,19 @@ button.modecard[aria-pressed="true"] b { color: var(--accent); }
 table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
   font-weight: 700; }
 /* ranked-leads table reads as a stat grid: center every column so the score
-   chips, decimals and percentages sit under their headers instead of hugging
-   the row's start edge (applies in both MP and IMP modes — same markup, only
-   the emph column differs). white-space:nowrap keeps each metric on one line
-   so the table stays a clean grid and scrolls as a block on phones. */
+   chips, decimals and percentages sit under their headers (both MP and IMP —
+   same markup, only the emph column differs). Sized to FIT the card width
+   with no horizontal scroll: tight padding, and multi-word HEADERS may wrap
+   to two lines (narrow columns) while the numeric DATA stays on one line. */
+#ltable { table-layout: fixed; }
 #ltable th, #ltable td { text-align: center; vertical-align: middle;
-  white-space: nowrap; }
+  padding: 6px 3px; }
+#ltable th { white-space: normal; line-height: 1.2; font-size: 12px; }
+#ltable td { white-space: nowrap; }
+/* the two decimal-metric columns (tricks / IMP) are the widest data — give
+   them a snug fixed share and shrink their digits slightly so six columns
+   clear a narrow phone */
+#ltable td:nth-child(3), #ltable td:nth-child(4) { font-size: 12px; }
 .resultline { font-size: 14px; margin: 3px 0; }
 .resultline b { font-variant-numeric: tabular-nums; }
 
@@ -3016,20 +3023,22 @@ function reveal(chosen) {
   const lv = (P.classification && P.classification.difficulty_level) || P.difficulty;
   document.getElementById("difficulty").innerHTML =
     glossHtml("diff", "רמת קושי") + " " + lv + "/5";
-  // ranked leads table: rank / lead / expected defensive tricks / expected
-  // IMP value / set probability. The active mode's own metric column is the
-  // leading (emphasized) one; every metric shows in BOTH modes.
+  // ranked leads table (rows already sorted best-first, so the serial-number
+  // column was dropped to save width): lead / score / expected defensive
+  // tricks / expected IMP value / set probability / BEN policy. The active
+  // mode's own metric column is the leading (emphasized) one; every metric
+  // shows in BOTH modes.
   const mpEm = MODE === "MP" ? ' class="emph"' : "";
   const impEm = MODE === "IMP" ? ' class="emph"' : "";
-  let rt = "<tr><th>#</th><th>קלף</th>" +
+  let rt = "<tr><th>קלף</th>" +
     "<th>" + glossHtml("panel", "ציון") + "</th>" +
-    "<th" + mpEm + ">" + glossHtml("tricks", "לקיחות צפויות") + "</th>" +
+    "<th" + mpEm + ">" + glossHtml("tricks", "לקיחות") + "</th>" +
     "<th" + impEm + ">" + glossHtml("ev", "IMP צפוי") + "</th>" +
     "<th>" + glossHtml("set", "סיכוי הכשלה") + "</th>" +
     "<th>" + glossHtml("ben", "BEN") + "</th></tr>";
   rows.forEach((r, i) => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
-    rt += "<tr" + g + "><td>" + (i + 1) + '</td><td><span class="ltr">' +
+    rt += "<tr" + g + '><td><span class="ltr">' +
       cardHtml(r.card) + '</span></td>' +
       "<td>" + btScoreChipHtml(btScoreLead(P, r.card, MODE).score, true) +
       "</td>" +
