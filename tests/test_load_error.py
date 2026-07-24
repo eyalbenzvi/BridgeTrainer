@@ -19,7 +19,7 @@ import pytest
 
 from bridge_trainer.app.webapp import (_index_html, _lead_html, _problem_html,
                                        _SHARED_JS)
-from tests.test_home_early_click import _extract_function
+from test_home_early_click import _extract_function
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
                                 reason="node not available")
