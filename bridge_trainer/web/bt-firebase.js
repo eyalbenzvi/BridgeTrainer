@@ -35,7 +35,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, isConfigured } from "./firebase-config.js";
 import { classifySignInError, mergePending, prunePending,
-         indexStamp, sameStamp } from "./bt-logic.js";
+         indexStamp, sameStamp, unwrapFirestore } from "./bt-logic.js";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -411,7 +411,10 @@ const BT = {
   },
   async getProblem(id) {
     const s = await getDoc(doc(db, "problems", id));
-    return s.exists() ? s.data() : null;
+    // reverse the producer's nested-array wrapping once, here, so no page has
+    // to unwrap fields ad hoc (DB-M-8). unwrapFirestore is idempotent on
+    // never-wrapped (static-file) records.
+    return s.exists() ? unwrapFirestore(s.data()) : null;
   },
   // Served from the in-memory cache preloaded/synced at sign-in — no extra
   // Firestore reads on the dashboard.

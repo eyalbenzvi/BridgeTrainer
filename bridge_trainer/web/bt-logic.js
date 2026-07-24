@@ -71,3 +71,30 @@ export function sameStamp(a, b) {
   return a.updated_at === b.updated_at && a.count === b.count
     && a.format === b.format;
 }
+
+// ---- Firestore array un-wrapping (DB-M-8) ----------------------------------
+// The producer's `_firestore_safe` (pool/firestore_store.py) makes docs legal
+// for Firestore by wrapping each directly-nested array as a one-key map
+// {items:[...]} (Firestore forbids an array element that is itself an array).
+// This is the EXACT inverse, applied once in getProblem, so no page has to know
+// the wrapping scheme (previously normalize() hand-unwrapped `top_contracts`,
+// duplicating — and drifting from — that contract). Static-file records that
+// were never wrapped pass through unchanged (the unwrap is idempotent on them).
+//
+// Caveat, documented on both sides: a *legitimate* single-key {items:[...]} map
+// in the data would be over-unwrapped. The writer only ever creates these for
+// nested arrays, so no real field collides; keep it that way.
+export function unwrapFirestore(value) {
+  if (Array.isArray(value))
+    return value.map((e) =>
+      (e && typeof e === "object" && !Array.isArray(e)
+        && Object.keys(e).length === 1 && Array.isArray(e.items))
+        ? unwrapFirestore(e.items)          // writer-wrapped nested array
+        : unwrapFirestore(e));
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const k in value) out[k] = unwrapFirestore(value[k]);
+    return out;
+  }
+  return value;
+}

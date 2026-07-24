@@ -55,7 +55,12 @@ def _firestore_safe(value):
     list of ``[contract, count]`` pairs, ``policy_trail[].policy`` is a list of
     lists). We wrap each such inner array in a one-key map ``{"items": [...]}``,
     which is legal and reversible. Maps and scalars pass through unchanged.
-    None of these wrapped fields are read by the web client.
+
+    The web client reverses this exactly once, in ``getProblem`` via
+    ``unwrapFirestore`` (web/bt-logic.js); the two are inverses and must stay in
+    sync. Round-trip is covered by tests/test_firestore_safe.py. (This replaces
+    the old, false claim that no wrapped field is read by the client — the
+    verdict's ``top_contracts`` always was.)
     """
     if isinstance(value, dict):
         return {k: _firestore_safe(v) for k, v in value.items()}
