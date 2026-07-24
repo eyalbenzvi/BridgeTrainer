@@ -4,23 +4,26 @@ For every record in <pool_dir>/problems this ensures:
 - classification.difficulty_score / difficulty_level — pure computation
   (bridge_trainer/engine/difficulty.py), recomputed only when missing;
 - classification.type — for bidding records the LLM classifier
-  (bridge_trainer/engine/classify.py, claude CLI headless; also sets
-  type_reason). For lead records the category is a deterministic function of
-  the final contract (bridge_trainer/engine/lead_classify.py) — no LLM.
+  (bridge_trainer/engine/classify.py; also sets type_reason). The default
+  backend is GitHub Models (--backend github), so this step runs in a GitHub
+  Actions workflow with no paid tokens and no Claude Code session — it needs
+  GITHUB_TOKEN (models:read). --backend claude uses the headless claude CLI.
+  For lead records the category is a deterministic function of the final
+  contract (bridge_trainer/engine/lead_classify.py) — no LLM.
 
 Fully classified records are skipped, so the same script is the one-time
 backfill AND the per-batch classification step after ben-forge. Rebuilds
 the pool index at the end.
 
 Resilience: the LLM type classification runs in small chunks (default
-DEFAULT_CHUNK_SIZE = 2 — larger chunks were observed to hang/truncate) and
-EACH record is written back to disk as soon as its chunk returns. A killed
-run therefore loses no completed work; re-running simply resumes on whatever
-still lacks classification.type. Deterministic updates (difficulty, lead
-category) are likewise written as they are computed.
+DEFAULT_CHUNK_SIZE — larger chunks risk output truncation and lower per-item
+accuracy) and EACH record is written back to disk as soon as its chunk
+returns. A killed run therefore loses no completed work; re-running simply
+resumes on whatever still lacks classification.type. Deterministic updates
+(difficulty, lead category) are likewise written as they are computed.
 
-Usage: python3 scripts/classify_pool.py <pool_dir> [--model MODEL]
-                                        [--chunk-size N] [--difficulty-only]
+Usage: python3 scripts/classify_pool.py <pool_dir> [--backend github|claude]
+                        [--model MODEL] [--chunk-size N] [--difficulty-only]
 """
 import argparse
 import json
@@ -30,14 +33,28 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bridge_trainer.engine.classify import (
-    DEFAULT_CHUNK_SIZE, MODEL, classify_records)
+    CLAUDE_MODEL, DEFAULT_CHUNK_SIZE, GITHUB_MODEL, classify_records,
+    run_claude_cli, run_github_models)
 from bridge_trainer.engine.difficulty import difficulty_classification
 from bridge_trainer.engine.lead_classify import classify_lead_record
 from bridge_trainer.pool.store import ProblemPool
 
+_BACKENDS = {
+    # name -> (run function, default model)
+    "github": (run_github_models, GITHUB_MODEL),  # workflow default, free tier
+    "claude": (run_claude_cli, CLAUDE_MODEL),      # local Claude Code session
+}
+
 ap = argparse.ArgumentParser()
 ap.add_argument("pool_dir")
-ap.add_argument("--model", default=MODEL)
+ap.add_argument("--backend", choices=sorted(_BACKENDS), default="github",
+                help="LLM backend for the type classification (default "
+                     "github: the GitHub Models free inference tier, so this "
+                     "runs in a GitHub Actions workflow with no paid tokens "
+                     "and no Claude Code session; needs GITHUB_TOKEN with "
+                     "models:read). claude uses the headless claude CLI.")
+ap.add_argument("--model", default=None,
+                help="override the backend's default model id")
 ap.add_argument("--difficulty-only", action="store_true",
                 help="skip the LLM type classification")
 ap.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE,
@@ -48,6 +65,9 @@ ap.add_argument("--chunk-size", type=int, default=DEFAULT_CHUNK_SIZE,
                      "fastest to load but risks a timeout/truncation hang on a "
                      "large pool, and forfeits the per-chunk resume.")
 args = ap.parse_args()
+
+run_fn, default_model = _BACKENDS[args.backend]
+model = args.model or default_model
 
 pool = ProblemPool(args.pool_dir)
 
@@ -98,7 +118,8 @@ if need_type:
           file=sys.stderr, flush=True)
     for i in range(0, len(need_type), step):
         group = need_type[i:i + step]
-        types = classify_records(group, model=args.model, chunk_size=inner,
+        types = classify_records(group, run=run_fn, model=model,
+                                 chunk_size=inner,
                                  log=lambda m: print(m, file=sys.stderr,
                                                      flush=True))
         for rec in group:

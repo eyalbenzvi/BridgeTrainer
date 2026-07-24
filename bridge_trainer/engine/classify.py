@@ -9,25 +9,49 @@ The classifier sees the hero hand, the auction with the engine's call
 meanings, vulnerability, the candidate calls and the winning call, and must
 answer with one category id plus a one-sentence reason (stored for audit).
 
-Backend: the ``claude`` CLI in headless mode (problems are generated inside
-Claude Code sessions at this stage), model claude-sonnet-5.
+Backends (both take the same ``(prompt, model)`` shape, so classify_records
+is backend-agnostic):
+  * ``run_github_models`` — the default. OpenAI-compatible chat completions
+    over HTTPS against the GitHub Models inference API, authenticated with the
+    workflow's ``GITHUB_TOKEN`` (needs ``permissions: models: read``). This is
+    what lets classification run in a GitHub Actions workflow with no Claude
+    Code session and no paid tokens.
+  * ``run_claude_cli`` — the original headless ``claude`` CLI, for running the
+    classifier by hand inside a Claude Code session.
 """
 from __future__ import annotations
 
 import json
+import os
 import subprocess
+import urllib.error
+import urllib.request
 
-MODEL = "claude-sonnet-5"
+CLAUDE_MODEL = "claude-sonnet-5"
+# GitHub Models model id — must be "{publisher}/{model}". A "low" tier model is
+# plenty for a 10-way enum classification and gets the larger free-tier budget
+# (~150 requests/day vs ~50 for "high" models).
+GITHUB_MODEL = "openai/gpt-4.1-mini"
+GITHUB_MODELS_URL = "https://models.github.ai/inference/chat/completions"
+
+# The default backend model. Classification now runs in a GitHub Actions
+# workflow, so the default backend is GitHub Models. (classify_pool.py imports
+# MODEL; --backend claude overrides it to CLAUDE_MODEL.)
+MODEL = GITHUB_MODEL
 TIMEOUT_S = 300
-# Bidding problems per claude CLI call. Batching amortizes the CLI cold start
-# (Node runtime, agent harness, MCP handshake) over many problems, but one
-# giant call must GENERATE one JSON object per problem — a huge output that
-# grows linearly and, past a point, times out or gets truncated mid-array
-# (the whole-pool "hang"). Kept small (2): in practice larger chunks (10)
-# regularly hung or truncated, whereas chunks of 2 classify reliably; the
-# extra cold starts are cheap next to a stalled batch, and classify_pool.py
-# saves each record as its chunk returns so an interrupted run resumes.
-DEFAULT_CHUNK_SIZE = 2
+
+# Bidding problems per model call. A big batch is a false economy on EITHER
+# backend, and for the SAME reason the whole-pool call once "hung" on the
+# claude CLI: one call must GENERATE one JSON object per problem, and the
+# GitHub Models free tier hard-caps output at 4,000 tokens/request — past that
+# the JSON array is truncated mid-array and the parse fails (identical symptom,
+# different cause). Per-problem accuracy also drifts as one prompt juggles more
+# problems. So we keep chunks SMALL (5): the extra HTTP requests are trivial
+# against the free-tier budget (~150 requests/day for a low-tier model dwarfs
+# any realistic forge batch), classify_pool.py saves each record as its chunk
+# returns (an interrupted run resumes), and classify_records() automatically
+# HALVES any chunk whose call still fails — so a stray truncation self-heals.
+DEFAULT_CHUNK_SIZE = 5
 
 TAXONOMY = [
     ("open_or_pass", "Opening Decision", "החלטת פתיחה",
@@ -177,7 +201,54 @@ problem's given id, no other text:
 "reason": "<one short sentence>"}}, ...]"""
 
 
-def run_claude_cli(prompt: str, model: str = MODEL,
+def run_github_models(prompt: str, model: str = GITHUB_MODEL,
+                      timeout: int = TIMEOUT_S) -> str:
+    """Classify via the GitHub Models inference API (OpenAI-compatible chat
+    completions). No paid tokens: it runs on the free inference tier.
+
+    Auth: ``GITHUB_TOKEN`` — the token a GitHub Actions job exposes once granted
+    ``permissions: models: read`` — or ``GITHUB_MODELS_TOKEN`` (a PAT with
+    ``models:read``) for local runs / when the automatic token lacks the scope.
+
+    Response parsing is left to parse_response/parse_batch_response, which pull
+    the JSON out of arbitrary text: no ``response_format`` is requested because
+    the batch prompt asks for a JSON *array*, which json_object mode rejects.
+    temperature 0 for reproducible classifications; max_tokens bounded well
+    under the free tier's 4,000-token output cap (chunks are small — see
+    DEFAULT_CHUNK_SIZE)."""
+    token = (os.environ.get("GITHUB_MODELS_TOKEN")
+             or os.environ.get("GITHUB_TOKEN"))
+    if not token:
+        raise RuntimeError(
+            "GitHub Models backend needs GITHUB_TOKEN or GITHUB_MODELS_TOKEN; "
+            "in a workflow grant the job `permissions: models: read`.")
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0,
+        "max_tokens": 2000,
+    }).encode()
+    req = urllib.request.Request(
+        GITHUB_MODELS_URL, data=body, method="POST",
+        headers={"Authorization": f"Bearer {token}",
+                 "Content-Type": "application/json",
+                 "Accept": "application/vnd.github+json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            payload = json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")[:500]
+        raise RuntimeError(f"GitHub Models HTTP {e.code}: {detail}")
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"GitHub Models request failed: {e.reason}")
+    try:
+        return payload["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError):
+        raise RuntimeError(
+            f"GitHub Models: unexpected response shape: {str(payload)[:300]}")
+
+
+def run_claude_cli(prompt: str, model: str = CLAUDE_MODEL,
                    timeout: int = TIMEOUT_S) -> str:
     # The prompt goes in on stdin, not argv: a whole-pool prompt can approach
     # ARG_MAX (~2 MB) and blow up as a single argument. Feeding it on stdin
@@ -202,7 +273,7 @@ def parse_response(text: str) -> dict:
     return {"type": obj["type"], "type_reason": str(obj.get("reason", ""))}
 
 
-def classify_record(rec: dict, run=run_claude_cli, model: str = MODEL,
+def classify_record(rec: dict, run=run_github_models, model: str = MODEL,
                     retries: int = 1) -> dict:
     """Return {"type", "type_reason"} for one problem record."""
     prompt = classification_prompt(rec)
@@ -239,7 +310,7 @@ def parse_batch_response(text: str, valid_ids: set[str] | None = None) -> dict:
     return out
 
 
-def classify_records(recs: list[dict], run=run_claude_cli, model: str = MODEL,
+def classify_records(recs: list[dict], run=run_github_models, model: str = MODEL,
                      chunk_size: int | None = DEFAULT_CHUNK_SIZE,
                      retries: int = 1, log=lambda _m: None) -> dict:
     """Classify many records with as few CLI invocations as possible.
