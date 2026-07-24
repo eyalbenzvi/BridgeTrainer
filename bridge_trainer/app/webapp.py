@@ -598,6 +598,13 @@ button.modecard[aria-pressed="true"] b { color: var(--accent); }
 /* the active mode's primary metric is visually emphasized */
 table.plain td.emph, table.plain th.emph { background: var(--accent-tint);
   font-weight: 700; }
+/* ranked-leads table reads as a stat grid: center every column so the score
+   chips, decimals and percentages sit under their headers instead of hugging
+   the row's start edge (applies in both MP and IMP modes — same markup, only
+   the emph column differs). white-space:nowrap keeps each metric on one line
+   so the table stays a clean grid and scrolls as a block on phones. */
+#ltable th, #ltable td { text-align: center; vertical-align: middle;
+  white-space: nowrap; }
 .resultline { font-size: 14px; margin: 3px 0; }
 .resultline b { font-variant-numeric: tabular-nums; }
 
@@ -2950,7 +2957,8 @@ function reveal(chosen) {
     "<th>" + glossHtml("panel", "ציון") + "</th>" +
     "<th" + mpEm + ">" + glossHtml("tricks", "לקיחות צפויות") + "</th>" +
     "<th" + impEm + ">" + glossHtml("ev", "IMP צפוי") + "</th>" +
-    "<th>" + glossHtml("set", "סיכוי הכשלה") + "</th></tr>";
+    "<th>" + glossHtml("set", "סיכוי הכשלה") + "</th>" +
+    "<th>" + glossHtml("ben", "BEN") + "</th></tr>";
   rows.forEach((r, i) => {
     const g = acc.includes(r.card) ? ' style="font-weight:700"' : "";
     rt += "<tr" + g + "><td>" + (i + 1) + '</td><td><span class="ltr">' +
@@ -2963,6 +2971,9 @@ function reveal(chosen) {
         : (r.exp_imps >= 0 ? "+" : "−") + Math.abs(r.exp_imps).toFixed(2)) +
       "</td><td>" +
       (r.set_prob === undefined ? "—" : Math.round(r.set_prob * 100) + "%") +
+      "</td><td>" +
+      (r.ben_softmax === undefined ? "—"
+        : Math.round(r.ben_softmax * 100) + "%") +
       "</td></tr>";
   });
   document.getElementById("ltable").innerHTML = rt;
@@ -3091,8 +3102,8 @@ async function init() {
     '<div class="card">' + typeBadgeHtml(P) +
     completeAuctionTableHtml(P, meanings) +
     '<div id="bidnote"></div>' +
-    '<p class="muted" style="margin:6px 0 0">הקש הכרזה כדי לראות את משמעותה · ' +
-    'הקש קלף למטה כדי להוביל אותו.</p></div>';
+    '<p class="muted" style="margin:6px 0 0">הקש על הכרזה כדי לראות את משמעותה · ' +
+    'הקש על קלף למטה כדי להוביל אותו.</p></div>';
   let openNote = -1;
   const tbl = document.querySelector("table.bidding");
   if (tbl) tbl.querySelectorAll(".call.expl").forEach(el => {
