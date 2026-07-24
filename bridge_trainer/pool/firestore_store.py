@@ -40,6 +40,22 @@ SHARD_MAX_ENTRIES = 3000            # ~150-200 B/entry -> well under 1 MiB
 SINGLE_DOC_MAX_ENTRIES = 4000       # ~4000 * 200 B ~= 0.8 MiB, safe under 1 MiB
 _MAX_TRANSIENT_RETRIES = 4
 _MAX_INDEX_CAS_RETRIES = 5
+# BulkWriter give-up policy (DB-O-5): keep retrying these transient gRPC
+# statuses (up to the transient budget), then record the failure and stop —
+# so a permanent error (RESOURCE_EXHAUSTED/PERMISSION_DENIED) is recorded at
+# once instead of being retried forever, and its doc is kept OUT of the index.
+_RETRYABLE_STATUS = {"UNAVAILABLE", "DEADLINE_EXCEEDED", "ABORTED", "INTERNAL"}
+
+
+def _check_schema(record: dict) -> None:
+    """Reject a record whose schema isn't supported (DB-M-7). Mirrors the
+    guard ProblemPool.add already applies locally, so the Firestore write path
+    can't smuggle in an unversioned/unknown-schema document."""
+    from .store import SUPPORTED_SCHEMAS
+    if record.get("schema") not in SUPPORTED_SCHEMAS:
+        raise ValueError(
+            f"record {record.get('id')!r} has schema {record.get('schema')!r}, "
+            f"not one of {SUPPORTED_SCHEMAS}")
 
 
 class IndexConflict(RuntimeError):
@@ -129,6 +145,7 @@ class FirestorePool:
 
     # ---- problem docs ---------------------------------------------------
     def add(self, record: dict, *, overwrite: bool = False) -> str:
+        _check_schema(record)
         pid = record["id"]
         ref = self._col.document(pid)
         if not overwrite and ref.get().exists:
@@ -140,6 +157,7 @@ class FirestorePool:
         """set() a problem without a prior existence read. Use when the caller
         has already determined the doc is new (e.g. from the index), to avoid
         one read per uploaded document."""
+        _check_schema(record)
         ref = self._col.document(record["id"])
         _retry_transient(lambda: ref.set(_firestore_safe(record)))
         return record["id"]
@@ -168,11 +186,42 @@ class FirestorePool:
         return snap.to_dict()
 
     def remove(self, pid: str) -> bool:
+        """Delete a problem and drop it from the index (DB-M-5).
+
+        Index-FIRST ordering: the index entry is removed (under the generation
+        CAS) BEFORE the document is deleted, so a crash between the two steps
+        leaves at most an unlisted orphan doc (harmless, re-addable) rather than
+        an index row pointing at a missing doc — which surfaces as "problem not
+        found" in the client. (Previously ``remove`` deleted the doc and never
+        touched the index, leaving a dangling entry until the next rebuild.)
+        """
         ref = self._col.document(pid)
         if not ref.get().exists:
             return False
+        self._remove_from_index(pid)
         _retry_transient(ref.delete)
         return True
+
+    def _remove_from_index(self, pid: str) -> None:
+        """Filter *pid* out of the index pointer under the generation CAS,
+        retrying on a concurrent bump. No-op if the index or the entry is
+        absent."""
+        from .store import index_from_entries
+        for attempt in range(_MAX_INDEX_CAS_RETRIES):
+            cur = self.read_index()
+            if not cur:
+                return
+            kept = [e for e in cur.get("problems", []) if e.get("id") != pid]
+            if len(kept) == len(cur.get("problems", [])):
+                return                       # not indexed; nothing to remove
+            try:
+                self.write_index(index_from_entries(kept),
+                                 expect_generation=cur.get("generation", 0))
+                return
+            except IndexConflict:
+                if attempt == _MAX_INDEX_CAS_RETRIES - 1:
+                    raise
+                time.sleep(0.5 * (attempt + 1))
 
     # ---- the sharded meta/index ----------------------------------------
     def read_index(self) -> dict | None:
@@ -308,7 +357,10 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
     under a generation check; if a concurrent producer bumped the generation
     meanwhile, we re-read, re-union (so no one's entries are dropped) and retry.
 
-    Returns {uploaded, skipped, total}. *remote* is injectable for testing.
+    Returns {uploaded, skipped, total, failed}. ``failed`` lists pids whose
+    BulkWriter write did not land (DB-O-5); those are kept OUT of the index
+    (DB-M-5) so the index never points at a missing doc, and the caller can
+    exit non-zero. *remote* is injectable for testing.
     """
     from .store import ProblemPool, index_entry, index_from_entries
 
@@ -318,20 +370,43 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
     have = {e["id"] for e in idx.get("problems", [])}
 
     # 1. upload the docs that are new to the current index (idempotent set).
+    #    A failing write is not swallowed: on_write_error records the pid (after
+    #    the transient-retry budget) so it can be excluded from the index and
+    #    reported. staged[] is filled at enqueue; the index is built from the
+    #    ones that actually LANDED (staged minus failed) — DB-M-5/DB-O-5.
     writer = remote._db.bulk_writer()
-    new_entries = {}
-    uploaded = skipped = 0
+    staged = {}
+    failed = set()
+
+    def _on_write_error(err):
+        ref = getattr(getattr(err, "operation", None), "reference", None)
+        code = getattr(getattr(err, "code", None), "name", str(
+            getattr(err, "code", ""))).upper()
+        attempts = getattr(err, "attempts", 1) or 1
+        if code in _RETRYABLE_STATUS and attempts < _MAX_TRANSIENT_RETRIES:
+            return True                      # transient: let BulkWriter retry
+        failed.add(getattr(ref, "id", ref))  # permanent/exhausted: record + stop
+        return False
+
+    if hasattr(writer, "on_write_error"):
+        writer.on_write_error(_on_write_error)
+    skipped = 0
     try:
         for pid in local.ids():
             if pid in have and not overwrite:
                 skipped += 1
                 continue
             rec = local.get(pid)
+            _check_schema(rec)      # DB-M-7 defense-in-depth on the write path
             writer.set(remote._col.document(pid), _firestore_safe(rec))
-            new_entries[pid] = index_entry(rec)
-            uploaded += 1
+            staged[pid] = index_entry(rec)
     finally:
-        writer.close()      # flush all buffered writes
+        writer.close()      # flush all buffered writes; on_write_error fires here
+
+    # index only the docs that actually landed (DB-M-5): a failed write must not
+    # leave an index entry pointing at a doc that isn't there.
+    new_entries = {pid: e for pid, e in staged.items() if pid not in failed}
+    uploaded = len(new_entries)
 
     # 2. fold the new rows into the index under an optimistic lock, retrying on
     #    a concurrent write so no producer's entries are lost.
@@ -355,7 +430,8 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
                         f"{uploaded} docs uploaded but not yet indexed — re-run "
                         f"push (idempotent) or rebuild_index")
                 time.sleep(0.5 * (attempt + 1))
-    return {"uploaded": uploaded, "skipped": skipped, "total": len(local.ids())}
+    return {"uploaded": uploaded, "skipped": skipped,
+            "total": len(local.ids()), "failed": sorted(failed)}
 
 
 def backfill_lead_training(key_path: str | None = None,

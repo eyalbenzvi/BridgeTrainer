@@ -263,6 +263,13 @@ def cmd_pool(args: argparse.Namespace) -> int:
                                   overwrite=args.overwrite)
         print(f"uploaded {summary['uploaded']}, skipped {summary['skipped']} "
               f"(pool has {summary['total']}); meta/index refreshed")
+        failed = summary.get("failed") or []
+        if failed:
+            # DB-O-5: real write failures must fail the run (redden CI), not be
+            # reported as success; those docs were excluded from the index.
+            print(f"ERROR: {len(failed)} doc(s) failed to upload and were left "
+                  f"out of the index: {', '.join(failed)}", file=sys.stderr)
+            return 1
         return 0
     if args.pool_cmd == "backfill-training":
         from ..pool.firestore_store import backfill_lead_training
