@@ -91,3 +91,63 @@ def test_cheap_audit_passes_a_board_without_the_pass_option():
     ex["options"] = [o for o in ex["options"] if o["bid"] != "P"]
     rec["candidates"] = [c for c in rec["candidates"] if c["call"] != "P"]
     assert audit_record(rec) == []
+
+
+# ---- lead boards: the displayed auction vs the cards ------------------------
+#
+# A lead problem shows the complete auction and nothing else — it IS the
+# evidence the trainee reads before choosing a card. Measured over the
+# published pool 2026-07-25, 18% of lead boards showed at least one call whose
+# gloss contradicts its own bidder, at the same rate on boards forged that
+# morning: the lead forge never ran the check. lead1-013b37ba is the shape of
+# it — Ben bids 4C with a club VOID (a splinter agreeing spades), GIB narrates
+# "twice rebiddable !C" (6+ clubs), and the claim rides along on the 4NT and
+# 6S that follow.
+
+def _lead_record():
+    return {
+        "id": "lead1-013b37ba", "kind": "lead", "dealer": "W",
+        "contract": "6SE", "leader": "S", "seat": "S",
+        "hand": "5.AKJ.KQT974.762",
+        "full_deal": {"W": "976.T42.J52.AKQ3", "N": "42.9765.3.JT9854",
+                      "S": "5.AKJ.KQT974.762", "E": "AKQJT83.Q83.A86."},
+        "explanations": {"auction": [
+            {"idx": 0, "seat": "W", "call": "P",
+             "card": _card("No suitable call -- 11- HCP")},
+            {"idx": 1, "seat": "N", "call": "P",
+             "card": _card("No suitable call -- 11- HCP")},
+            {"idx": 2, "seat": "E", "call": "1S",
+             "card": _card("Major suit opening -- 5+ !S; 11-21 HCP")},
+            {"idx": 3, "seat": "S", "call": "2D",
+             "card": _card("Two-level overcall -- 5+ !D; 10+ HCP")},
+            {"idx": 4, "seat": "W", "call": "2NT",
+             "card": _card("Invitational to 3NT game -- 3- !H; 2- !S; 11 HCP")},
+            {"idx": 5, "seat": "N", "call": "P",
+             "card": _card("No suitable call -- 9- total points")},
+            {"idx": 6, "seat": "E", "call": "4C",
+             "card": _card("6+ !S; 19- HCP; twice rebiddable !C; biddable !S")},
+        ]},
+    }
+
+
+def test_lead_audit_flags_a_gloss_the_bidder_contradicts():
+    bad = audit_record(_lead_record())
+    assert len(bad) == 1
+    assert "call 6 4C (E)" in bad[0] and "C len 0 < promised 6" in bad[0]
+
+
+def test_lead_audit_passes_an_honest_auction():
+    rec = _lead_record()
+    # the same board without the splinter: every remaining gloss fits its hand
+    rec["explanations"]["auction"] = rec["explanations"]["auction"][:6]
+    assert audit_record(rec) == []
+
+
+def test_lead_forge_rejects_such_a_board():
+    """The gate must run in the forge, not only in the audit (the 18% rate was
+    identical on boards forged the same morning)."""
+    src = (Path(__file__).resolve().parent.parent / "bridge_trainer" /
+           "engine" / "lead_maker.py").read_text(encoding="utf-8")
+    assert "from .explain_check import auction_violations" in src
+    assert "auction_violations(auc, hands, dealer_i)" in src
+    assert '"rejected", "expl_vs_hand"' in src

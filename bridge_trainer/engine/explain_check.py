@@ -269,6 +269,45 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
     return fatal, soft
 
 
+def auction_violations(auction_entries: list[dict], hands: list[str],
+                       dealer_i: int) -> list[str]:
+    """Displayed calls whose gloss contradicts the hand that made them, for a
+    problem that shows a COMPLETE auction and no candidate set of its own —
+    i.e. an opening-lead board.
+
+    Same rule and same slack as a bidding board's STEM (``hand_violations``),
+    and fatal for the same reason, only more so: the auction IS the evidence a
+    leader reasons from. Measured over the published lead pool 2026-07-25,
+    18% of boards showed at least one such call — Ben bidding a splinter or a
+    two-suited cue that GIB narrates as a natural suit bid, e.g. 4♣ with a
+    club VOID glossed "twice rebiddable !C" and the claim then repeated on the
+    4NT and 6♠ that followed. The lead forge never ran this check, which is
+    why the rate was the same on boards forged that morning.
+
+    Pass is exempt, as in ``hand_violations``: its "No suitable call" gloss
+    only restates what the seat's own bids established."""
+    out = []
+    for j, e in enumerate(auction_entries):
+        if e.get("call") == "P":
+            continue
+        idx = e.get("idx", j)
+        bidder = hands[seat_of(dealer_i, idx)]
+        for v in card_vs_hand(e.get("card") or {}, bidder):
+            out.append(f"call {idx} {e['call']} ({e.get('seat', '?')}): {v}")
+        v = _ask_answer_violation(e, auction_entries, j, bidder)
+        if v:
+            out.append(f"call {idx} {e['call']} ({e.get('seat', '?')}): {v}")
+    return out
+
+
+def lead_record_violations(rec: dict) -> list[str]:
+    """``auction_violations`` for an already-built lead record (the audit's
+    entry point, mirroring ``record_violations`` for bidding boards)."""
+    hands = [rec["full_deal"][s] for s in SEATS]
+    entries = (rec.get("explanations") or {}).get("auction") or []
+    return auction_violations(entries, hands, SEATS.index(rec["dealer"]))
+
+
 # GIB's own forcing phrase, for the violation message: the ";"-clause that
 # carries it ("forcing to 3N", "forcing", "game force").
 _FORCING_CLAUSE_RE = re.compile(r"[^;]*\bforc\w*[^;]*")
