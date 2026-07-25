@@ -647,6 +647,200 @@ Plus the 5-band reference table with a swatch per row — the one place the full
 
 ---
 
+## 4A. Round-2 revisions (statistics review)
+
+The plan above was reviewed by a statistics-minded club player, who
+re-simulated its own stated distribution. The review found three defects
+serious enough to block, several overclaims, and one bug neither expert
+caught. Rulings below **supersede** anything above that contradicts them.
+
+### Accepted, blocking
+
+**R1. Legacy attempts are graded on a harsher scale, so a time-ordered
+window shows fake improvement.** Verified in source: `btScoreOfAttempt`
+(`webapp.py:919`) approximates any attempt with no stored `score` using the
+**base curve only** — no CI haircut, no stakes stretch, no field leniency. The
+function's own comment says so. Leniency alone is worth up to +6 points, so
+every pre-`score` attempt is biased *downward* by several points against an
+identical decision made today. §2.1's hero is a rolling window ordered by
+time, §4.4's sparkline plots old→new, and the trend compares an earlier window
+to a later one — so all three drift upward purely as the window slides off
+legacy attempts. This is the same class of error as §1.4's cumulative-line
+complaint, and worse because it is invisible.
+
+Second half of the same bug: the legacy path returns *exactly* `ERROR_MIN`
+(40) for a recorded mistake with no measured cost, and the mix bar bins on
+`sc >= ERROR_MIN`. So legacy blunders land in `סטייה` instead of
+`טעות חמורה`, systematically undercounting the bad bin in the very bar §4.3
+promotes into the hero to disclose composition.
+
+**Fix:** the hero card (numeral, interval, mix bar, sparkline, trend) is
+computed **only from attempts carrying a stored `score`**. If any were
+excluded, disclose it: `לא נכללות N בעיות שנפתרו לפני עדכון שיטת הציון.` If
+*no* attempt has a stored score, fall back to all of them with that notice
+shown prominently rather than rendering an empty hero. Never mix two
+calibrations inside one time series.
+
+**R2. The significance gate is not invalid — it is powerless.** CI
+non-overlap is roughly α≈0.005, and overlapping windows make it stricter
+still. Simulated power for *disjoint* 50-vs-50 windows (better than the plan
+specified): +5 pts fires 7.7% of the time, +10 pts 45.8%. A 10-point gain is
+most of the distance between two `AGG_HE` buckets — months of work — and the
+dashboard would flip a coin on acknowledging it. A caption reading
+`ללא שינוי מובהק` after every session forever asserts flatness that isn't
+established, which inverts the honesty rule into its own kind of lie.
+
+**Fix:** drop the two-window comparison. Fit OLS of score on attempt index
+over the last 100 stored-score first attempts and test the slope. It uses
+every point, needs no window pairing, has no overlap problem, and says
+something more useful than an arrow: `בקצב הזה, +6 נקודות ל-100 בעיות`.
+Gate the arrow on the slope's CI excluding zero. When it doesn't clear, the
+copy must not assert flatness — `עוד לא מספיק נתונים כדי לזהות מגמה`.
+
+**R3. The weakness rule does not solve multiple comparisons.** In a null
+world of 15 categories with identical true ability, `(overall − cat) −
+1.0·SE(cat) > 3` fires **46.9% of the time at n=12 and 37.1% at n=20**, and
+reports a mean fabricated gap of 11–13 points. The `−1.0·SE` is a one-sided
+~84% adjustment applied once, and then an argmax over 15 candidates is taken
+anyway — the winner's curse is intact. §2.6's "always show the evidence"
+principle then amplifies the harm: a false positive prints `71 על 14 בעיות,
+לעומת 82 בשאר`, which is exactly the presentation that makes it believable,
+and costs the user a week of misdirected practice.
+
+**Fix:** stop hypothesis-testing. This is the batting-average problem —
+ranking many small samples and taking the extreme — and the standard answer
+is shrinkage. Compute each category mean, shrink toward the overall mean by
+`n/(n+k)` with `k` estimated from between- vs within-category variance
+(empirical Bayes), rank on the shrunk values, and **display the shrunk
+value** so the evidence line stops overstating the gap. At n=12 with no real
+signal everything collapses to the overall mean and the fallback ladder fires,
+with no threshold to tune; a real 10-point hole at n=50 survives. This
+replaces four tuned constants with one estimated quantity.
+
+Related confound the plan missed: it forbids recommending *by* difficulty but
+ignores difficulty as a confounder *within* a skill category. If one category
+is authored harder on average, its mean is permanently lower for a reason that
+isn't the player. Print the category's mean difficulty in the evidence line:
+`71 על 14 בעיות בקושי ממוצע 3.9, לעומת 82 בקושי 3.1`.
+
+### Accepted, copy and disclosure
+
+**R4. The `AGG_HE` one-line meanings overclaim by about one bucket** — and
+the plan's own arithmetic contradicts them. With `mean = 100p + 75(1−p)`,
+`p = (mean−75)/25`: at 88 the share of best answers is 0.52, at 82 it is
+0.28, and "most" (p≈0.7) needs ~92.5. Corrected:
+
+| mean | label | corrected meaning |
+|---|---|---|
+| ≥ 88 | `שיפוט מדויק` | בכמחצית הבעיות בחרת בדיוק את הפעולה המיטבית, ובשאר היית קרוב. |
+| 78–87 | `שיפוט טוב` | בכרבע מהבעיות בחרת את המיטבית, וברוב השאר היית קרוב. |
+| 68–77 | `שיפוט סביר` | כמעט תמיד בחרת אפשרות הגיונית, אך רק לעתים את המיטבית. |
+| < 68 | `יש מה לחזק` | לצד בחירות קרובות יש גם טעויות של ממש. |
+
+**R5. Use `t`, not 1.96, and stop dressing a display guard as inference.**
+Measured coverage of the proposed interval is 87–91% where 95% is claimed —
+the dashboard is overconfident at exactly the sample sizes it is being careful
+about — because 1.96 with an estimated sd at small n should be `t` (t₄=2.776,
+a 42% wider interval). Also, the floors are nearly inert: coverage is
+identical to a decimal with and without them, so `SD_FLOOR` was answering a
+cosmetic bug (`100 (100–100, n=5)`) while claiming to answer an inferential
+one.
+
+**Fix:** use a `t` multiplier. Drop `SD_FLOOR`. Keep a small half-width floor
+**documented purely as a display guard**. And since §2.4 already hides the
+whisker below n=12, go further and show **no interval at all** below 12 —
+numeral and `n` only. A fabricated ±7 says less than an honest absence.
+
+**R6. The hero silently mixes three differently-calibrated scales.**
+`SCORE_TAU = {bidding: 2.0, leadMP: 0.6, leadIMP: 1.75}`, and MP leads carry a
+35% rank blend that bidding does not. A week of MP lead drills can move the
+headline several points with judgment unchanged. §2.3's own logic — which
+insists on printing `ממוצע קושי` because the score does not normalise for how
+hard the winner is to find — applies identically here and got nothing.
+**Fix:** print the scenario mix beside the difficulty mix
+(`70% הכרזה · 30% הובלה`).
+
+**R7. The honesty rule's stated *reason* is false, and §4.7 violates the rule
+it states.** The claim "the app has never observed another human" is wrong:
+`docs/classification.md` defines difficulty as the estimated probability a
+competent club player gets it wrong, and the score's leniency term docks the
+user less for errors the field also makes — human reference is baked into the
+number. Meanwhile §4.7's own replacement string,
+`רוב השחקנים טועים כאן באותה צורה`, is both a comparative claim and an
+overclaim (`ben_softmax` is a policy estimate, not an observed frequency, and
+34% is not "most").
+
+**Fix:** restate the rule as what it actually protects — *no claim about where
+the user ranks; any claim about what the field chooses is attributed to the
+engine's estimate*. The §4.7 string becomes
+`לפי הערכת המנוע, כשליש מהשחקנים בוחרים כאן כמוך — הציון מקל בהתאם (+3)`.
+
+**R8. SD≈21 is unmeasured and load-bearing.** It appears nowhere but this
+document, yet it sets the window size, the interval width and the bucket
+width. Simulation shows it swings from ~14 to ~34 purely with blunder rate,
+and is *correlated with the mean* — so the whisker is systematically narrower
+for strong players, and any constant tuned to "the noise floor" is tuned for
+one player. There is no attempt data in this repo and no way to query
+production from here, so the number cannot be measured now.
+
+**Fix:** derive from the sample wherever possible rather than baking the
+assumption in — the CI already uses the observed sd, and the shrinkage of R3
+estimates its own `k` from observed variance, which removes the two most
+important dependencies. Label the remaining constants explicitly as
+provisional in the source, and record the query to run: SD of `score` overall,
+per scenario, per training mode, and by decile of user mean.
+
+### Accepted, smaller
+
+- **R9. Show the blunder *rate*, not the run.** A run length is geometric —
+  at a 3% blunder rate the mean is 33 with SD≈33 — so it is the noisiest
+  number on the page, displayed as a precise integer, in a plan that elsewhere
+  refuses an arrow without a significance test. `2 טעויות חמורות ב-50
+  הבעיות האחרונות` carries the same coaching instruction, is bounded and
+  comparable, and sits on the same window as the rest of the card.
+- **R10. Fixed section slots, in a fixed order.** §4.1 bans reordering rows
+  because "a list that reorders is unlearnable" and then makes the *section
+  list* data-dependent. A section with no data renders disabled with `עוד לא`
+  rather than vanishing, and the data-dependent auto-open is dropped — the
+  `.dsum` already points at what matters without moving the layout.
+- **R11. The row track must look like an axis.** A 10px full-width rounded
+  filled pill reads as a progress bar at 100% on a phone, whatever the intent.
+  Use a 1px rule with ticks at 40/85/100.
+- **R12. Keep the lifetime mean somewhere** — it is the least noisy statistic
+  the app has, and dropping the numeral entirely was a layout decision applied
+  to a measurement question. One line in `המספרים המלאים`:
+  `ממוצע כל הזמנים 81 · 247 בעיות`.
+- **R13. Disclose the hero's scope**, because `min(50, n)` silently changes
+  the estimand: `על 50 הבעיות האחרונות` vs `על כל 34 הבעיות שפתרת`.
+- **R14. Label hysteresis.** A stationary player's `AGG_HE` label flips on
+  9.4% of sessions mid-bucket and 16% near an edge. Require the mean to clear
+  an edge by the CI half-width before the label changes; keep the previous
+  label otherwise (persisted alongside the open-set).
+- **R15. Add stakes context to the miss list.** Score-ordering is right on
+  units, but the score is deliberately stakes-*normalised*, so a 5-IMP slam
+  error can score the same as a 0.8-IMP part-score error — which
+  de-prioritises exactly the hands most worth studying. Keep score as the
+  default sort and show `quality.stakes` (or the cost with its unit) as row
+  context.
+- **R16. Drop the unbacked adjective** in the difficulty sanity line: print
+  the two numbers, not `פער תקין`.
+
+### Noted, not adopted here
+
+- **The mean is the right hero summary, and the plan should say why.** A
+  median over a 50-window is *twice* as noisy (SD 6.5 vs 2.86) because with
+  ~45% of answers at 100 it flops between the clump and the ceiling. Worth one
+  sentence in §2.1 to pre-empt the reflex objection.
+- **Time-to-answer** is not stored and would be a high-value one-field
+  addition; goes on the deferred list beside `lastScore`.
+- **Vulnerability/seat** should be ranked in a visible known-gaps list rather
+  than buried, since it is a bigger coaching hole than
+  improvement-on-repeats.
+- **The pattern sentence should name a bridge idea, not a statistical shape** —
+  otherwise the detectors are measurements wearing a diagnosis costume. The
+  three shipping detectors do name concepts (passing, suit choice, bidding
+  height); hold the line there.
+
 ## 5. Implementation order
 
 1. Shared-layer fixes: `meanCI` floors, `bidHeight`, `.stars` CSS scope,
