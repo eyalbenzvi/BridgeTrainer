@@ -1,5 +1,5 @@
-"""Audit published bidding problems with the CURRENT explanation gates and,
-with --remove, delete the ones that would not be published today.
+"""Audit published problems with the CURRENT explanation gates and, with
+--remove, delete the ones that would not be published today.
 
 The gates in engine/explain_check.py run at generation time, so every board
 forged before a gate existed was never vetted by it. This script closes that
@@ -21,8 +21,10 @@ Two levels:
       Costs one sampling pass per checked call (~7 s per board), which is why
       it is opt-in.
 
-Lead problems are skipped: both gates are bidding-shaped (stem + option
-cards). Leads have their own pruning path (scripts/prune_obvious_leads.py).
+Lead problems are audited with ``lead_record_violations`` — the same
+gloss-vs-cards rule over the complete auction they display, which is the whole
+evidence a leader reads. The band check does not apply to them (they offer
+cards, not calls), so --band changes nothing for leads.
 
 Usage:
     python3 scripts/audit_pool.py --firestore [--key K] [--band] [--remove]
@@ -40,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bridge_trainer.engine.explain_check import (band_violations,
+                                                 lead_record_violations,
                                                  record_violations)
 from bridge_trainer.engine.scanner import SEATS, VUL_NAMES, Spot
 
@@ -64,7 +67,10 @@ def spot_from_record(rec: dict) -> Spot:
 
 def audit_record(rec: dict, engine=None) -> list[str]:
     """Every violation the current gates find in *rec*. With *engine*, the
-    band half runs too."""
+    band half runs too (bidding boards only — a lead board has no candidate
+    calls whose measured meaning could be sampled)."""
+    if rec.get("kind") == "lead":
+        return lead_record_violations(rec)
     fatal, _soft = record_violations(rec)
     if engine is None:
         return fatal
@@ -92,11 +98,14 @@ def main(argv=None) -> int:
                     help="service-account JSON (or set "
                          "GOOGLE_APPLICATION_CREDENTIALS)")
     ap.add_argument("--band", action="store_true",
-                    help="also run the engine band check (needs Ben)")
+                    help="also run the engine band check on bidding boards "
+                         "(needs Ben)")
     ap.add_argument("--remove", action="store_true",
                     help="delete the offenders from Firestore (index first)")
     ap.add_argument("--limit", type=int, default=0,
                     help="audit at most N records (smoke runs)")
+    ap.add_argument("--kind", choices=("bidding", "lead"), default=None,
+                    help="audit only this problem kind (default: both)")
     ap.add_argument("--ids", default="",
                     help="comma-separated problem ids to audit (re-check a "
                          "finding, or remove one board's worth of them)")
@@ -115,7 +124,9 @@ def main(argv=None) -> int:
         records = remote.stream_records()
     else:
         records = _local_records(args.pool)
-    records = [r for r in records if r.get("kind") != "lead"]
+    if args.kind:
+        records = [r for r in records
+                   if (r.get("kind") or "bidding") == args.kind]
     if args.ids:
         want = {i.strip() for i in args.ids.split(",") if i.strip()}
         records = [r for r in records if r["id"] in want]
@@ -146,7 +157,7 @@ def main(argv=None) -> int:
             print(f"[{i}/{len(records)}] clean so far: "
                   f"{i - len(findings)}/{i}", flush=True)
 
-    print(f"\n{len(findings)} of {len(records)} bidding problems violate the "
+    print(f"\n{len(findings)} of {len(records)} problems violate the "
           f"current gates ({'cheap + band' if engine else 'cheap only'})")
     if args.out:
         Path(args.out).write_text(json.dumps(findings, indent=1,

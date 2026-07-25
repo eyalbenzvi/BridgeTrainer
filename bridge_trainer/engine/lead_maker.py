@@ -310,6 +310,19 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
 
     te = time.perf_counter()
     auc = auction_meanings(dealer_i, full_auction)
+    # ---- explanation-consistency gate: every displayed call's gloss vs the
+    # actual cards of the seat that made it. The auction is the whole evidence
+    # a leader reads, so a call GIB narrates as a hand its bidder does not hold
+    # (Ben's splinter glossed as a natural suit bid) makes the board
+    # unanswerable. Runs here, after the confirm, because the glosses cost one
+    # GIB fetch per call and only accepted boards ever fetch them.
+    from .explain_check import auction_violations
+    bad = auction_violations(auc, hands, dealer_i)
+    if bad:
+        return LeadOutcome(
+            seed, "rejected", "expl_vs_hand", timings=t,
+            detail="expl_vs_hand " + "; ".join(bad[:3]) +
+                   (f" (+{len(bad) - 3} more)" if len(bad) > 3 else ""))
     notes = card_notes(v)
     t["explain_s"] = time.perf_counter() - te
     elapsed = time.perf_counter() - t_board
