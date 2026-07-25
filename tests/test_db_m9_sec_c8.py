@@ -66,7 +66,7 @@ def test_dashboard_escapes_attempt_fields():
     seg = _DASHBOARD_JS[_DASHBOARD_JS.index("function missRowHtml"):
                         _DASHBOARD_JS.index("function section(")]
     assert "esc(m.chosenCall)" in seg
-    assert "esc(m.acceptedSet.join" in seg
+    assert "esc(acc.join" in seg          # accOf()-normalized
     assert "esc(OUTCOME_HE[m.outcomeClass]" in seg
 
 
@@ -141,13 +141,13 @@ def test_dashboard_regrades_the_low_rows_from_current_problems():
     assert "btScoreOfAttempt(a) < REVIEW_MIN" in seg
     assert "slice(0, HEAL_MAX)" in seg
     assert "const HEAL_MAX = 10;" in _DASHBOARD_JS
-    # graded by the same functions the answer path uses
-    assert "window.BT.gradeLead(P, action, a.trainingMode)" in seg
-    assert "window.BT.gradeBidding(P, action)" in seg
+    # graded by the same scorers the answer path uses (see the raw-record
+    # note in test_heal_uses_the_raw_tolerant_scorers_only)
+    assert "window.btScoreBidding(P, action)" in seg
     # a deleted problem is skipped, not guessed at
     assert "if (!P) continue;" in seg
-    # derived fields only; the guess and the timestamps stay
-    assert "Object.assign(a, fresh);" in seg
+    # the score and nothing else: the guess, outcome, cost and timestamps stay
+    assert "a.score = sp.score;" in seg
     # painted from cache first, re-rendered only when something changed
     init = _DASHBOARD_JS[_DASHBOARD_JS.index("async function init()"):]
     assert "render(attempts);" in init
@@ -161,3 +161,30 @@ def test_unsynced_answers_are_declared_not_presented_as_settled():
                          _DASHBOARD_JS.index("function mixHtml(")]
     assert "pendingN" in hero
     assert "לא נשמרו לענן" in hero
+
+
+def test_heal_uses_the_raw_tolerant_scorers_only():
+    """The first cut of healLowGrades called BT.gradeBidding on the RAW doc
+    BT.getProblem returns. gradeBidding copies verdict.accepted verbatim, which
+    is a bare string there, so acceptedSet became a string and missRowHtml's
+    .join threw — the dashboard rendered nothing but the error. Only the two
+    scorers documented to accept a raw record may be used, and only the score
+    may be touched."""
+    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("async function healLowGrades"):
+                        _DASHBOARD_JS.index("async function init()")]
+    assert "window.btScoreBidding(P, action)" in seg
+    assert "window.btScoreLead(P, action, a.trainingMode)" in seg
+    assert "gradeBidding" not in seg and "gradeLead" not in seg
+    assert "a.score = sp.score;" in seg
+    assert "Object.assign" not in seg
+    # a single bad row must never take the page down
+    assert "} catch (e) { continue; }" in seg
+
+
+def test_accepted_set_is_normalized_at_every_read():
+    js = _DASHBOARD_JS
+    assert "function accOf(a) {" in js
+    assert "Array.isArray(s) ? s : (s ? [s] : [])" in js
+    # no consumer reads the field raw any more
+    assert "a.acceptedSet || []" not in js
+    assert "esc(m.acceptedSet" not in js

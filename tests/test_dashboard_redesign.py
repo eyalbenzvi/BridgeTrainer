@@ -486,3 +486,45 @@ def test_emitted_assets_equal_the_constants():
             == _DASHBOARD_JS
     finally:
         shutil.rmtree(d)
+
+
+# ---- the heal path's contract: raw records ----------------------------------
+#
+# healLowGrades re-grades a stale row from the doc BT.getProblem returns, which
+# is the RAW record: verdict.accepted is a bare string and the rows live in
+# verdict.table. btScoreBidding/btScoreLead accept that shape (their headers say
+# so) and are the only graders that may be used there — BT.gradeBidding reads
+# verdict.corrected and copies accepted verbatim, which yielded acceptedSet as a
+# string and threw "m.acceptedSet.join is not a function" on render.
+
+_RAW_BIDDING = """{
+  id: "ben1-raw", kind: "bidding", scoring_form: "IMPs",
+  created_at: "2026-07-24T10:11:30+00:00",
+  classification: {type: "invite_or_game", difficulty_level: 4},
+  candidates: [{call: "3S", policy: 0.52}, {call: "4S", policy: 0.293},
+               {call: "P", policy: 0.11}],
+  quality: {stakes: 6.69},
+  verdict: {accepted: "4S", toss_up: false, dead_options: [], table: [
+    {bid: "4S", ev_imp_vs_top: 1.58, ci: 0.63},
+    {bid: "3S", ev_imp_vs_top: -1.58, ci: 0.63},
+    {bid: "P", ev_imp_vs_top: -1.77, ci: 0.68}]}}"""
+
+
+@needs_node
+def test_score_module_accepts_a_raw_record_with_a_string_accepted():
+    got = run_js([f"btScoreBidding({_RAW_BIDDING}, '3S').score",
+                  f"btScoreBidding({_RAW_BIDDING}, '4S').score",
+                  f"JSON.stringify(btScoreBidding({_RAW_BIDDING}, '3S')"
+                  f".accepted)"])
+    # the published values for the reported board (ben1-19f939859fa)
+    assert got[0] == 83 and got[1] == 100
+    assert got[2] == '["4S"]'          # normalized to an array, not "4S"
+
+
+@needs_node
+def test_acc_of_survives_a_string_accepted_set():
+    got = run_js(["JSON.stringify(accOf({acceptedSet: ['4S', '3S']}))",
+                  "JSON.stringify(accOf({acceptedSet: '4S'}))",
+                  "JSON.stringify(accOf({}))",
+                  "JSON.stringify(accOf(null))"])
+    assert got == ['["4S","3S"]', '["4S"]', "[]", "[]"]
