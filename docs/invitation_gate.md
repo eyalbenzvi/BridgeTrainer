@@ -114,6 +114,31 @@ produced, so it adds no sampling and no network call — unlike
 `band_violations`, it can also re-judge stored records, which is what
 the purge below does.
 
+## Relation to R1 (`answer_insensitive_violations`)
+
+R1 (docs/4nt_projection_and_gloss_gate.md) fires when the rollout
+*discards partner's answer*: partner replied differently on different
+layouts and the contract never moved. This gate asks a different
+question — whether the *displayed meaning* of the call survives what
+partner did with it — and the two do not overlap:
+
+* `ben1-19f9609a4d9` (2NT glossed "Invitational to 3NT game") is
+  explicitly **cleared** by R1, because partner bid 3♠ on all 128
+  re-rolled layouts: one action, so no answer was discarded. It is
+  killed here, because that one action is a refusal — game is never
+  reached, while the winning 4♠ reaches it always and is 1.2 IMPs
+  better.
+* `ben1-19f947b9723`'s 4♥ is invisible to R1 for the same reason
+  (partner passes on every layout, so nothing varied to be ignored).
+* Conversely R1's asks — a 4NT answered 5♣/5♦/5♥/5♠ and blasted over —
+  are invisible here whenever GIB names them Blackwood rather than an
+  invitation.
+
+The one board both rules reach is `ben1-19f9609a54c` (4NT "Quantitative
+invite to 6NT"): R1 because the four different keycard answers all end
+in 6♣, this gate because a call the board calls an invitation reaches
+slam on 100% of layouts.
+
 ## Operations
 
 ```bash
