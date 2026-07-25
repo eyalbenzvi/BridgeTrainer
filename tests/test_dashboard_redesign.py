@@ -23,7 +23,7 @@ import pytest
 
 from bridge_trainer.app.webapp import (_CSS, _DASHBOARD_CSS, _DASHBOARD_JS,
                                        _SCORE_JS, _SHARED_JS,
-                                       _dashboard_html)
+                                       _dashboard_html, _taxonomy_he_json)
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
                                 reason="node not available")
@@ -39,10 +39,15 @@ def run_js(exprs: list[str]) -> list:
 
     The dashboard script's last lines bootstrap against window.BT, so they are
     dropped; everything above them is pure functions.
+
+    TYPE_NAMES is the one name the dashboard borrows from the excluded shared
+    block. It is supplied from the same taxonomy modules the page builds it
+    from, so a label asserted here is the label that ships.
     """
     cut = _DASHBOARD_JS.index("// refresh the dashboard once the background")
     src = (_SCORE_JS + "\n"
            + "const localStorage = {getItem: () => null, setItem: () => {}};\n"
+           + "const TYPE_NAMES = " + _taxonomy_he_json() + ";\n"
            + _DASHBOARD_JS[:cut] + "\n"
            + "console.log(JSON.stringify([" + ",".join(exprs) + "]));")
     fd, path = tempfile.mkstemp(suffix=".js")
@@ -418,6 +423,86 @@ def test_miss_list_sorted_by_score_not_raw_cost():
     """A cross-scenario cost sort would rank 2.4 IMP against 0.7 tricks."""
     assert "btScoreOfAttempt(a) - btScoreOfAttempt(b)" in _DASHBOARD_JS
     assert "b.gradedCost - a.gradedCost" not in _DASHBOARD_JS
+
+
+# ---- both scenarios reach both miss lists -----------------------------------
+# The two score scales do not have the same shape: a bidding dead option is
+# pinned to 0 and other calls are charged on tau = 2.0 IMP, while a lead has no
+# dead option and is charged on tau = 0.6 tricks blended with its matchpoint
+# rank. One pooled ranking cut at a cap therefore filled every slot from the
+# bidding tail and dropped the leads entirely.
+
+def _attempts_js(kinds: list[tuple[str, int, int]]) -> str:
+    """A JS array literal of graded first attempts: (kind, score, count) per
+    scenario, scores counting up from the given floor."""
+    out = []
+    for i, (kind, floor, n) in enumerate(kinds):
+        for j in range(n):
+            out.append(json.dumps(
+                {"problemId": f"{kind}{i}-{j}", "kind": kind,
+                 "score": floor + j, "isFirstAttempt": True,
+                 "ts": {"seconds": 1700000000 + 100 * i + j}}))
+    return "[" + ",".join(out) + "]"
+
+
+@needs_node
+def test_miss_slots_are_shared_between_the_scenarios():
+    """The cap must not be consumable by one scenario alone. 60 bidding misses
+    scoring 0-59 against 20 lead misses scoring 62-81 is the real shape of the
+    two scales, and it used to fill all 30 rows with bidding."""
+    mixed = _attempts_js([("bidding", 0, 60), ("lead", 62, 20)])
+    three = _attempts_js([("bidding", 0, 12), ("lead", 70, 12)])
+    bid_only = _attempts_js([("bidding", 0, 40)])
+    got = run_js([
+        "pickMisses(" + mixed + ", 30).map(a => a.kind)",
+        # 3 slots with both scenarios present -> neither is shut out
+        "pickMisses(" + three + ", 3).map(a => a.kind)",
+        # a scenario with nothing left yields its turns: the cap still fills
+        "pickMisses(" + bid_only + ", 30).length",
+        # ordering within a scenario is still worst-first
+        "pickMisses(" + mixed + ", 30).filter(a => a.kind === 'lead')"
+        ".map(a => a.score)",
+    ])
+    assert [got[0].count("bidding"), got[0].count("lead")] == [15, 15], got[0]
+    assert sorted(got[1]) == ["bidding", "bidding", "lead"], got[1]
+    assert got[2] == 30, got[2]
+    assert got[3] == sorted(got[3]), got[3]
+
+
+@needs_node
+def test_a_miss_row_names_its_scenario():
+    """The two taxonomies collide in Hebrew (both have a "סלם" and a
+    "חוזה חלקי"), so in a mixed list the type label alone cannot say whether a
+    row was an auction or a lead."""
+    got = run_js(["badge({kind: 'lead', type: 'lead_3nt', difficultyLevel: 2})",
+                  "badge({kind: 'bidding', type: 'slam_try', difficultyLevel: 2})",
+                  "badge({kind: 'lead'})"])
+    assert "הובלה" in got[0] and "הכרזה" not in got[0]
+    assert "הכרזה" in got[1] and "הובלה" not in got[1]
+    assert "הובלה" in got[2]      # no type at all still names the scenario
+
+
+@needs_node
+def test_a_kindless_legacy_attempt_counts_as_bidding():
+    """Attempts recorded before the lead trainer carry no `kind`."""
+    got = run_js(["attKind({})", "attKind({kind: 'lead'})", "attKind(null)"])
+    assert got == ["bidding", "lead", "bidding"]
+
+
+def test_the_truncated_miss_list_says_it_is_truncated():
+    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("const missRows = pickMisses"):
+                        _DASHBOARD_JS.index("const patBody")]
+    assert "allMiss.length > missRows.length" in seg
+    assert "מוצגות" in seg
+    # and it names the per-scenario split rather than a bare total
+    assert "הכרזה" in seg and "הובלה" in seg
+
+
+@needs_node
+def test_the_revisit_card_counts_the_rows_it_has():
+    """The heading used to say "3" whatever it held."""
+    got = run_js(["nToCheck(1)", "nToCheck(3)"])
+    assert got == ["החלטה אחת לחזור אליה", "3 החלטות לחזור אליהן"]
 
 
 # ---- glossary ---------------------------------------------------------------
