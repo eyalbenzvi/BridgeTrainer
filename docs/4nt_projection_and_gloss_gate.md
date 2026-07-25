@@ -426,6 +426,41 @@ Full list:
 | `ben1-19f95ad1501`, `ben1-19f95ad156c`, `ben1-19f9609a54c`, `ben1-19f966c0800`, `ben1-19f975cae49`, `ben1-19f98ba4d93`, `ben1-19f98ba4e75`, `ben1-19f9910d96d` | R1 |
 | `ben1-013572e7`, `ben1-01357319`, `ben1-013574c2`, `ben1-0135750a`, `ben1-19f93985aed`, `ben1-19f93fc826f`, `ben1-19f947b97cb`, `ben1-19f947b9854`, `ben1-19f9609a411`, `ben1-19f975cae9e`, `ben1-19f97f89099`, `ben1-19f9910d9de`, `ben1-19f9910da11` | R3 |
 
+## What shipped, and what the rules removed
+
+Implemented in `engine/explain_check.py` (R0-R3), wired into
+`engine/maker.forge_one` (R1/R2/R3) and `record_violations` (R2/R3), with
+`scripts/audit_pool.py --rollout / --suspects-only` for R1 on stored records.
+Covered by `tests/test_rollout_gate.py`.
+
+Run against the live pool on 2026-07-25 (1 030 problems, 503 of them bidding —
+the pool had grown since the calibration above):
+
+| stage | result |
+|---|---|
+| cheap audit (R2 + R3, every board) | 17 boards flagged |
+| R1 pre-filter (point mass = 100 %) | 10 suspects |
+| R1 re-roll, shortlist of 15 (every board with a ≥ 99 % point mass) | **8 confirmed, 6 cleared** as forced continuations |
+| band check on the same shortlist (pre-existing gate) | 1 further board (`ben1-19f9910d9ea`) |
+| **removed** | **25 boards** (each re-confirmed by `--band --rollout --remove` before deletion) |
+
+The 6 cleared boards are the point of the exercise: `ben1-19f93985a7f`,
+`ben1-19f95ad153a`, `ben1-19f95ad1594`, `ben1-19f97f88f2a`,
+`ben1-19f98ba4e0e`, `ben1-19f99977637` all project a single contract on every
+layout, and all six survive, because partner made the same call on every
+layout too. The naive point-mass rule would have deleted them.
+
+R1's confirmed 8: `ben1-19f95ad1501`, `ben1-19f95ad156c`, `ben1-19f966c0800`,
+`ben1-19f975cad49`, `ben1-19f975cae49`, `ben1-19f98ba4d93`,
+`ben1-19f98ba4e75`, `ben1-19f9910d96d` — six of them a 4NT ask answered
+5♣/5♦/5♥/5♠ and blasted over regardless.
+
+Afterwards: 1 005 problem docs, index in step (1 005 entries), and
+`trainer pool purge-orphan-attempts` deleted the 6 stored attempts left on
+deleted boards — 5 on boards removed here (including this board's own
+answered-4♦-scored-42 attempt, graded against the 4NT verdict) and 1 already
+orphaned. 122 attempts remain, 0 orphans.
+
 ## Conclusions
 
 1. This board is not a one-off: each of its three faults is a class with 2-15
