@@ -103,11 +103,16 @@ def rollout_violations(rec: dict, engine) -> list[str]:
     return answer_insensitive_violations(ev, spot.stem)
 
 
-def audit_record(rec: dict, engine=None, rollout: bool = False) -> list[str]:
+def audit_record(rec: dict, engine=None, rollout: bool = False,
+                 band: bool = True) -> list[str]:
     """Every violation the current gates find in *rec*. With *engine*, the
-    band half runs too, and with *rollout* the R1 re-roll as well (bidding
-    boards only — a lead board has no candidate calls whose measured meaning
-    could be sampled)."""
+    engine-level halves run too: the band check (unless *band* is off) and,
+    with *rollout*, the R1 re-roll (bidding boards only — a lead board has no
+    candidate calls whose measured meaning could be sampled).
+
+    *band* is separate from ``engine is None`` so that --rollout alone reports
+    R1 without the band check's findings mixed in; both flags create the
+    engine, and each check answers for itself."""
     if rec.get("kind") == "lead":
         return lead_record_violations(rec)
     fatal, _soft = record_violations(rec)
@@ -116,8 +121,9 @@ def audit_record(rec: dict, engine=None, rollout: bool = False) -> list[str]:
     ex = rec.get("explanations") or {}
     option_cards = {o["bid"]: o.get("card") for o in (ex.get("options") or [])
                     if o.get("bid")}
-    fatal = fatal + band_violations(engine, spot_from_record(rec),
-                                    ex.get("stem") or [], option_cards)
+    if band:
+        fatal = fatal + band_violations(engine, spot_from_record(rec),
+                                        ex.get("stem") or [], option_cards)
     if rollout:
         fatal += rollout_violations(rec, engine)
     return fatal
@@ -209,7 +215,8 @@ def main(argv=None) -> int:
     findings = {}
     for i, rec in enumerate(records, 1):
         try:
-            bad = audit_record(rec, engine, rollout=args.rollout)
+            bad = audit_record(rec, engine, rollout=args.rollout,
+                               band=args.band)
         except Exception as e:                       # never lose the report
             bad = [f"audit error ({type(e).__name__}: {e})"]
         if bad:
