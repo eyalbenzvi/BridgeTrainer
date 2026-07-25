@@ -61,7 +61,10 @@ def test_dashboard_marks_orphan_attempts():
 
 # ---- SEC-A-6: esc() on user-owned attempt fields in the dashboard -----------
 def test_dashboard_escapes_attempt_fields():
-    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("const missList"):]
+    # every miss row on the page is built by this one function, so escaping it
+    # here covers both the tier-1 "3 to revisit" card and the full list
+    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("function missRowHtml"):
+                        _DASHBOARD_JS.index("function section(")]
     assert "esc(m.chosenCall)" in seg
     assert "esc(m.acceptedSet.join" in seg
     assert "esc(OUTCOME_HE[m.outcomeClass]" in seg

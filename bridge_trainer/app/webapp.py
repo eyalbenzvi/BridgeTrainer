@@ -208,8 +208,11 @@ a.big.off { background: var(--push); color: var(--fg); cursor: not-allowed; }
 .diffline { display: flex; align-items: center; gap: 8px; font-size: 13px;
             color: var(--muted); margin: 0 0 10px; }
 .diffline .stars { font-size: 15px; letter-spacing: 2px; line-height: 1; }
-.diffline .stars .on { color: var(--gold); }
-.diffline .stars .off { color: var(--line); }
+/* the on/off tones are NOT scoped to .diffline: the dashboard renders .stars
+   inside its own rows, and while these lived under .diffline every star there
+   inherited the body ink and the rating read as a solid five */
+.stars .on { color: var(--gold); }
+.stars .off { color: var(--line); }
 .diffline b { color: var(--fg); }
 /* four-color suits (BBO default deck) */
 .ss { color: var(--sp); } .sh { color: var(--he); }
@@ -931,6 +934,62 @@ function btScoreOfAttempt(a) {
     : SCORE_TAU.bidding;
   return Math.round(btClamp(btCurve(cost, tau), 1, SCORE_MAX_NONBEST));
 }
+/* An attempt carries a FULL-scale score only if the grader stored one.
+   btScoreOfAttempt's fallback above rebuilds a legacy attempt from the base
+   curve alone -- no CI haircut, no stakes stretch, no field leniency (the
+   problem doc isn't loaded here) -- so a legacy attempt reads several points
+   HARSHER than the identical decision made today. Anything ordered by time
+   (the dashboard's rolling window, its sparkline, its trend slope) would
+   therefore drift upward on its own as the window slides off the legacy
+   attempts, showing improvement nobody earned. Views that compare across
+   time must filter on this. */
+function btHasStoredScore(a) { return !!a && typeof a.score === "number"; }
+/* ===== aggregate vocabulary =====
+   BAND_HE grades ONE decision against ONE optimum, so it must never label a
+   MEAN: an average of 86 can be 100/100/100/44, which is not "almost
+   optimal". These four buckets describe a mean instead. ~10-point buckets
+   because a narrower bucket flips between visits on sampling noise alone.
+   The wording is derived, not chosen: with non-best answers averaging ~75,
+   mean = 100p + 75(1-p), so the share of best answers is p = (mean-75)/25 --
+   0.52 at 88 and 0.28 at 82. Hence "half" and "a quarter"; "most" would need
+   ~92.5 and would overclaim. */
+const AGG_MIN = [88, 78, 68];
+const AGG_HE = [
+  ["שיפוט מדויק", "win",
+   "בכמחצית הבעיות בחרת בדיוק את הפעולה המיטבית, ובשאר היית קרוב."],
+  ["שיפוט טוב", "win",
+   "בכרבע מהבעיות בחרת את המיטבית, וברוב השאר היית קרוב."],
+  ["שיפוט סביר", "gold",
+   "כמעט תמיד בחרת אפשרות הגיונית, אך רק לעתים את המיטבית."],
+  ["יש מה לחזק", "loss",
+   "לצד בחירות קרובות יש גם טעויות של ממש."],
+];
+function btAggOf(mean) {
+  for (let i = 0; i < AGG_MIN.length; i++)
+    if (mean >= AGG_MIN[i]) return i;
+  return AGG_MIN.length;
+}
+/* Contract-bid height, for the over/under-bidding detector. NOT candOrder:
+   that sorts P/X/XX to 100/101/102 (above 7NT) for display purposes, so
+   reusing it here would classify every Pass as an overbid. Non-contract
+   calls have no height and are excluded from the comparison instead. */
+function bidHeight(c) {
+  if (!c || c === "P" || c === "X" || c === "XX") return null;
+  const d = ["C", "D", "H", "S", "NT"].indexOf(c.slice(1));
+  if (!(+c[0] >= 1) || d < 0) return null;
+  return +c[0] * 10 + d;
+}
+/* Two-sided 95% t multiplier. The normal 1.96 is wrong when sd is ESTIMATED
+   from a small sample -- at n=5 the right value is 2.776, a 42% wider
+   interval -- which made the old dashboard's intervals cover ~87% where they
+   claimed 95%. Table for df 1..20, then close enough to 1.96. */
+const T95 = [0, 12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306,
+             2.262, 2.228, 2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110,
+             2.101, 2.093, 2.086];
+function btT95(df) {
+  if (df < 1) return T95[1];
+  return df <= 20 ? T95[df] : 1.96 + 1.6 / df;
+}
 function btScoreChipHtml(score, small) {
   const band = btBandOf(score);
   if (!band) return "";
@@ -1143,7 +1202,49 @@ const GLOSS = {
     "משיג את מספר הלקיחות הדרוש."],
   diff: ["רמת קושי", "דירוג אוטומטי מ-1 (קל) עד 5 (מומחה) לפי מורכבות " +
     "ההחלטה: גודל הפערים בין האפשרויות ורגישות התוצאה."],
-  streak: ["רצף מיטבי", "כמה מהתשובות האחרונות שלך קיבלו ציון 100 ברצף."],
+  /* ----- dashboard terms (docs/dashboard_redesign_plan.md 4.8) -----
+     The progress page explains its jargon the same way the problem pages do:
+     tap the term, get the card. `streak` is gone with the metric it
+     documented (a run of 100s punished an 84 exactly like a 12, and rewarded
+     answering easy problems). */
+  form: ["הטופס הנוכחי", "הציון הראשי מחושב על 50 ההחלטות האחרונות שלך " +
+    "בלבד (או על כל ההחלטות, אם פתרת פחות מ-50). כך הוא מגיב לשיפור בתוך " +
+    "שבוע, במקום להיתקע על ממוצע של כל הזמנים."],
+  ci: ["טווח סביר", "הציון מחושב על מדגם של החלטות, ולכן אינו מדויק " +
+    "לחלוטין. הטווח מציין את התחום שבו סביר שנמצא הציון האמיתי שלך. טווח " +
+    "רחב = פתרת מעט בעיות."],
+  agg: ["דירוג השיפוט", "תיאור מילולי של הציון הממוצע שלך. הוא מתאר את " +
+    "איכות הבחירות שלך מול פתרון המנוע \\u2014 ולא מול שחקנים אחרים."],
+  sig: ["מגמה", "המגמה נמדדת ברגרסיה על 100 ההחלטות האחרונות. חץ שיפור " +
+    "מוצג רק כשהמגמה גדולה מהתנודה הטבעית של המדידה \\u2014 הפרש קטן יכול " +
+    "לנבוע מהגרלת הבעיות בלבד."],
+  blunders: ["טעויות חמורות", "החלטות שקיבלו ציון מתחת ל-40. בקבוצות " +
+    "ובאימפים, הימנעות מתקלות היא מה שמנצח \\u2014 החמצה קטנה נסלחת."],
+  mix: ["פילוח התשובות", "ממוצע לבדו מסתיר את ההרכב: 85 יכול להיות 'תמיד " +
+    "קרוב למיטבי' או 'מושלם לרוב, עם כמה תקלות'. הפילוח מראה איזה מהשניים."],
+  scale40: ["הסולם מתחיל ב-40", "בפילוח לפי נושא הסולם מתחיל ב-40 ולא " +
+    "ב-0, כדי שההבדלים בין הנושאים יהיו נראים. הנקודה מסמנת את הציון, " +
+    "והפס סביבה את הטווח הסביר."],
+  cost: ["מחיר הטעות", "כמה עלתה הבחירה שלך מול המיטבית \\u2014 ב-IMP " +
+    "בהכרזה ובהובלת IMP, ובלקיחות בהובלת מאצ'פוינטס. מוצג רק על החלטות " +
+    "שבהן טעית."],
+  leadrank: ["דירוג ההובלה", "באיזה מקום דורגה ההובלה שלך מבין ההובלות " +
+    "האפשריות. בתחרות זוגות זה מה שקובע: הובלה שנייה-הכי-טובה עדיין " +
+    "מנצחת חלק מהאולם."],
+  weakspot: ["מה כדאי לחזק", "הציון בכל נושא מכווץ אל הממוצע הכללי שלך " +
+    "לפי מספר הבעיות שפתרת בו, כדי שנושא עם מעט נתונים לא ייראה כחולשה. " +
+    "הנושא נבחר רק אם הוא נשאר נמוך גם לאחר הכיווץ."],
+  pattern: ["נטיות שחוזרות", "דפוסים שחוזרים בטעויות שלך \\u2014 למשל " +
+    "נטייה להכריז גבוה מהמיטבי. מוצגים רק כשהדפוס חוזר מספר פעמים " +
+    "ובאופן חד-צדדי."],
+  coverage: ["היקף התרגול", "כמה בעיות פתרת בכל נושא, מול מה שקיים " +
+    "במאגר. נושא שכמעט לא תרגלת אינו חולשה \\u2014 פשוט אין עליו מספיק " +
+    "נתונים."],
+  firstonly: ["ניסיון ראשון", "הלוח מציג רק את התשובה הראשונה שלך לכל " +
+    "בעיה. תשובה שנייה לבעיה שראית את פתרונה היא זכירה, לא שיפוט."],
+  legacy: ["עדכון שיטת הציון", "בעיות שנפתרו לפני עדכון שיטת הציון נשמרו " +
+    "ללא ציון מלא, והשחזור שלהן מחמיר בכמה נקודות. כדי שלא ייראה שיפור " +
+    "מדומה עם הזמן, הן אינן נכללות בציון הראשי ובגרף המגמה."],
 };
 let GLOSS_KEY = null;
 function hideGloss() {
@@ -3490,74 +3591,244 @@ def _lead_html() -> str:
 
 
 _DASHBOARD_CSS = """
-.statgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.stat { text-align: center; }
-.stat b { font-size: 26px; display: block; line-height: 1.1; }
-.catrow { display: grid; grid-template-columns: 9em 1fr auto; gap: 8px;
-          align-items: center; margin: 7px 0; font-size: 13px; }
-.dbar { height: 12px; border-radius: 99px; background: var(--line);
-        overflow: hidden; }
-.dbar > span { display: block; height: 100%; background: var(--accent);
-               border-radius: 99px; }
-.scen .subh { font-weight: 700; margin: 13px 0 3px; font-size: 13px; }
-.costline { margin: 6px 0 6px; font-size: 14px; }
-.costline b { font-size: 21px; }
-.band { display: flex; height: 22px; border-radius: 99px; overflow: hidden;
-        background: var(--line); margin: 4px 0 5px; }
-.band .bseg { display: flex; align-items: center; justify-content: center;
-              font-size: 11px; font-weight: 700; color: #fff; min-width: 0;
-              box-shadow: inset -1px 0 0 rgba(0,0,0,.15); }
-.band .bseg.opt { background: var(--win); color: var(--on-win); }
-.band .bseg.near { background: var(--gold); color: var(--on-gold); }
-.band .bseg.bl { background: var(--loss); color: var(--on-loss); }
-.blegend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px;
-           color: var(--muted); }
-.blegend i.sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block;
-                margin-inline-end: 4px; vertical-align: middle; }
-.blegend i.opt { background: var(--win); } .blegend i.near { background: var(--gold); }
-.blegend i.bl { background: var(--loss); }
-.catrow { direction: rtl; }
-.catrow .dbar { direction: ltr; }
-.drill { border-top: 1px solid var(--line); }
-/* drill rows are data rows, not captions — keep the text tone and let the
-   accent chevron alone signal that they expand */
-.drill > summary { cursor: pointer; padding: 2px 0; color: var(--fg);
-                   font-weight: 400; }
-.drill > summary .catrow { margin: 5px 0; }
-.drill .drillbody { padding: 0 1.6em 6px; }
-/* #dash content rides directly on the green felt: its cards reset to their own
-   --fg, but the loading placeholder, the load-error line and the closing
-   footnote are loose text. Default #dash to the on-felt tone (and the footnote
-   to the muted on-felt tone) so they aren't dark-green-on-green — unreadable in
-   light mode. */
-#dash { color: var(--on-felt); }
-#dash .dtab > .footnote { color: var(--on-felt-muted); }
+/* ===== progress dashboard =====
+   Data ink is deliberately NOT --accent: in this app blue means "tappable"
+   (links, CTAs, .typebadge, the gloss buttons), so an accent-filled bar reads
+   as a control. Every colour below is a color-mix against --card/--fg, both of
+   which are already themed for light/dark plus the manual override, so dark
+   mode needs no parallel palette. */
+#dash {
+  --data:      color-mix(in srgb, var(--fg) 62%, var(--card));
+  --data-weak: color-mix(in srgb, var(--fg) 22%, var(--card));
+  --data-ci:   color-mix(in srgb, var(--fg) 16%, transparent);
+  color: var(--on-felt);
+}
+/* loose text rides on the green felt, where the card --muted is unreadable */
+#dash > .footnote, #dash > .dnote { color: var(--on-felt-muted); }
+
+/* ---- hero ---- */
+.hero { text-align: center; padding: 20px 16px 14px; }
+/* em, not px: the app's 3-step text scaling sets body font-size, so the hero
+   follows the user's choice for free. --fg ink, never the band colour: --gold
+   on white is ~1.9:1 and unreadable at display size -- the tone lives in the
+   chip instead, which uses the contrast-checked --on-* pairs. */
+.hero .hnum { font-size: 3.8em; font-weight: 800; line-height: .95;
+              letter-spacing: -.02em; color: var(--fg); }
+.hero .hnum.small { color: var(--muted); font-size: 2.6em; }
+.hero .hagg { display: inline-block; margin-top: 6px; border-radius: 999px;
+              padding: 4px 13px; font-size: 13px; font-weight: 700;
+              border: 0; font-family: inherit; cursor: pointer; }
+.hero .hagg.tone-win { background: var(--win); color: var(--on-win); }
+.hero .hagg.tone-gold { background: var(--gold); color: var(--on-gold); }
+.hero .hagg.tone-loss { background: var(--loss); color: var(--on-loss); }
+.hero .haggtxt { font-size: 13px; color: var(--muted); margin: 7px 0 0; }
+.hero .hsub { margin-top: 9px; font-size: 13px; color: var(--muted);
+              display: flex; flex-wrap: wrap; justify-content: center;
+              gap: 2px 13px; }
+.hero .hsub b { font-weight: 600; color: var(--fg);
+                font-variant-numeric: tabular-nums; }
+.hero .hdisc { font-size: 12px; color: var(--muted); margin: 9px 0 0;
+               line-height: 1.4; }
+/* the rail teaches the full 0-100 scale; the 62px numeral carries the
+   precision, so the rail's job is orientation, not discrimination */
+/* the interval band must read DARKER than the track it sits on, or the one
+   piece of uncertainty information on the hero disappears into its own rail */
+.rail { position: relative; height: 22px; margin: 14px 0 0;
+        border-radius: 7px;
+        background: color-mix(in srgb, var(--fg) 9%, var(--card)); }
+.rail > i { position: absolute; display: block; }
+/* A fill is legitimate HERE and not on the category rows: this rail runs the
+   full 0-100, so its length is a true proportion. Without it a lone marker on
+   an empty track reads as a slider handle rather than a position on a scale. */
+.rail .rfill { inset-inline-start: 0; top: 0; bottom: 0; border-radius: 7px;
+               background: color-mix(in srgb, var(--fg) 20%, var(--card)); }
+.rail .rlife { top: -3px; bottom: -3px; width: 2px; background: var(--muted); }
+.rail .rband { top: 5px; bottom: 5px; border-radius: 4px;
+               background: color-mix(in srgb, var(--fg) 30%, var(--card)); }
+.rail .rmark { top: 1px; bottom: 1px; width: 5px; border-radius: 3px;
+               background: var(--fg); box-shadow: 0 0 0 2px var(--card); }
+.railax { position: relative; height: 14px; margin-bottom: 2px; }
+.railax span { position: absolute; width: 3em; margin-inline-start: -1.5em;
+               text-align: center; font-size: 10px; color: var(--muted);
+               font-variant-numeric: tabular-nums; }
+.spark { display: block; width: 100%; height: auto; margin-top: 10px; }
+.trendline { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.trendline .up { color: var(--win); font-style: normal; }
+.trendline .down { color: var(--loss); font-style: normal; }
+
+/* ---- mix bar ---- */
+/* 14px, not 22px: a thick fully-saturated red/gold/green block was the
+   loudest object on the page. The 2px gap renders in the surface colour,
+   which IS the separator -- no inset shadow, i.e. no ink that isn't data.
+   Labels live in the key line below, never inside a segment (a small segment
+   used to clip its own text under min-width:0 + overflow:hidden). */
+.mix { display: flex; gap: 2px; height: 14px; border-radius: 99px;
+       overflow: hidden; background: var(--card); margin: 12px 0 6px; }
+.mix > i { display: block; min-width: 0; }
+.mix .s-ok { background: var(--win); }
+.mix .s-mid { background: var(--gold); }
+.mix .s-bad { background: var(--loss); }
+.mixkey { display: flex; flex-wrap: wrap; gap: 3px 13px; font-size: 12px;
+          color: var(--muted); justify-content: center; }
+.mixkey b { font-weight: 700; color: var(--fg);
+            font-variant-numeric: tabular-nums; }
+.mixkey .sw { width: 9px; height: 9px; border-radius: 3px;
+              display: inline-block; margin-inline-end: 5px;
+              vertical-align: middle; }
+.mixkey .sw.ok { background: var(--win); }
+.mixkey .sw.mid { background: var(--gold); }
+.mixkey .sw.bad { background: var(--loss); }
+
+/* ---- collapsible sections ---- */
+.dsec { background: var(--card); color: var(--fg); border-radius: 14px;
+        margin: 12px 0; box-shadow: 0 1px 3px #0003, 0 4px 14px #0000001f; }
+/* mirrors the .card rule: a drop shadow reads as grime on a dark surface */
+@media (prefers-color-scheme: dark) {
+  .dsec { border: 1px solid var(--line); box-shadow: none; }
+}
+html[data-theme="dark"] .dsec { border: 1px solid var(--line);
+                                box-shadow: none; }
+html[data-theme="light"] .dsec { border: 0;
+  box-shadow: 0 1px 3px #0003, 0 4px 14px #0000001f; }
+.dsec > summary { display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px; min-height: 52px; cursor: pointer; color: var(--fg);
+  font-size: 16px; font-weight: 700; list-style: none; }
+.dsec > summary::-webkit-details-marker { display: none; }
+/* the heading keeps the text tone -- it is a heading, not a link. The accent
+   chevron alone signals that it expands. */
+.dsec > summary::before { content: "\\25C2"; color: var(--accent);
+                          font-size: 11px; flex: 0 0 auto; }
+.dsec[open] > summary::before { content: "\\25BE"; }
+.dsec > summary:focus-visible { border-radius: 14px; }
+.dsec.empty > summary { color: var(--muted); cursor: default; }
+.dsec.empty > summary::before { color: var(--muted); }
+.dsum { margin-inline-start: auto; font-size: 13px; font-weight: 600;
+        color: var(--muted); font-variant-numeric: tabular-nums;
+        text-align: end; }
+.dsec > .dbody { padding: 0 16px 16px; }
+.dsub { border-top: 1px solid var(--line); }
+.dsub > summary { display: flex; align-items: center; gap: 8px;
+  padding: 11px 0; min-height: 44px; font-size: 14px; font-weight: 600;
+  color: var(--fg); list-style: none; cursor: pointer; }
+.dsub > summary::-webkit-details-marker { display: none; }
+.dsub > summary::before { content: "\\25C2"; color: var(--accent);
+                          font-size: 10px; }
+.dsub[open] > summary::before { content: "\\25BE"; }
+.dsub > .dbody { padding: 0 0 10px; }
+.subh { font-weight: 700; margin: 13px 0 3px; font-size: 13px; }
+
+/* ---- category rows: dot + interval on a 40-100 domain ---- */
+/* A bar could not do this job. A mean panel score essentially never leaves
+   ~60-95, so a 0-100 bar renders a 78 and a 90 almost identically -- but
+   rescaling a BAR to start at 40 would misstate the ratios, because a bar's
+   length IS its encoding. A dot is a position mark, and position on a
+   non-zero domain is legitimate. The track is therefore an AXIS, not a bar:
+   1px, uniform width on every row, so no length comparison is possible. */
+.rrow { display: grid; grid-template-columns: 8.2em 1fr 2.6em 2.2em;
+        gap: 9px; align-items: center; margin: 11px 0; font-size: 13px; }
+.rlbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtrack { position: relative; height: 12px; }
+.rtrack::before { content: ""; position: absolute; inset-inline: 0; top: 5.5px;
+                  height: 1px; background: var(--data-weak); }
+.rtrack > i { position: absolute; display: block; }
+.rtrack .rtick { top: 2px; height: 8px; width: 1px;
+                 background: var(--data-weak); }
+.rtrack .rthr { top: 0; height: 12px; width: 1px; background: var(--muted);
+                opacity: .5; }
+.rtrack .rci { top: 4.5px; height: 3px; border-radius: 2px;
+               background: var(--data-ci); }
+.rtrack .rdot { top: 1px; width: 10px; height: 10px; margin-inline-start: -5px;
+                border-radius: 50%; background: var(--data);
+                box-shadow: 0 0 0 2px var(--card); }
+/* n < 12: a mean with no interval shown -- hollow, so "provisional" reads
+   without relying on colour or on text */
+.rtrack .rdot.thin { background: var(--card);
+                     box-shadow: 0 0 0 2px var(--card),
+                                 inset 0 0 0 2px var(--data); }
+.rrow.low .rdot { background: var(--loss); }
+.rrow.low .rdot.thin { box-shadow: 0 0 0 2px var(--card),
+                                   inset 0 0 0 2px var(--loss); }
+.rtrack .runder { top: 0; inset-inline-start: 0; color: var(--loss);
+                  font-size: 11px; line-height: 12px; font-style: normal; }
+.rval { text-align: end; font-weight: 600;
+        font-variant-numeric: tabular-nums; }
+.rn { text-align: end; color: var(--muted); font-size: 11px;
+      font-variant-numeric: tabular-nums; }
+.rcap { font-size: 11px; color: var(--muted); margin: 2px 0 8px;
+        display: grid; grid-template-columns: 8.2em 1fr 2.6em 2.2em; gap: 9px; }
+.rcap .ax { position: relative; height: 1.2em; }
+.rcap .ax span { position: absolute; margin-inline-start: -1em; width: 2em;
+                 text-align: center; font-variant-numeric: tabular-nums; }
+.rmore { font-size: 12px; color: var(--muted); margin-top: 9px; }
+
+/* ---- misc rows ---- */
+.mrow { display: flex; align-items: center; gap: 10px; padding: 10px 0;
+        min-height: 44px; border-top: 1px solid var(--line);
+        color: inherit; text-decoration: none; }
+.mrow:first-child { border-top: 0; }
+.mrow .mtxt { flex: 1; font-size: 13px; min-width: 0; }
+.mrow .go { color: var(--accent); font-weight: 700; flex: 0 0 auto;
+            white-space: nowrap; }
+.patlist { list-style: none; margin: 0; padding: 0; }
+.patlist li { padding: 10px 0; border-top: 1px solid var(--line);
+              font-size: 13px; line-height: 1.5; }
+.patlist li:first-child { border-top: 0; }
+.bandtab { width: 100%; border-collapse: collapse; font-size: 13px;
+           margin-top: 8px; }
+.bandtab td { padding: 5px 0; border-top: 1px solid var(--line);
+              vertical-align: baseline; }
+.bandtab td.sc { font-variant-numeric: tabular-nums; color: var(--muted);
+                 text-align: end; white-space: nowrap; }
+.bandtab i.sw { width: 10px; height: 10px; border-radius: 3px;
+                display: inline-block; margin-inline-end: 6px; }
+/* the zone tints are decorative reinforcement; numbers and labels carry the
+   meaning, so drop them rather than fight the forced palette */
+@media (forced-colors: active) {
+  .rail .rband, .rtrack .rci, .rtrack .rtick { display: none; }
+  .rail .rmark, .rtrack .rdot { background: CanvasText; }
+}
 """
 
 _DASHBOARD_JS = r"""
-const MIN_N = 5, MIN_TREND = 8;
-// cost-line units differ by scenario AND, for leads, by training mode
-// (MP costs are tricks below best; IMP costs are IMPs below best). The
-// distribution band itself groups by the panel score, not by raw cost.
-const COST = { bidding: {unit: "IMP"}, lead: {unit: "לקיחה"},
-               leadIMP: {unit: "IMP"} };
+/* ===== progress dashboard =====
+   One hero number; everything else behind a labelled, collapsed heading whose
+   summary already carries the payoff value. Design notes and the reasoning
+   behind the statistics live in docs/dashboard_redesign_plan.md. */
+const MIN_N = 5;         // a mean appears
+const MIN_CI = 12;       // an interval appears, and the cell may drive advice
+const MIN_LABEL = 20;    // a cell may be NAMED the weakest
+const MIN_TREND = 20;    // the trend slope appears
+const HERO_WIN = 5 * SESSION_SIZE;   // hero window: 50 first attempts
+const TREND_WIN = 100;   // slope is fitted over at most this many
+const DOM_LO = 40;       // category-row domain floor (= ERROR_MIN)
+const H_FLOOR = 2;       // DISPLAY guard only: never print "76-76"
+const OPEN_KEY = "bt_dash_open", AGG_KEY = "bt_dash_agg";
 const SUIT_NAME = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
-const RANKS = "AKQJT98765432";
 function num(x) { return typeof x === "number" ? x : (parseFloat(x) || 0); }
+/* Hebrew number agreement: a bare "1 בעיות" reads as broken Hebrew, and these
+   counts legitimately reach 1 on a new account and in sparse categories. */
+function nProblems(n) { return n === 1 ? "בעיה אחת" : n + " בעיות"; }
+function nDecisions(n) { return n === 1 ? "החלטה אחת" : n + " החלטות"; }
+function mean(xs) { return xs.reduce((s, x) => s + x, 0) / xs.length; }
 function median(xs) {
   if (!xs.length) return 0;
   const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
   return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
 }
-/* mean panel score with a 95% CI on the mean (replaces the Wilson
-   proportion — the aggregate is now an average of 0-100 scores) */
+/* Mean panel score with a 95% interval on the mean. Uses the t multiplier,
+   not 1.96: sd is ESTIMATED from the sample, and at small n the normal
+   multiplier makes the interval far too narrow (it covered ~87% while
+   claiming 95%). No variance floor -- flooring sd was cosmetic, it changed
+   coverage by less than a decimal. Instead no interval at all is SHOWN below
+   MIN_CI (see rowHtml): an honest absence beats a fabricated width. */
 function meanCI(xs) {
-  const n = xs.length;
-  const m = xs.reduce((s, x) => s + x, 0) / n;
+  const n = xs.length, m = mean(xs);
   const sd = n > 1
     ? Math.sqrt(xs.reduce((s, x) => s + (x - m) * (x - m), 0) / (n - 1)) : 0;
-  const h = 1.96 * sd / Math.sqrt(n);
-  return {m, lo: Math.max(0, m - h), hi: Math.min(100, m + h)};
+  const h = n > 1 ? Math.max(btT95(n - 1) * sd / Math.sqrt(n), H_FLOOR) : null;
+  return {m, sd, n, h,
+          lo: h === null ? m : Math.max(0, m - h),
+          hi: h === null ? m : Math.min(100, m + h)};
 }
 function tsMillis(a) {
   if (!a || !a.ts) return 0;
@@ -3565,129 +3836,578 @@ function tsMillis(a) {
   if (a.ts.seconds) return a.ts.seconds * 1000;
   return 0;
 }
-// Order first-attempts by their FIRST-attempt time. A re-answer now bumps `ts`
-// (so incremental cross-device sync notices attemptCount updates — DB-M-9), but
-// `firstTs` is written once at the first attempt and never moves. Fall back to
-// `ts` for legacy docs that predate firstTs — there `ts` is still the first
-// attempt's time, so ordering is unchanged for them.
+/* Order first-attempts by their FIRST-attempt time. A re-answer bumps `ts`
+   (so incremental cross-device sync notices attemptCount updates -- DB-M-9),
+   but `firstTs` is written once and never moves. Fall back to `ts` for legacy
+   docs that predate firstTs -- there `ts` IS the first attempt's time. */
 function firstMs(a) { return tsMillis(a && a.firstTs ? {ts: a.firstTs} : a); }
-// Ids still present in the pool index; attempts whose problem was deleted are
-// marked "removed" instead of linking to a dead page (DB-M-9). null = unknown
-// (index unavailable) -> treat every attempt as live, as before.
+/* Ids still present in the pool index; attempts whose problem was deleted are
+   marked "removed" instead of linking to a dead page (DB-M-9). null = unknown
+   (index unavailable) -> treat every attempt as live, as before. */
 let LIVE_IDS = null;
-function row(label, scores) {
-  const n = scores.length;
-  if (n < MIN_N)
-    return `<div class="catrow"><span>${label}</span>` +
-      `<span class="muted">אין מספיק נתונים</span>` +
-      `<span class="muted">n=${n}</span></div>`;
-  const c = meanCI(scores);
-  return `<div class="catrow"><span>${label}</span>` +
-    `<span class="dbar"><span style="width:${c.m}%"></span></span>` +
-    `<span>${Math.round(c.m)} <span class="muted">(${Math.round(c.lo)}–` +
-    `${Math.round(c.hi)}, n=${n})</span></span></div>`;
+let POOL_BY_TYPE = null;   // pool counts per problem type, for coverage
+
+/* ---- fixed-slot open/closed state -------------------------------------- */
+function loadOpen() {
+  try { return new Set(JSON.parse(localStorage.getItem(OPEN_KEY)) || []); }
+  catch (e) { return new Set(); }
 }
-function diffRows(list) {
-  const by = {};
-  list.forEach(a => { const d = a.difficultyLevel || 0;
-    (by[d] ??= []).push(btScoreOfAttempt(a)); });
-  const out = [1, 2, 3, 4, 5].filter(d => by[d])
-    .map(d => row(DIFF_NAMES[d] || ("רמה " + d), by[d])).join("");
-  return out || '<div class="muted">אין נתונים</div>';
+function saveOpen(set) {
+  try { localStorage.setItem(OPEN_KEY, JSON.stringify([...set])); }
+  catch (e) { /* private mode */ }
 }
-function typeRows(list) {
-  const by = {};
-  list.forEach(a => { const t = a.type || "—";
-    (by[t] ??= []).push(btScoreOfAttempt(a)); });
-  const es = Object.entries(by).sort((a, b) => b[1].length - a[1].length);
-  return es.length
-    ? es.map(([t, s]) => row((TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t, s)).join("")
-    : '<div class="muted">אין נתונים</div>';
+
+/* ---- the score bar chart: dot + interval on a clipped domain ------------
+   The track is an AXIS (a 1px rule of uniform width on every row), not a
+   bar, so nothing invites a length comparison across rows. */
+function pct(score) {
+  return btClamp((score - DOM_LO) / (100 - DOM_LO) * 100, 0, 100);
 }
-function costBand(list, kind) {
-  const cfg = COST[kind] || COST.bidding, n = list.length;
-  if (!n) return "";
-  let opt = 0, near = 0, bl = 0; const costs = [];
-  list.forEach(a => { costs.push(num(a.gradedCost));
-    const sc = btScoreOfAttempt(a);
-    if (sc >= REVIEW_MIN) opt++; else if (sc >= ERROR_MIN) near++; else bl++; });
-  const mean = costs.reduce((s, c) => s + c, 0) / n, med = median(costs), u = cfg.unit;
-  const seg = (cls, v) => v
-    ? `<span class="bseg ${cls}" style="width:${(v / n * 100).toFixed(1)}%">` +
-      `${Math.round(v / n * 100)}%</span>` : "";
-  const uHtml = u === "IMP" ? glossHtml("imp", "IMP") : u;
-  return `<div class="costline">ממוצע <b>${mean.toFixed(1)}</b> ${uHtml} מתחת למיטבי ` +
-    `<span class="muted">(חציון ${med.toFixed(1)})</span></div>` +
-    `<div class="band" role="img" aria-label="מיטבי או קרוב ${opt}, סטייה ${near}, ` +
-    `כשל ${bl} מתוך ${n}">` + seg("opt", opt) + seg("near", near) + seg("bl", bl) +
-    '</div><div class="blegend">' +
-    '<span><i class="sw opt"></i>מיטבי או קרוב (ציון 85+)</span>' +
-    '<span><i class="sw near"></i>סטייה (40–84)</span>' +
-    '<span><i class="sw bl"></i>כשל (0–39)</span></div>';
+function axisCapHtml(cols) {
+  return '<div class="rcap"><span>' + cols + '</span><span class="ax">' +
+    [DOM_LO, REVIEW_MIN, 100].map(v =>
+      `<span style="inset-inline-start:${pct(v)}%">${v}</span>`).join("") +
+    '</span><span></span><span></span></div>';
 }
-function suitRows(list) {
-  const suits = {S: {all: [], c: {}}, H: {all: [], c: {}},
-                 D: {all: [], c: {}}, C: {all: [], c: {}}};
-  list.forEach(a => { const card = a.chosenCall || "", st = card[0], s = suits[st];
-    if (!s) return;
-    const sc = btScoreOfAttempt(a);
-    s.all.push(sc);
-    (s.c[card] ??= []).push(sc); });
-  const order = ["S", "H", "D", "C"].filter(st => suits[st].all.length);
-  if (!order.length) return '<div class="muted">אין נתונים</div>';
-  return order.map(st => {
-    const s = suits[st], label = suitHtml(st) + " " + SUIT_NAME[st];
-    const cards = Object.keys(s.c)
-      .sort((a, b) => RANKS.indexOf(a[1]) - RANKS.indexOf(b[1]))
-      .map(c => row(cardHtml(c), s.c[c])).join("");
-    return '<details class="drill"><summary>' + row(label, s.all) + '</summary>' +
-      '<div class="drillbody">' + cards + '</div></details>';
-  }).join("");
-}
-function scenarioCard(title, list, kind, costKey) {
-  if (!list.length) return "";
-  const cfg = COST[costKey || kind] || COST.bidding;
-  let html = '<div class="card scen"><b>' + title + '</b> ' +
-    '<span class="muted">' + (kind === "lead" && cfg.unit !== "IMP"
-      ? "לקיחות" : glossHtml("imp", "IMP")) +
-    ' · n=' + list.length + '</span>' +
-    costBand(list, costKey || kind) +
-    '<div class="subh">לפי דרגת קושי</div>' + diffRows(list);
-  if (kind === "lead") {
-    html += '<div class="subh">לפי סוג חוזה</div>' + typeRows(list) +
-      '<div class="subh">לפי סדרת ההובלה</div>' + suitRows(list) +
-      '<div class="muted" style="font-size:12px;margin-top:4px">' +
-      'הקש סדרה כדי לראות את הקלפים.</div>';
-  } else {
-    html += '<div class="subh">לפי סוג בעיה</div>' + typeRows(list);
+function rowHtml(label, scores, opts) {
+  const o = opts || {}, n = scores.length;
+  if (n < MIN_N) return "";
+  const c = meanCI(scores), m = Math.round(c.m);
+  const showCI = n >= MIN_CI;
+  let marks = [DOM_LO, 100].map(v =>
+    `<i class="rtick" style="inset-inline-start:${pct(v)}%"></i>`).join("") +
+    `<i class="rthr" style="inset-inline-start:${pct(REVIEW_MIN)}%"></i>`;
+  if (showCI) {
+    const lo = pct(c.lo), hi = pct(c.hi);
+    marks += `<i class="rci" style="inset-inline-start:${lo}%;` +
+             `width:${Math.max(0, hi - lo)}%"></i>`;
   }
-  return html + '</div>';
+  marks += c.m < DOM_LO
+    ? '<i class="runder">◂</i>'
+    : `<i class="rdot${showCI ? "" : " thin"}" ` +
+      `style="inset-inline-start:${pct(c.m)}%"></i>`;
+  return `<div class="rrow${c.m < NEAR_MIN ? " low" : ""}">` +
+    `<span class="rlbl">${label}</span>` +
+    `<span class="rtrack" role="img" aria-label="ציון ${m}` +
+      (showCI ? `, טווח ${Math.round(c.lo)} עד ${Math.round(c.hi)}` : "") +
+      `, ${nDecisions(n)}">${marks}</span>` +
+    `<span class="rval">${m}</span><span class="rn">${n}</span></div>`;
 }
-function weakArea(scen) {
+/* Rows for one breakdown, plus one aggregate line for everything too sparse
+   to score. Returns null when no cell qualifies, so the caller can skip the
+   whole sub-section instead of shipping a heading whose payoff is "no data". */
+function rowGroup(groups, opts) {
+  const rows = [], thin = [];
+  for (const g of groups) {
+    if (g.scores.length >= MIN_N) rows.push({g, html: rowHtml(g.label, g.scores, opts)});
+    else if (g.scores.length) thin.push(g);
+  }
+  if (!rows.length && !thin.length) return null;
+  let html = rows.length ? axisCapHtml(opts && opts.cols || "נושא") : "";
+  html += rows.map(r => r.html).join("");
+  if (thin.length)
+    html += `<div class="rmore">עוד ${thin.length} ` +
+      (thin.length === 1 ? "נושא" : "נושאים") +
+      ` עם פחות מ-${MIN_N} החלטות — עדיין ללא ציון.</div>`;
+  if (!rows.length) return {html, worst: null, any: false};
   let worst = null;
-  const mean = xs => xs.reduce((s, x) => s + x, 0) / xs.length;
-  const bt = {};
-  scen.bidding.forEach(a => { const t = a.type; if (!t) return;
-    (bt[t] ??= []).push(btScoreOfAttempt(a)); });
-  for (const [t, xs] of Object.entries(bt)) if (xs.length >= MIN_N) {
-    const m = mean(xs);
-    if (!worst || m < worst.m) worst = {m, kind: "bidding",
-      label: (TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t,
-      href: "index.html?kind=bidding&type=" + t};
+  for (const r of rows) {
+    const m = mean(r.g.scores);
+    if (!worst || m < worst.m) worst = {m, label: r.g.label, n: r.g.scores.length};
   }
-  const ld = {};
-  scen.lead.forEach(a => { const d = a.difficultyLevel; if (!d) return;
-    (ld[d] ??= []).push(btScoreOfAttempt(a)); });
-  for (const [d, xs] of Object.entries(ld)) if (xs.length >= MIN_N) {
-    const m = mean(xs);
-    if (!worst || m < worst.m) worst = {m, kind: "lead",
-      label: "הובלה — " + (DIFF_NAMES[d] || d),
-      href: "index.html?kind=lead&lv=" + d};
-  }
-  return worst;
+  return {html, worst, any: true};
 }
+function worstSum(g) {
+  if (!g || !g.worst) return "";
+  const w = g.worst;
+  // the wording carries the epistemic status: only a well-sampled cell earns
+  // the word "weakest"
+  const lead = w.n >= MIN_LABEL ? "החלש ביותר" : "הנמוך עד כה";
+  return `${lead}: ${w.label} ${Math.round(w.m)}`;
+}
+
+/* ---- grouping helpers -------------------------------------------------- */
+function byType(list) {
+  const by = new Map();
+  for (const a of list) {
+    const t = a.type;
+    if (!t) continue;
+    if (!by.has(t)) by.set(t, []);
+    by.get(t).push(btScoreOfAttempt(a));
+  }
+  return [...by.entries()]
+    .sort((x, y) => y[1].length - x[1].length)
+    .map(([t, scores]) => ({key: t, label: typeLabel(t), scores}));
+}
+function typeLabel(t) { return (TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t; }
+function byDiff(list) {
+  const by = {};
+  for (const a of list) {
+    const d = a.difficultyLevel;
+    if (!d) continue;
+    (by[d] ??= []).push(btScoreOfAttempt(a));
+  }
+  return [1, 2, 3, 4, 5].filter(d => by[d])
+    .map(d => ({key: String(d), label: DIFF_NAMES[d] || ("רמה " + d),
+                scores: by[d]}));
+}
+
+/* ---- empirical-Bayes shrinkage for "what should I practise" ------------
+   Ranking ~15 small samples and taking the minimum is the batting-average
+   problem: the argmin is usually the noisiest cell, not the weakest. A
+   one-sided SE haircut applied once does not fix that (it still names a false
+   weakness on roughly 40% of null category sets). So shrink each category
+   mean toward the overall mean by n/(n+k), with k estimated from the observed
+   between- vs within-category variance, and rank -- and DISPLAY -- the shrunk
+   value. With no real signal every cell collapses to the overall mean and the
+   fallback ladder fires; a genuine hole at decent n survives. */
+function shrink(groups, overall) {
+  const elig = groups.filter(g => g.scores.length >= MIN_N);
+  if (elig.length < 2) return [];
+  let wss = 0, wdf = 0;
+  for (const g of elig) {
+    const m = mean(g.scores);
+    for (const s of g.scores) wss += (s - m) * (s - m);
+    wdf += g.scores.length - 1;
+  }
+  const within = wdf > 0 ? wss / wdf : 0;          // pooled within-cell var
+  const ms = elig.map(g => mean(g.scores));
+  const gm = mean(ms);
+  const spread = elig.length > 1
+    ? ms.reduce((s, m) => s + (m - gm) * (m - gm), 0) / (elig.length - 1) : 0;
+  const noise = mean(elig.map(g => within / g.scores.length));
+  const between = Math.max(0, spread - noise);     // real variance between
+  const k = between > 0 ? within / between : Infinity;
+  return elig.map(g => {
+    const n = g.scores.length, raw = mean(g.scores);
+    const w = k === Infinity ? 0 : n / (n + k);
+    return {...g, n, raw, adj: overall + w * (raw - overall), weight: w,
+            diffMean: g.diffMean};
+  });
+}
+
+/* ---- pattern detectors -------------------------------------------------
+   Three ship. A fourth ("leads passively from own longest suit") needs the
+   player's hand, which no attempt document stores. */
+function patterns(first) {
+  const out = [];
+  const bid = first.filter(a => (a.kind || "bidding") !== "lead");
+  const lead = first.filter(a => a.kind === "lead");
+  // 1. pass bias -- exact, no height arithmetic and no exclusions
+  let passive = 0, pushy = 0;
+  for (const a of bid) {
+    const acc = a.acceptedSet || [];
+    if (a.chosenCall === "P" && !acc.includes("P")) passive++;
+    else if (a.chosenCall !== "P" && acc.includes("P")) pushy++;
+  }
+  if (passive + pushy >= 8 && Math.max(passive, pushy) >= 2 * Math.min(passive, pushy))
+    out.push(passive > pushy
+      ? {w: passive, txt: `מ-${passive + pushy} טעויות הכרזה שבהן פאס היה ` +
+         `הגורם המבדיל, ב-${passive} פאסת כשהיה צריך להכריז. אתה נוטה לפאסיביות.`}
+      : {w: pushy, txt: `מ-${passive + pushy} טעויות הכרזה שבהן פאס היה ` +
+         `הגורם המבדיל, ב-${pushy} הכרזת כשפאס היה המיטבי. אתה נוטה להיכנס יותר מדי.`});
+  // 2. lead: wrong suit vs wrong card. Tested against acceptedSet, not a
+  // single recommended card -- acceptedSet can span several suits, and using
+  // one card would misfile right-suit-wrong-card and INVERT the finding.
+  let wrongSuit = 0, wrongCard = 0;
+  for (const a of lead) {
+    if (btScoreOfAttempt(a) >= 100) continue;
+    const acc = a.acceptedSet || [];
+    if (!acc.length || !a.chosenCall) continue;
+    if (acc.some(c => c[0] === a.chosenCall[0])) wrongCard++; else wrongSuit++;
+  }
+  if (wrongSuit + wrongCard >= 12)
+    out.push({w: Math.max(wrongSuit, wrongCard),
+      txt: `מ-${wrongSuit + wrongCard} טעויות הובלה, ב-${wrongSuit} בחרת את ` +
+        `הסדרה הלא נכונה וב-${wrongCard} את הקלף הלא נכון בסדרה הנכונה. ` +
+        (wrongSuit > wrongCard ? "בחירת הסדרה היא הבעיה, לא הטכניקה."
+                               : "בחירת הסדרה טובה — חדד את הקלף בתוך הסדרה.")});
+  // 3. bidding height. bidHeight() returns null for P/X/XX, so those attempts
+  // drop out of the comparison rather than being counted as overbids.
+  let high = 0, low = 0;
+  for (const a of bid) {
+    if (btScoreOfAttempt(a) >= 100) continue;
+    const acc = a.acceptedSet || [];
+    if (acc.length !== 1) continue;
+    const mine = bidHeight(a.chosenCall), best = bidHeight(acc[0]);
+    if (mine === null || best === null) continue;
+    if (mine > best) high++; else if (mine < best) low++;
+  }
+  const hl = high + low;
+  if (hl >= 15 && Math.max(high, low) / hl >= 0.65)
+    out.push({w: Math.max(high, low),
+      txt: high > low
+        ? `מ-${hl} טעויות הכרזה שניתן להשוות בגובה, ב-${high} הכרזת גבוה ` +
+          `מהמיטבי. אתה נוטה להגזים בהכרזה.`
+        : `מ-${hl} טעויות הכרזה שניתן להשוות בגובה, ב-${low} הכרזת נמוך ` +
+          `מהמיטבי. אתה נוטה להיות שמרן מדי.`});
+  // 4. difficulty cliff
+  const easy = first.filter(a => a.difficultyLevel && a.difficultyLevel <= 3)
+    .map(btScoreOfAttempt);
+  const hard = first.filter(a => a.difficultyLevel && a.difficultyLevel >= 4)
+    .map(btScoreOfAttempt);
+  if (easy.length >= MIN_CI && hard.length >= MIN_CI) {
+    const de = mean(easy), dh = mean(hard);
+    if (de - dh > 12)
+      out.push({w: Math.round(de - dh),
+        txt: `על בעיות קלות ובינוניות הציון שלך ${Math.round(de)} ` +
+          `(${nProblems(easy.length)}), ועל מאתגרות ומעלה ${Math.round(dh)} ` +
+          `(${nProblems(hard.length)}).`});
+    else if (dh - de > 6)
+      out.push({w: Math.round(dh - de),
+        txt: `דווקא על הבעיות הקלות הציון שלך ${Math.round(de)}, ` +
+          `מול ${Math.round(dh)} על הקשות — שווה לבדוק חיפזון.`});
+  }
+  return out.sort((a, b) => b.w - a.w);
+}
+
+/* ---- trend: OLS slope, not a window-vs-window comparison ---------------
+   Comparing two rolling windows by CI non-overlap is about alpha=0.005, so a
+   real 10-point gain -- months of work -- would be acknowledged less than
+   half the time while the caption asserted flatness. A slope over every point
+   in the last TREND_WIN uses all the data, needs no window pairing, and says
+   something more useful than an arrow. */
+function trendOf(chrono) {
+  const xs = chrono.slice(-TREND_WIN);
+  const n = xs.length;
+  if (n < MIN_TREND) return null;
+  const ys = xs.map(btScoreOfAttempt);
+  const mx = (n - 1) / 2, my = mean(ys);
+  let sxy = 0, sxx = 0;
+  for (let i = 0; i < n; i++) { sxy += (i - mx) * (ys[i] - my); sxx += (i - mx) * (i - mx); }
+  const b = sxx > 0 ? sxy / sxx : 0;
+  let sse = 0;
+  for (let i = 0; i < n; i++) {
+    const fit = my + b * (i - mx);
+    sse += (ys[i] - fit) * (ys[i] - fit);
+  }
+  const se = n > 2 && sxx > 0 ? Math.sqrt(sse / (n - 2) / sxx) : Infinity;
+  const h = btT95(n - 2) * se;
+  return {n, per100: b * 100, lo: (b - h) * 100, hi: (b + h) * 100,
+          sig: se !== Infinity && (b - h) * (b + h) > 0, ys};
+}
+function sparkHtml(tr) {
+  const ys = tr.ys, n = ys.length;
+  // rolling mean, so the line shows level rather than per-answer noise
+  const win = Math.max(8, Math.min(20, Math.round(n / 2)));
+  const roll = ys.map((_, i) => {
+    const lo = Math.max(0, i - win + 1);
+    return mean(ys.slice(lo, i + 1));
+  });
+  // padded dynamic domain with a minimum span, so a genuinely stable player
+  // gets a flat line instead of amplified noise
+  let lo = Math.min(...roll) - 5, hi = Math.max(...roll) + 5;
+  if (hi - lo < 20) { const c = (hi + lo) / 2; lo = c - 10; hi = c + 10; }
+  lo = Math.max(0, lo); hi = Math.min(100, hi);
+  const W = 300, H = 44, span = hi - lo || 1;
+  const y = v => H - (v - lo) / span * H;
+  const step = roll.length > 1 ? W / (roll.length - 1) : W;
+  const path = roll.map((v, i) =>
+    `${i ? "L" : "M"}${(i * step).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  const thr = REVIEW_MIN >= lo && REVIEW_MIN <= hi
+    ? `<line x1="0" y1="${y(REVIEW_MIN).toFixed(1)}" x2="${W}" ` +
+      `y2="${y(REVIEW_MIN).toFixed(1)}" stroke="var(--line)" stroke-width="1" ` +
+      'vector-effect="non-scaling-stroke"></line>' : "";
+  const last = roll[roll.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" dir="ltr" role="img" ` +
+    `aria-label="מגמת הציון על ${n} ההחלטות האחרונות">` + thr +
+    `<path d="${path}" fill="none" stroke="var(--data)" stroke-width="2" ` +
+    'stroke-linejoin="round" stroke-linecap="round" ' +
+    'vector-effect="non-scaling-stroke"></path>' +
+    `<circle cx="${W}" cy="${y(last).toFixed(1)}" r="4" fill="var(--data)" ` +
+    'stroke="var(--card)" stroke-width="2"></circle></svg>';
+}
+
+/* ---- hero -------------------------------------------------------------- */
+function heroHtml(scored, legacyN) {
+  const n = scored.length;
+  const chrono = [...scored].sort((a, b) => firstMs(a) - firstMs(b));
+  const win = chrono.slice(-HERO_WIN);
+  const ws = win.map(btScoreOfAttempt);
+  const c = meanCI(ws), m = Math.round(c.m);
+  const lifetime = mean(chrono.map(btScoreOfAttempt));
+  const small = win.length < MIN_N;
+  // label hysteresis: a stationary player's label otherwise flips on ~10% of
+  // sessions (16% near an edge). Only cross a bucket edge by the interval's
+  // own half-width, else keep the label already shown.
+  let idx = btAggOf(c.m);
+  try {
+    const prev = JSON.parse(localStorage.getItem(AGG_KEY));
+    if (prev && typeof prev.i === "number" && prev.i !== idx && c.h) {
+      const edge = idx < prev.i ? AGG_MIN[idx] : AGG_MIN[prev.i];
+      if (Math.abs(c.m - edge) < c.h) idx = prev.i;
+    }
+    if (!small && win.length >= MIN_CI)
+      localStorage.setItem(AGG_KEY, JSON.stringify({i: idx}));
+  } catch (e) { /* private mode */ }
+  const agg = AGG_HE[idx];
+  const showAgg = !small && win.length >= MIN_CI;
+  // scope, difficulty mix and scenario mix are all disclosures, not decoration:
+  // min(50, n) silently changes what the number MEANS, the score does not
+  // normalise for how hard the winner is to find, and the three scenarios are
+  // graded on three different taus.
+  const scope = win.length >= HERO_WIN
+    ? `על ${HERO_WIN} הבעיות האחרונות`
+    : `על כל ${nProblems(win.length)} שפתרת`;
+  const dls = win.filter(a => a.difficultyLevel > 0);
+  const dmix = dls.length >= win.length * 0.8
+    ? `${glossHtml("diff", "ממוצע קושי")} ${mean(dls.map(a => +a.difficultyLevel)).toFixed(1)}`
+    : "";
+  const nLead = win.filter(a => a.kind === "lead").length;
+  const smix = win.length
+    ? `${Math.round((win.length - nLead) / win.length * 100)}% הכרזה · ` +
+      `${Math.round(nLead / win.length * 100)}% הובלה` : "";
+  const blunders = ws.filter(s => s < ERROR_MIN).length;
+  // the RATE, not a run: a blunder-free run length is geometric, so its sd
+  // equals its mean -- the noisiest number on the page, dressed as an integer
+  const bl = `${glossHtml("blunders", "טעויות חמורות")} ${blunders} ` +
+             `מתוך ${win.length}`;
+  const ok = ws.filter(s => s >= REVIEW_MIN).length;
+  const mid = ws.filter(s => s >= ERROR_MIN && s < REVIEW_MIN).length;
+  const tr = trendOf(chrono);
+  let trendHtml = "";
+  if (tr) {
+    const d = tr.per100, arrow = tr.sig
+      ? (d > 0 ? '<i class="up">▲</i> ' : '<i class="down">▼</i> ') : "";
+    trendHtml = sparkHtml(tr) + '<div class="trendline">' +
+      glossHtml("sig", "מגמה") + " · " + arrow +
+      (tr.sig
+        ? `${d > 0 ? "+" : ""}${d.toFixed(0)} נקודות ל-100 בעיות ` +
+          `<span class="ltr">(${tr.lo.toFixed(0)}–${tr.hi.toFixed(0)})</span>`
+        : "עוד לא מספיק נתונים כדי לזהות מגמה") + '</div>';
+  }
+  return '<div class="card hero">' +
+    `<div class="hnum${small ? " small" : ""}">${small ? "—" : m}</div>` +
+    (showAgg
+      ? `<button type="button" class="hagg tone-${agg[1]}" data-gloss="agg">` +
+        `${agg[0]}</button><div class="haggtxt">${agg[2]}</div>`
+      : `<div class="haggtxt">מדגם קטן — עוד לא מוצג דירוג שיפוט</div>`) +
+    '<div class="railax">' + [0, DOM_LO, REVIEW_MIN, 100].map(v =>
+      `<span style="inset-inline-start:${v}%">${v}</span>`).join("") + '</div>' +
+    `<div class="rail" role="img" aria-label="ציון ממוצע ${m} מתוך 100">` +
+      (small ? "" : `<i class="rfill" style="width:${btClamp(c.m, 0, 100)}%"></i>`) +
+      (c.h !== null
+        ? `<i class="rband" style="inset-inline-start:${c.lo}%;` +
+          `width:${Math.max(0, c.hi - c.lo)}%"></i>` : "") +
+      `<i class="rlife" style="inset-inline-start:${btClamp(lifetime, 0, 100)}%"></i>` +
+      (small ? "" : `<i class="rmark" style="inset-inline-start:${btClamp(c.m, 0, 100)}%"></i>`) +
+    '</div>' +
+    '<div class="hsub">' +
+      `<span>${glossHtml("form", "הטופס הנוכחי")} ${scope}</span>` +
+      (c.h !== null
+        ? `<span>${glossHtml("ci", "טווח סביר")} ` +
+          `<b class="ltr">${Math.round(c.lo)}–${Math.round(c.hi)}</b></span>` : "") +
+      (dmix ? `<span>${dmix}</span>` : "") +
+      (smix ? `<span>${smix}</span>` : "") +
+      `<span>${bl}</span>` +
+    '</div>' +
+    mixHtml(ok, mid, blunders, win.length) +
+    trendHtml +
+    '<div class="hdisc">' + glossHtml("panel", "ציון ממוצע") +
+    ' 0–100. הציון מודד את בחירותיך מול פתרון המנוע על הבעיות שפתרת ' +
+    '— לא מול שחקנים אחרים. ' + glossHtml("firstonly", "ניסיון ראשון") +
+    ' בלבד.' +
+    (legacyN
+      ? ` ${glossHtml("legacy", "לא נכללות")} ${nProblems(legacyN)} שנפתרו לפני ` +
+        `עדכון שיטת הציון.` : "") +
+    '</div></div>';
+}
+function mixHtml(ok, mid, bad, n) {
+  if (!n) return "";
+  const p = v => Math.round(v / n * 100);
+  const seg = (cls, v) => v ? `<i class="s-${cls}" style="flex:${v}"></i>` : "";
+  return `<div class="mix" role="img" aria-label="${p(ok)}% בציון 85 ומעלה, ` +
+    `${p(mid)}% בין 40 ל-84, ${p(bad)}% מתחת ל-40">` +
+    seg("ok", ok) + seg("mid", mid) + seg("bad", bad) + '</div>' +
+    '<div class="mixkey">' + glossHtml("mix", "פילוח") +
+    `<span><i class="sw ok"></i>מיטבי או קרוב <b class="ltr">${p(ok)}%</b></span>` +
+    `<span><i class="sw mid"></i>סטייה <b class="ltr">${p(mid)}%</b></span>` +
+    `<span><i class="sw bad"></i>טעות חמורה <b class="ltr">${p(bad)}%</b></span>` +
+    '</div>';
+}
+
+/* ---- what to practise next -------------------------------------------- */
+function weakArea(first, scen) {
+  // eligible units are SKILL-named only. Difficulty is deliberately excluded:
+  // docs/classification.md defines level 5 as the probability a competent
+  // club player gets it wrong, so a low score there is what "level 5" MEANS.
+  const groups = [];
+  const push = (list, href, suffix) => {
+    for (const g of byType(list)) {
+      const withDiff = list.filter(a => a.type === g.key && a.difficultyLevel > 0);
+      groups.push({...g, label: g.label + (suffix || ""),
+        href, key: g.key,
+        diffMean: withDiff.length ? mean(withDiff.map(a => +a.difficultyLevel)) : null});
+    }
+  };
+  push(scen.bidding, "index.html?kind=bidding&type=");
+  push(scen.lead, "index.html?kind=lead&type=");
+  const all = first.map(btScoreOfAttempt);
+  if (!all.length) return null;
+  const overall = mean(all);
+  const adj = shrink(groups, overall);
+  // recent activity, for the cooldown
+  const recent = [...first].sort((a, b) => firstMs(b) - firstMs(a)).slice(0, 20);
+  const recentBy = {};
+  for (const a of recent) if (a.type) recentBy[a.type] = (recentBy[a.type] || 0) + 1;
+  const answered = new Set(first.map(a => a.problemId));
+  const poolLeft = t => {
+    if (!POOL_BY_TYPE) return Infinity;
+    const e = POOL_BY_TYPE.get(t);
+    if (!e) return 0;
+    let k = 0;
+    for (const id of e.ids) if (!answered.has(id)) k++;
+    return k;
+  };
+  const ranked = adj
+    .filter(g => g.n >= MIN_CI)
+    .filter(g => (recentBy[g.key] || 0) < 8)          // cooldown
+    .filter(g => poolLeft(g.key) >= SESSION_SIZE)      // pool guard
+    .sort((a, b) => a.adj - b.adj);
+  const hit = ranked.find(g => g.adj < overall - 3);
+  if (hit) {
+    const dm = hit.diffMean
+      ? ` בקושי ממוצע ${hit.diffMean.toFixed(1)}` : "";
+    // "the rest" must exclude this category, or the comparison quietly
+    // includes the very cell it is comparing against and understates the gap
+    const rest = first.filter(a => a.type !== hit.key).map(btScoreOfAttempt);
+    const restTxt = rest.length
+      ? `, לעומת ${Math.round(mean(rest))} בשאר הנושאים` : "";
+    return {kind: "weak", label: hit.label,
+      why: `ציון ${Math.round(hit.adj)} על ${nProblems(hit.n)}${dm}${restTxt}.`,
+      href: hit.href + hit.key};
+  }
+  // fallback (a): coverage. A barely-practised topic is not a weakness, and
+  // saying so is a true statement at low n.
+  const thin = groups.filter(g => g.scores.length < 8)
+    .filter(g => poolLeft(g.key) >= SESSION_SIZE)
+    .sort((a, b) => a.scores.length - b.scores.length)[0];
+  if (thin)
+    return {kind: "coverage", label: thin.label,
+      why: `פתרת בו ${nProblems(thin.scores.length)} בלבד — עוד לא מספיק ` +
+           `כדי לדעת אם זו חולשה.`,
+      href: thin.href + thin.key};
+  return null;
+}
+
+/* ---- render ------------------------------------------------------------ */
 const OUTCOME_HE = {winner: "מנצחת", "accepted-alt": "חלופה קבילה",
-  dead: "מתה", suboptimal: "לא אופטימלית"};
+  dead: "אפשרות ללא סיכוי", suboptimal: "נחותה מהמיטבית"};
+function unitOf(a) {
+  if ((a.kind || "bidding") !== "lead") return "IMP";
+  return a.trainingMode === "IMP" ? "IMP" : "לקיחה";
+}
+function badge(m) {
+  const t = TYPE_NAMES[m.type], d = m.difficultyLevel;
+  return (t ? `<span class="typebadge" style="margin:0">${t[0]}</span> ` : "") +
+    (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
+      `${"★".repeat(d)}</span><span class="off">` +
+      `${"★".repeat(5 - d)}</span></span>` : "");
+}
+function missRowHtml(m, compact) {
+  // attempt fields are user-owned free text -> esc() before innerHTML
+  // (SEC-A-6). A problem deleted from the pool becomes a non-link "removed"
+  // row instead of a dead retry link (DB-M-9).
+  const gone = LIVE_IDS && !LIVE_IDS.has(m.problemId);
+  const sc = btScoreOfAttempt(m);
+  const cost = m.gradedCost
+    ? ` · ${glossHtml("cost", "עלות")} ≈ ` +
+      `<span class="ltr">${(+m.gradedCost).toFixed(unitOf(m) === "IMP" ? 1 : 2)}</span> ${unitOf(m)}`
+    : "";
+  const body = `${btScoreChipHtml(sc, true)}` +
+    `<span class="mtxt">${badge(m)} בחרת <b class="ltr">${esc(m.chosenCall)}</b>` +
+    (m.acceptedSet && m.acceptedSet.length
+      ? ` — מיטבי <b class="ltr">${esc(m.acceptedSet.join(", "))}</b>` : "") +
+    (compact ? "" : ` · ${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}${cost}`) +
+    `</span>` +
+    (gone ? '<span class="go muted">בעיה שהוסרה</span>'
+          : '<span class="go">←</span>');
+  return gone
+    ? `<div class="mrow">${body}</div>`
+    : `<a class="mrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">${body}</a>`;
+}
+/* A section always occupies its slot, in a fixed order. An empty one renders
+   disabled rather than vanishing: a page whose STRUCTURE moves between visits
+   is exactly as unlearnable as a list that reorders. */
+function section(id, title, sum, body, open) {
+  if (!body)
+    return `<details class="dsec empty" data-sec="${id}"><summary>${title}` +
+      `<span class="dsum">עוד לא</span></summary></details>`;
+  return `<details class="dsec" data-sec="${id}"${open ? " open" : ""}>` +
+    `<summary>${title}<span class="dsum">${sum}</span></summary>` +
+    `<div class="dbody">${body}</div></details>`;
+}
+function sub(id, title, sum, body) {
+  if (!body) return "";
+  return `<details class="dsub" data-sec="${id}"><summary>${title}` +
+    `<span class="dsum">${sum}</span></summary>` +
+    `<div class="dbody">${body}</div></details>`;
+}
+function scenarioBody(list, kind) {
+  if (!list.length) return "";
+  const tg = rowGroup(byType(list), {cols: kind === "lead" ? "סוג חוזה" : "סוג בעיה"});
+  const dg = rowGroup(byDiff(list), {cols: "דרגת קושי"});
+  let modes = "";
+  if (kind === "lead") {
+    const mp = list.filter(a => a.trainingMode !== "IMP").map(btScoreOfAttempt);
+    const imp = list.filter(a => a.trainingMode === "IMP").map(btScoreOfAttempt);
+    const rows = rowHtml(glossHtml("mp", "מאצ'פוינטס"), mp) +
+                 rowHtml(glossHtml("imp", "IMP"), imp);
+    if (rows) modes = axisCapHtml("שיטת ניקוד") + rows;
+  }
+  // conditioned on errors: averaging cost over every attempt mixes "how
+  // often" with "how much", and once the hit rate passes 50% the
+  // unconditional median is 0.0 forever, which reads as a bug
+  const errs = list.filter(a => btScoreOfAttempt(a) < 100 && +a.gradedCost > 0);
+  // Grouped BY UNIT, never pooled: a lead scenario holds both MP attempts
+  // (costed in tricks) and IMP attempts (costed in IMPs), so one median over
+  // the lot would average 0.7 tricks against 2.4 IMP and label the result with
+  // whichever unit happened to come first.
+  const byUnit = new Map();
+  for (const a of errs) {
+    const u = unitOf(a);
+    if (!byUnit.has(u)) byUnit.set(u, []);
+    byUnit.get(u).push(+a.gradedCost);
+  }
+  const costParts = [...byUnit.entries()]
+    .filter(([, cs]) => cs.length >= MIN_N)
+    .map(([u, cs]) => {
+      const dec = u === "IMP" ? 1 : 2;
+      return `<div class="rmore" style="margin-top:0">חציון ` +
+        `<b class="ltr">${median(cs).toFixed(dec)}</b> ${u} · הגרועה ביותר ` +
+        `<b class="ltr">${Math.max(...cs).toFixed(dec)}</b> ${u} ` +
+        `(מתוך ${cs.length} טעויות)</div>`;
+    });
+  const costLine = costParts.length
+    ? `<div class="subh">${glossHtml("cost", "מחיר הטעות")}</div>` +
+      costParts.join("")
+    : "";
+  let ranks = "";
+  if (kind === "lead") {
+    const rk = list.filter(a => typeof a.chosenRank === "number");
+    if (rk.length >= MIN_N) {
+      const firsts = rk.filter(a => a.chosenRank === 1).length;
+      ranks = `<div class="subh">${glossHtml("leadrank", "דירוג ההובלה")}</div>` +
+        `<div class="rmore" style="margin-top:0">דורגה בממוצע במקום ` +
+        `<b class="ltr">${mean(rk.map(a => +a.chosenRank)).toFixed(1)}</b> · ` +
+        `במקום הראשון ב-${Math.round(firsts / rk.length * 100)}% מהמקרים ` +
+        `(${rk.length} הובלות)</div>`;
+    }
+  }
+  const scores = list.map(btScoreOfAttempt);
+  const ok = scores.filter(s => s >= REVIEW_MIN).length;
+  const mid = scores.filter(s => s >= ERROR_MIN && s < REVIEW_MIN).length;
+  const bad = scores.filter(s => s < ERROR_MIN).length;
+  return mixHtml(ok, mid, bad, scores.length) +
+    `<div class="rmore" style="margin-top:2px">${glossHtml("scale40", "הסולם מתחיל ב-40")}</div>` +
+    sub(kind + "-type", kind === "lead" ? "לפי סוג חוזה" : "לפי סוג בעיה",
+        worstSum(tg), tg && tg.html) +
+    sub(kind + "-mode", "מאצ'פוינטס מול IMP", "", modes) +
+    sub(kind + "-num", "המספרים המלאים",
+        `${Math.round(mean(scores))} בממוצע`,
+        (dg ? `<div class="subh">לפי דרגת קושי</div>` + dg.html : "") +
+        costLine + ranks + coverageHtml(list, kind));
+}
 function render(attempts) {
   const el = document.getElementById("dash");
   if (!attempts.length) {
@@ -3695,147 +4415,144 @@ function render(attempts) {
       '<a class="big" href="index.html">ענה על בעיה כדי להתחיל &larr;</a></div>';
     return;
   }
+  const open = loadOpen();
   const first = attempts.filter(a => a.isFirstAttempt !== false);
-  const n = first.length;
-  const avgAll = n
-    ? first.reduce((s, a) => s + btScoreOfAttempt(a), 0) / n : 0;
-  const recent = [...first].sort((a, b) => firstMs(b) - firstMs(a));
-  let streak = 0;
-  for (const a of recent) { if (btScoreOfAttempt(a) >= 100) streak++; else break; }
-  // split first-attempts by scenario, and leads further by training mode
-  // (cost units differ: MP grades in tricks, IMP in IMPs)
+  // Hero, mix and trend use STORED-score attempts only. A legacy attempt is
+  // rebuilt by btScoreOfAttempt from the base curve alone -- no CI haircut, no
+  // stakes stretch, no leniency -- so it reads several points harsher than the
+  // same decision made today, and any view ordered by time would drift upward
+  // on its own as the window slid off them.
+  const scored = first.filter(btHasStoredScore);
+  const legacyN = first.length - scored.length;
+  const heroSet = scored.length ? scored : first;
   const scen = {bidding: [], lead: []};
   for (const a of first) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
-  const leadMP = scen.lead.filter(a => a.trainingMode !== "IMP");
-  const leadIMP = scen.lead.filter(a => a.trainingMode === "IMP");
-  const byKind = {};
-  for (const a of first) { const kd = a.kind || "bidding";
-    (byKind[kd] ??= []).push(btScoreOfAttempt(a)); }
-  const chrono = [...first].sort((a, b) => firstMs(a) - firstMs(b));
-  let trend = "";
-  if (chrono.length >= MIN_TREND) {
-    let cum = 0; const pts = [];
-    chrono.forEach((a, i) => { cum += btScoreOfAttempt(a); pts.push(cum / (i + 1)); });
-    const W = 300, H = 60, step = W / (pts.length - 1);
-    const path = pts.map((y, i) =>
-      `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
-    const last = Math.round(pts[pts.length - 1]);
-    // cumulative mean score plus a rolling window: the cumulative line
-    // flattens and hides recent change, so overlay a last-min(20, n/2) window
-    const win = Math.max(MIN_TREND, Math.min(20, Math.round(chrono.length / 2)));
-    const roll = chrono.map((a, i) => {
-      const lo = Math.max(0, i - win + 1);
-      let s = 0; for (let j = lo; j <= i; j++) s += btScoreOfAttempt(chrono[j]);
-      return s / (i - lo + 1);
-    });
-    const rpath = roll.map((y, i) =>
-      `${i ? "L" : "M"}${(i * step).toFixed(1)},${(H - y * 0.6).toFixed(1)}`).join(" ");
-    trend = '<div class="card"><b>ציון לאורך זמן</b> ' +
-      '<span class="muted">(ניסיון ראשון)</span><br>' +
-      `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="ציון לאורך זמן, כעת ${last}" style="width:100%;height:auto;margin-top:6px">` +
-      `<line x1="0" y1="${H - 30}" x2="${W}" y2="${H - 30}" stroke="#8884" ` +
-      'stroke-dasharray="3"></line>' +
-      `<path d="${rpath}" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 3"></path>` +
-      `<path d="${path}" fill="none" stroke="var(--accent)" stroke-width="2"></path>` +
-      '</svg><div class="muted">' +
-      '<span style="color:var(--accent)">■</span> מצטבר · ' +
-      '<span>▨</span> חלון אחרון (' + win + ') · קו מקווקו = ציון 50 · כעת ' +
-      last + '</div></div>';
-  }
-  const badge = m => {
-    const t = TYPE_NAMES[m.type];
-    const d = m.difficultyLevel;
-    return (t ? `<span class="typebadge" style="margin:0">${t[0]}</span> ` : "") +
-      (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
-        `${"★".repeat(d)}</span><span class="off">${"★".repeat(5 - d)}</span></span>` : "");
-  };
-  const misses = recent.filter(a => btScoreOfAttempt(a) < REVIEW_MIN).slice(0, 10);
-  const missList = misses.length
-    ? '<div class="card"><b>לשיפור — החלטות מתחת ל־' + REVIEW_MIN + '</b> <span class="muted">(הקש לחזרה)</span>' +
-      '<ul class="misslist">' + misses.map(m => {
-        // attempt fields are user-owned free text -> esc() before innerHTML
-        // (SEC-A-6). A problem deleted from the pool becomes a non-link
-        // "removed" row instead of a dead retry link (DB-M-9).
-        const gone = LIVE_IDS && !LIVE_IDS.has(m.problemId);
-        const body =
-          `<div>${btScoreChipHtml(btScoreOfAttempt(m), true)} ${badge(m)}</div>` +
-          `<div style="margin-top:4px">בחרת <b class="ltr">${esc(m.chosenCall)}</b> — ` +
-          `${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}` +
-          (m.gradedCost ? `, עלות ≈ ${(+m.gradedCost).toFixed(1)}` : "") +
-          (m.acceptedSet && m.acceptedSet.length
-            ? `. מיטבי: <span class="ltr">${esc(m.acceptedSet.join(", "))}</span>` : "") +
-          (gone ? ` <span class="go muted">בעיה שהוסרה</span></div>`
-                : ` <span class="go">חזור לתרגל &larr;</span></div>`);
-        return gone
-          ? `<li><div class="missrow">${body}</div></li>`
-          : `<li><a class="missrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">${body}</a></li>`;
-      }).join("") + "</ul></div>"
+  const recent = [...first].sort((a, b) => firstMs(b) - firstMs(a));
+  const heroChrono = [...heroSet].sort((a, b) => firstMs(a) - firstMs(b));
+  const winIds = new Set(heroChrono.slice(-HERO_WIN).map(a => a.problemId));
+
+  const weak = weakArea(first, scen);
+  const pats = patterns(first);
+  const nextup = weak
+    ? '<div class="card"><b>' + glossHtml("weakspot", "מה כדאי לחזק") + '</b>' +
+      `<div style="margin:7px 0 3px">${weak.kind === "coverage" ? "כמעט לא תרגלת" : "הנושא החלש שלך"}: ` +
+      `<b>${weak.label}</b></div>` +
+      `<div class="rmore" style="margin-top:0">${weak.why}</div>` +
+      (pats.length ? `<div class="rmore">${pats[0].txt}</div>` : "") +
+      `<a class="big" href="${weak.href}" style="margin-top:11px">` +
+      `תרגל ${SESSION_SIZE} כאלה &larr;</a></div>`
+    : (pats.length
+        ? '<div class="card"><b>' + glossHtml("pattern", "נטייה שחוזרת") +
+          `</b><div class="rmore">${pats[0].txt}</div></div>` : "");
+
+  // the 3 worst decisions IN THE HERO WINDOW: "worst recently" is a review
+  // target, the all-time worst from six months ago is not. Ordered by score,
+  // not gradedCost -- cost units differ by scenario (IMP vs tricks), so a
+  // mixed cost sort would rank 2.4 IMP against 0.7 tricks.
+  const winMisses = heroChrono.filter(a => winIds.has(a.problemId))
+    .filter(a => btScoreOfAttempt(a) < REVIEW_MIN)
+    .sort((a, b) => btScoreOfAttempt(a) - btScoreOfAttempt(b) ||
+                    firstMs(b) - firstMs(a));
+  const tocheck = winMisses.length
+    ? '<div class="card"><b>3 החלטות לחזור אליהן</b>' +
+      '<span class="dsum" style="margin-inline-start:8px">מתוך הבעיות האחרונות</span>' +
+      winMisses.slice(0, 3).map(m => missRowHtml(m, true)).join("") + '</div>'
     : "";
-  const weak = weakArea(scen);
-  const weakCard = weak
-    ? '<div class="card"><b>מה כדאי לתרגל</b>' +
-      `<div style="margin:6px 0 8px">הנקודה החלשה שלך: <b>${weak.label}</b> ` +
-      `(ציון ממוצע ${Math.round(weak.m)}).</div>` +
-      `<a class="big" href="${weak.href}">תרגל ${SESSION_SIZE} כאלה &larr;</a></div>`
+
+  const allMiss = [...first].filter(a => btScoreOfAttempt(a) < REVIEW_MIN)
+    .sort((a, b) => btScoreOfAttempt(a) - btScoreOfAttempt(b) ||
+                    firstMs(b) - firstMs(a));
+  const missList = allMiss.length
+    ? allMiss.slice(0, 30).map(m => missRowHtml(m, false)).join("")
     : "";
-  const statCard =
-    '<div class="card"><div class="statgrid">' +
-    `<div class="stat"><b>${n < MIN_N ? "—" : Math.round(avgAll)}</b>` +
-    `<span class="muted">${glossHtml("panel", "ציון ממוצע")}</span></div>` +
-    `<div class="stat"><b>${streak}</b>` +
-    `<span class="muted">${glossHtml("streak", "רצף מיטבי")}</span></div>` +
-    `<div class="stat"><b>${n}</b><span class="muted">בעיות שנענו</span></div>` +
-    `<div class="stat"><b>${attempts.length}</b><span class="muted">סה"כ ניסיונות</span></div>` +
-    '</div></div>';
-  const byKindCard = '<div class="card"><b>לפי תרחיש</b>' +
-    Object.keys(byKind).map(kd =>
-      row(kd === "lead" ? "הובלה" : "הכרזה", byKind[kd])).join("") +
-    '</div>';
-  const footnote =
-    '<p class="footnote">ניסיון ראשון בלבד. לכל החלטה ציון 0–100: ' +
-    '100 = הפעולה המיטבית (או שקולה לה), 0 = אפשרות שלא ניצחה באף חלוקה, ' +
-    'ובתווך הציון יורד עם העלות מול הפעולה המיטבית — IMP בהכרזה ובהובלת ' +
-    'IMP, לקיחות בהובלת MP — בסולם המותאם לתנודת הלוח. ' +
-    'ממוצעים מוסתרים עד לפחות ' + MIN_N + ' ניסיונות; הטווח בסוגריים הוא ' +
-    'רווח בר־סמך 95% של הממוצע. “מתחת למיטבי” = העלות הגולמית; ' +
-    'תשובה מיטבית נספרת כאפס.</p>';
-  // three tabbed panels: overview / bidding / leads
-  const tabs = [
-    ["overview", "סקירה"], ["bidding", "הכרזה"], ["lead", "הובלה"],
-  ];
+
+  const patBody = pats.length
+    ? '<ul class="patlist">' + pats.map(p => `<li>${p.txt}</li>`).join("") + '</ul>'
+    : "";
+  const bidBody = scenarioBody(scen.bidding, "bidding");
+  const leadBody = scenarioBody(scen.lead, "lead");
+  const sumOf = list => list.length
+    ? `ציון ${Math.round(mean(list.map(btScoreOfAttempt)))} · ${nDecisions(list.length)}` : "";
+
   el.innerHTML =
-    '<div class="segctl tabs" role="tablist">' + tabs.map(([id, lbl], i) =>
-      `<button role="tab" data-tab="${id}" aria-selected="${i === 0}">${lbl}` +
-      `</button>`).join("") + '</div>' +
-    `<div class="dtab" data-panel="overview">` +
-      statCard + weakCard + trend + byKindCard + missList + footnote + '</div>' +
-    `<div class="dtab" data-panel="bidding" hidden>` +
-      (scenarioCard("הכרזה", scen.bidding, "bidding") ||
-       '<div class="card muted">עוד אין נתוני הכרזה.</div>') + '</div>' +
-    `<div class="dtab" data-panel="lead" hidden>` +
-      (scenarioCard("הובלה · MP", leadMP, "lead") +
-       scenarioCard("הובלה · IMP", leadIMP, "lead", "leadIMP") ||
-       "") +
-      (leadMP.length || leadIMP.length ? ""
-        : '<div class="card muted">עוד אין נתוני הובלה.</div>') + '</div>';
-  el.querySelector(".tabs").addEventListener("click", ev => {
-    const b = ev.target.closest("button[data-tab]");
-    if (!b) return;
-    el.querySelectorAll(".tabs button").forEach(x =>
-      x.setAttribute("aria-selected", x === b ? "true" : "false"));
-    el.querySelectorAll(".dtab").forEach(p =>
-      p.hidden = p.dataset.panel !== b.dataset.tab);
-  });
+    heroHtml(heroSet, legacyN) + nextup + tocheck +
+    section("bidding", "הכרזה", sumOf(scen.bidding), bidBody, open.has("bidding")) +
+    section("lead", "הובלה", sumOf(scen.lead), leadBody, open.has("lead")) +
+    section("pat", "נטיות שחוזרות",
+            pats.length + (pats.length === 1 ? " דפוס" : " דפוסים"),
+            patBody, open.has("pat")) +
+    section("miss", "כל ההחלטות לשיפור",
+            `${allMiss.length} מתחת ל-${REVIEW_MIN}`, missList, open.has("miss")) +
+    section("how", "איך מחושב הציון", "0–100 · 6 רמות", howHtml(first),
+            open.has("how"));
+
+  el.addEventListener("toggle", ev => {
+    const d = ev.target.closest("details.dsec");
+    if (!d || !d.dataset.sec) return;
+    const s = loadOpen();
+    if (d.open) s.add(d.dataset.sec); else s.delete(d.dataset.sec);
+    saveOpen(s);
+  }, true);
+}
+/* Coverage lives inside its scenario rather than in a section of its own:
+   the section budget is five, and coverage is only meaningful next to the
+   breakdown it qualifies -- a topic with no attempts is not a weak topic. */
+function coverageHtml(list, kind) {
+  if (!POOL_BY_TYPE || !POOL_BY_TYPE.size) return "";
+  const done = {};
+  for (const a of list) if (a.type) done[a.type] = (done[a.type] || 0) + 1;
+  const rows = [...POOL_BY_TYPE.entries()]
+    .filter(([, e]) => e.kind === kind)
+    .map(([t, e]) => ({t, n: done[t] || 0, pool: e.ids.size}))
+    .sort((a, b) => a.n - b.n || b.pool - a.pool);
+  if (!rows.length) return "";
+  return `<div class="subh">${glossHtml("coverage", "היקף התרגול")}</div>` +
+    '<ul class="patlist">' + rows.map(r =>
+      `<li>${typeLabel(r.t)} — <b>${r.n}</b> מתוך ${r.pool}` +
+      (r.n === 0 ? ' <span class="muted">לא תרגלת</span>' : "") + '</li>').join("") +
+    '</ul>';
+}
+function howHtml(first) {
+  const bands = [
+    ["מיטבי", "100", "win"], ["כמעט מיטבי", "85–99", "win"],
+    ["סטייה קלה", "65–84", "gold"], ["טעות", "40–64", "loss"],
+    ["טעות חמורה", "1–39", "loss"],
+    ["אפשרות ללא סיכוי", "0", "loss"],
+  ];
+  const lifetime = first.length
+    ? Math.round(mean(first.map(btScoreOfAttempt))) : 0;
+  return '<p class="rmore" style="margin-top:0">כל החלטה מקבלת ציון ' +
+    '0–100 לפי כמה היא רחוקה מהפעולה המיטבית. <b>100</b> — הפעולה ' +
+    'המיטבית (או שקולה לה). <b>0</b> — אפשרות שלא ניצחה באף חלוקה. ' +
+    'הפער נמדד ב-' + glossHtml("imp", "IMP") + ' בהכרזה ובהובלת IMP, ' +
+    'ובלקיחות בהובלת ' + glossHtml("mp", "מאצ'פוינטס") +
+    ', בסולם המותאם לתנודת הלוח. ממוצע מוצג רק מ-' + MIN_N +
+    ' החלטות ומעלה, וטווח מ-' + MIN_CI + '.</p>' +
+    '<table class="bandtab">' + bands.map(([nm, rng, tone]) =>
+      `<tr><td><i class="sw" style="background:var(--${tone})"></i>${nm}</td>` +
+      `<td class="sc ltr">${rng}</td></tr>`).join("") + '</table>' +
+    `<div class="rmore">ממוצע כל הזמנים <b>${lifetime}</b> · ` +
+    `${nProblems(first.length)} (${glossHtml("firstonly", "ניסיון ראשון")} בלבד)</div>`;
 }
 async function init() {
   try {
     // Learn which problems still exist so deleted ones can be flagged in the
-    // miss list (DB-M-9). Cheap: the index is stamp-cached (T10). If it fails,
-    // LIVE_IDS stays null and every attempt is treated as live (prior behavior).
+    // miss list (DB-M-9), and the per-type pool counts the coverage section
+    // and the recommendation's pool guard need. Cheap: the index is
+    // stamp-cached (T10). If it fails, LIVE_IDS stays null and every attempt
+    // is treated as live, as before.
     try {
       const idx = await window.BT.fetchIndex();
-      LIVE_IDS = new Set((idx.problems || []).map(p => p.id));
-    } catch (e) { LIVE_IDS = null; }
+      const rows = idx.problems || [];
+      LIVE_IDS = new Set(rows.map(p => p.id));
+      POOL_BY_TYPE = new Map();
+      for (const p of rows) {
+        if (!p.type) continue;
+        if (!POOL_BY_TYPE.has(p.type))
+          POOL_BY_TYPE.set(p.type, {ids: new Set(), kind: kindOf(p)});
+        POOL_BY_TYPE.get(p.type).ids.add(p.id);
+      }
+    } catch (e) { LIVE_IDS = null; POOL_BY_TYPE = null; }
     render(await window.BT.allAttempts());
   } catch (e) {
     const el = document.getElementById("dash");
@@ -3843,7 +4560,8 @@ async function init() {
     el.querySelector(".en").textContent = e.message;
   }
 }
-// refresh the dashboard once the background sync (T4) lands
+// refresh the dashboard once the background sync (T4) lands. render() reads
+// the persisted open-set, so a sync can't collapse a section the user opened.
 window.addEventListener("bt-attempts-synced", async () => {
   try { render(await window.BT.allAttempts()); } catch (e) { /* keep prior */ }
 });
@@ -3852,22 +4570,32 @@ else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 """
 
 
+# The dashboard's own CSS/JS ship as external files too, for the same reason
+# the shared pair does (T2/PERF-F-4): the redesign grew this page's inline
+# blobs past 50 KB, which the browser had to re-download on every visit. Same
+# content-hash versioning, so a returning visitor can never pair new HTML with
+# a stale-cached script.
+_DASH_CSS_HREF = f"dashboard.css?v={_asset_ver(_DASHBOARD_CSS)}"
+_DASH_SRC = f"dashboard.js?v={_asset_ver(_DASHBOARD_JS)}"
+
+
 def _dashboard_html() -> str:
     return (
         '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
         '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
         + _theme_head_script() + '\n'
         '<title>ההתקדמות שלי</title>\n'
-        '<link rel="stylesheet" href="' + _CSS_HREF + '">\n<style>' + _DASHBOARD_CSS +
-        '</style>\n' + _head_preloads() +
+        '<link rel="stylesheet" href="' + _CSS_HREF + '">\n'
+        '<link rel="stylesheet" href="' + _DASH_CSS_HREF + '">\n'
+        + _head_preloads() +
         '\n<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-nav="progress">\n<main id="main" tabindex="-1">\n'
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
         '<span class="muted">ההתקדמות שלי</span></div>\n'
         '<h1>ההתקדמות שלי</h1>\n<div id="dash" class="muted">טוען&hellip;</div>\n'
         + _taxonomy_script() + '\n<script src="'
-        + _SHARED_SRC + '"></script>\n<script>'
-        + _DASHBOARD_JS + '</script>\n</body></html>'
+        + _SHARED_SRC + '"></script>\n<script src="'
+        + _DASH_SRC + '"></script>\n</body></html>'
     )
 
 
@@ -3897,6 +4625,8 @@ def write_app(out_dir: str | Path) -> None:
     # long-lived caching.
     (out / "app.css").write_text(_CSS, encoding="utf-8")
     (out / "bt-shared.js").write_text(_SHARED_JS, encoding="utf-8")
+    (out / "dashboard.css").write_text(_DASHBOARD_CSS, encoding="utf-8")
+    (out / "dashboard.js").write_text(_DASHBOARD_JS, encoding="utf-8")
     web = resources.files("bridge_trainer") / "web"
     for name in _ASSET_FILES:
         (out / name).write_text((web / name).read_text(encoding="utf-8"),

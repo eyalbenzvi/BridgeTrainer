@@ -16,7 +16,7 @@ from importlib import resources
 
 import pytest
 
-from bridge_trainer.app.webapp import (_dashboard_html, _index_html,
+from bridge_trainer.app.webapp import (_DASHBOARD_JS, _index_html,
                                        _lead_html, _problem_html)
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
@@ -55,10 +55,15 @@ def test_start_hands_off_before_the_background_sync():
     assert 'new Event("bt-attempts-synced")' in start
 
 
-@pytest.mark.parametrize("html_fn", [_index_html, _problem_html, _lead_html,
-                                     _dashboard_html])
+@pytest.mark.parametrize("html_fn", [_index_html, _problem_html, _lead_html])
 def test_every_page_listens_for_sync(html_fn):
     assert 'addEventListener("bt-attempts-synced"' in html_fn()
+
+
+def test_dashboard_listens_for_sync():
+    # the dashboard's script ships as an external asset (dashboard.js), so the
+    # listener lives in the asset, not in the page body
+    assert 'addEventListener("bt-attempts-synced"' in _DASHBOARD_JS
 
 
 @needs_node
