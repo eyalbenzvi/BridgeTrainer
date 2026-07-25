@@ -305,6 +305,19 @@ def cmd_pool_purge_forcing_pass(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pool_purge_mislabeled_invites(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import purge_mislabeled_invites
+    summary = purge_mislabeled_invites(key_path=args.key,
+                                       dry_run=args.dry_run)
+    verb = "would delete" if args.dry_run else "deleted"
+    print(f"{verb} {len(summary['flagged'])} problem(s) whose displayed "
+          f"invitation the rollout never treats as one "
+          f"({summary['total']} docs total)")
+    for pid in summary["flagged"]:
+        print(f"  {pid}: {summary['reasons'][pid]}")
+    return 0
+
+
 def cmd_pool_purge_orphan_attempts(args: argparse.Namespace) -> int:
     from ..pool.firestore_store import purge_orphan_attempts
     summary = purge_orphan_attempts(key_path=args.key, dry_run=args.dry_run)
@@ -589,6 +602,18 @@ def main(argv: list[str] | None = None) -> int:
     pf.add_argument("--dry-run", action="store_true",
                     help="report the offenders without deleting")
     pf.set_defaults(func=cmd_pool_purge_forcing_pass)
+
+    pm = pool_sub.add_parser(
+        "purge-mislabeled-invites",
+        help="migration: delete bidding problems that offer a call their "
+             "gloss calls an invitation while the rollout never treats it "
+             "as one (pre-gate boards)")
+    pm.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pm.add_argument("--dry-run", action="store_true",
+                    help="report the offenders without deleting")
+    pm.set_defaults(func=cmd_pool_purge_mislabeled_invites)
 
     po = pool_sub.add_parser(
         "purge-orphan-attempts",

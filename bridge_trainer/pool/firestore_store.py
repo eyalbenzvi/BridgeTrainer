@@ -707,6 +707,63 @@ def purge_forcing_pass(key_path: str | None = None,
             "removed": removed, "total": len(records)}
 
 
+def invite_offenders(records: list[dict]) -> dict:
+    """{problemId: reason} for bidding records that offer a call their gloss
+    calls an invitation while the rollout behind it gives partner no
+    decision (engine/explain_check.invite_violations). Pure — shared by the
+    purge and its tests.
+
+    Needs ``kind``/``seat``/``verdict``/``quality``/``explanations``: the
+    check reads the displayed glosses against the published rollout, so it
+    never looks at the cards."""
+    from ..engine.conventions import SEATS as _SEATS
+    from ..engine.explain_check import invite_violations
+
+    out = {}
+    for rec in records:
+        if rec.get("kind") == "lead" or not rec.get("seat"):
+            continue
+        ex = rec.get("explanations") or {}
+        v = rec.get("verdict") or {}
+        bad = invite_violations(
+            {o["bid"]: o.get("card") for o in (ex.get("options") or [])
+             if o.get("bid")},
+            v.get("table") or [], v.get("accepted") or "",
+            _SEATS.index(rec["seat"]),
+            int((rec.get("quality") or {}).get("n_samples") or 0))
+        if bad:
+            out[rec["id"]] = bad[0]
+    return out
+
+
+def purge_mislabeled_invites(key_path: str | None = None,
+                             dry_run: bool = False) -> dict:
+    """Migration: DELETE bidding problems published before the invitation
+    gate (engine/explain_check.invite_violations, engine/maker) — the ones
+    whose displayed invitation the rollout never treats as one.
+
+    Deletion, not repair, for the reason ``purge_forcing_pass`` gives: the
+    misdescribed option cannot just be dropped, because the same partner
+    model that ignored the invitation produced the rollout behind every
+    other candidate, and the verdict's rows are pairwise against it.
+
+    Stored attempts on a purged problem are left untouched;
+    ``regrade_attempts`` counts them as ``missing_problem``.
+
+    Returns {flagged, reasons, removed, total}. ``dry_run`` reports without
+    deleting."""
+    remote = FirestorePool(key_path)
+    records = remote.stream_records(
+        fields=["kind", "seat", "verdict", "quality", "explanations"])
+    reasons = invite_offenders(records)
+    removed = 0
+    if not dry_run:
+        for pid in reasons:      # remove() retries its own writes
+            removed += bool(remote.remove(pid))
+    return {"flagged": sorted(reasons), "reasons": reasons,
+            "removed": removed, "total": len(records)}
+
+
 # ---- attempt regrading (fix user history after problem changes) ----------
 #
 # Attempts store a grading SNAPSHOT (score/correct/outcomeClass/gradedCost/

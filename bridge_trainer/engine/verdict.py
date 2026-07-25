@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..scoring.tables import imps
+from .conventions import contract_class, contract_side
 
 GAP_MAX = 2.5           # accept band (IMPs)
 MIN_WINNER_GAP = 0.3    # IMPs the EV-best call must clear the runner-up by;
@@ -77,25 +78,6 @@ def _tv_distance(ca: list, cb: list) -> float:
     return 0.5 * sum(abs(fa[k] / na - fb[k] / nb) for k in keys)
 
 
-def _contract_side(contract: str, hero_i: int):
-    """0 = hero's side declares, 1 = theirs, None = passed out."""
-    if contract.upper() == "PASS":
-        return None
-    return ("NESW".index(contract[-1]) - hero_i) % 2
-
-
-def _contract_class(contract: str) -> str:
-    if contract.upper() == "PASS":
-        return "pass"
-    level, strain = int(contract[0]), contract[1]
-    if level >= 6:
-        return "slam"
-    if (strain == "N" and level >= 3) or (strain in "HS" and level >= 4) \
-            or (strain in "CD" and level >= 5):
-        return "game"
-    return "partscore"
-
-
 def _interest_ref(bids, best, policy_map, fallback):
     """The interest REFERENCE: the call the student is most likely to pick
     instead of the EV-winner — the highest-policy alternative — rather than
@@ -127,14 +109,14 @@ def _interest(diff, doubled, ev, best, ref, hero_i, policy_top, gap):
     tv = _tv_distance(ev.contracts[best], ev.contracts[ref])
     if hero_i is not None:
         flips = [
-            (_contract_side(a, hero_i) != _contract_side(b, hero_i))
+            (contract_side(a, hero_i) != contract_side(b, hero_i))
             for a, b in zip(ev.contracts[best], ev.contracts[ref])]
         flip = float(np.mean(flips))
     else:
         flip = 0.0
     modal_b = _C(ev.contracts[best]).most_common(1)[0][0]
     modal_s = _C(ev.contracts[ref]).most_common(1)[0][0]
-    span = _contract_class(modal_b) != _contract_class(modal_s)
+    span = contract_class(modal_b) != contract_class(modal_s)
     trap = (policy_top is not None and policy_top != best
             and gap >= TRAP_GAP_MIN)
     damage = max(float(ev.ev[b].mean()) for b in ev.bids) < 0
@@ -400,7 +382,7 @@ def prejudge(ev, policy_top: str | None = None,
     tv_hi = min(1.0, tv + PRE_TV_ALLOW)
     if hero_i is not None:
         flips = int(sum(
-            _contract_side(a, hero_i) != _contract_side(b, hero_i)
+            contract_side(a, hero_i) != contract_side(b, hero_i)
             for a, b in zip(ev.contracts[best], ev.contracts[ref])))
         flip_hi = _wilson_upper(flips, n)
     else:
