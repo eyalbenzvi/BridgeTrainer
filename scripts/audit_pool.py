@@ -97,6 +97,9 @@ def main(argv=None) -> int:
                     help="delete the offenders from Firestore (index first)")
     ap.add_argument("--limit", type=int, default=0,
                     help="audit at most N records (smoke runs)")
+    ap.add_argument("--ids", default="",
+                    help="comma-separated problem ids to audit (re-check a "
+                         "finding, or remove one board's worth of them)")
     ap.add_argument("--out", default=None,
                     help="write the full findings to this JSON file")
     args = ap.parse_args(argv)
@@ -113,6 +116,12 @@ def main(argv=None) -> int:
     else:
         records = _local_records(args.pool)
     records = [r for r in records if r.get("kind") != "lead"]
+    if args.ids:
+        want = {i.strip() for i in args.ids.split(",") if i.strip()}
+        records = [r for r in records if r["id"] in want]
+        missing = want - {r["id"] for r in records}
+        if missing:
+            print(f"not in the pool: {', '.join(sorted(missing))}")
     if args.limit:
         records = records[:args.limit]
 
