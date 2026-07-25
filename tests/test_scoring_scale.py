@@ -94,6 +94,57 @@ def test_bidding_pins_and_bands():
     assert mid["cEff"] == pytest.approx(0.9)
 
 
+# the reported bug (problem ben1-19f939859fa, real published numbers): the
+# forge's old strictly-unique winner share flagged 3S dead because it TIED
+# Pass's winning result on the layouts it won — yet 3S sits 1.6 IMP from
+# best, beats the winner on 52% of layouts, and is BETTER than Pass
+# (-1.8 IMP), which scored 78 while 3S pinned to 0. The stored flag must be
+# vetted against the option's own evidence row.
+STALE_DEAD = {
+    "kind": "bidding",
+    "quality": {"stakes": 6.69},
+    "candidates": [{"call": "3S", "policy": 0.52},
+                   {"call": "4S", "policy": 0.293},
+                   {"call": "P", "policy": 0.11}],
+    "verdict": {
+        "accepted": "4S", "toss_up": False,
+        "table": [
+            {"bid": "4S", "ev_imp_vs_top": 1.58, "ci": 0.63,
+             "p_gain": 0.412, "p_loss": 0.52, "p_push": 0.068},
+            {"bid": "3S", "ev_imp_vs_top": -1.58, "ci": 0.63,
+             "p_gain": 0.52, "p_loss": 0.412, "p_push": 0.068},
+            {"bid": "P", "ev_imp_vs_top": -1.77, "ci": 0.68,
+             "p_gain": 0.529, "p_loss": 0.471, "p_push": 0},
+        ],
+        "dead_options": [{"bid": "3S", "best_share": 0.0039}],
+    },
+}
+
+
+@needs_node
+def test_stale_dead_flag_rides_the_curve_not_the_pin():
+    stale = json.dumps(STALE_DEAD)
+    # a record whose dead row CONFIRMS deadness (never ties or beats best)
+    confirmed = json.dumps({"verdict": {
+        "accepted": "4H", "toss_up": False,
+        "table": [{"bid": "4H", "ev_imp_vs_top": 2.0, "ci": 0.5,
+                   "p_gain": 0.6, "p_loss": 0.3, "p_push": 0.1},
+                  {"bid": "X", "ev_imp_vs_top": -6.0, "ci": 0.9,
+                   "p_gain": 0, "p_loss": 0.9, "p_push": 0}],
+        "dead_options": [{"bid": "X"}]}})
+    s3, sp, vetoed, kept = run_js([
+        f"btScoreBidding({stale}, '3S')",
+        f"btScoreBidding({stale}, 'P')",
+        f"btIsDead({stale}, '3S')",
+        f"btIsDead({confirmed}, 'X')",
+    ])
+    assert vetoed is False and kept is True
+    # 3S rides the normal curve — never the 0 pin, never confusable w/ best
+    assert not s3.get("dead") and 1 <= s3["score"] <= 94
+    # and the scores agree with the EV ordering: 3S (-1.6) beats P (-1.8)
+    assert s3["score"] > sp["score"]
+
+
 @needs_node
 def test_bidding_ci_haircut_and_leniency_monotonic():
     with_ci, no_ci, no_policy = run_js([
@@ -277,6 +328,7 @@ def test_attempt_records_carry_score():
         .read_text(encoding="utf-8")
     assert "window.btScoreBidding" in js
     assert "window.btScoreLead" in js
+    assert "window.btIsDead" in js   # stored dead flags are vetted (BEN-1)
     # grading still works (binary fallback) when the shared block is absent
     assert "(correct ? 100 : 0)" in js
 

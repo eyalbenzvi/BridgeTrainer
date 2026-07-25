@@ -178,6 +178,15 @@ def judge(ev, policy_top: str | None = None,
             (stacked > stacked[i] - 1e-9).sum(axis=0) == 1)
         share = float(strictly.mean())
         winner_share[b] = share
+        # "won a layout" counts TIES for the per-sample best: two calls
+        # that reach the identical winning result (e.g. 3S and Pass both
+        # ending in 3S on every layout where 3S beats the winner) both won
+        # those layouts, even though neither is ever the UNIQUE winner.
+        # Deadness is judged on this tied share; the strict share above
+        # stays the pure_guess gate's input. Requiring uniqueness published
+        # ben1-19f939859fa with 3S (-1.6 IMP, 52% wins vs the winner) as a
+        # 0-score dead option while the strictly-worse Pass scored 78.
+        tied_share = float((stacked[i] >= best_per_sample - 1e-9).mean())
         row = {
             "bid": b,
             # the winner's row compares to the NEXT-best option, never to
@@ -188,12 +197,12 @@ def judge(ev, policy_top: str | None = None,
             "p_gain": round(float((d > 0).mean()), 3),
             "p_loss": round(float((d < 0).mean()), 3),
             "p_push": round(float((d == 0).mean()), 3),
-            "best_share": round(share, 3),
+            "best_share": round(tied_share, 3),
             "top_contracts": Counter(ev.contracts[b]).most_common(3),
         }
         table.append(row)
-        if share < DEAD_SHARE:
-            dead.append({"bid": b, "best_share": round(share, 4)})
+        if tied_share < DEAD_SHARE:
+            dead.append({"bid": b, "best_share": round(tied_share, 4)})
 
     measured = {
         "n_samples": n, "quality": round(ev.quality, 2),
