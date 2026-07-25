@@ -648,3 +648,223 @@ def backfill_dead_options(key_path: str | None = None,
                              remote._col.document(rid).set(p, merge=True))
     return {"with_dead": with_dead, "updated": updated,
             "stale_flags": stale_flags, "total": len(records)}
+
+
+# ---- attempt regrading (fix user history after problem changes) ----------
+#
+# Attempts store a grading SNAPSHOT (score/correct/outcomeClass/gradedCost/
+# acceptedSet + problem-derived meta) taken at answer time. When problem
+# docs change afterwards — a verdict fix like backfill_dead_options, a
+# reclassification, a formula improvement shipped in _SCORE_JS — that
+# history goes stale. regrade_attempts recomputes every attempt's DERIVED
+# fields from the CURRENT problem docs and rewrites only what changed.
+# The user's own facts — chosenCall/answer, trainingMode, timestamps,
+# attemptCount — are never touched.
+#
+# Fidelity: the score is recomputed by running the client's actual scoring
+# module (_SCORE_JS, webapp.py) under node, plus thin wrappers mirroring
+# bt-firebase.js gradeBidding/gradeLead on raw Firestore records — so a
+# regraded attempt matches what the client would store for the same answer
+# today, byte for byte. Requires `node` on PATH (same engine the test
+# suite already uses for _SCORE_JS).
+
+_REGRADE_FIELDS = (
+    "score", "correct", "outcomeClass", "gradedCost", "acceptedSet",
+    "problemVersion", "type", "difficultyLevel",
+    # lead-only extras (absent from bidding recomputations)
+    "rankingMetric", "chosenRank", "recommendedLead", "primaryValue",
+)
+
+_REGRADE_JS = r"""
+/* regrade driver (appended to _SCORE_JS by regrade_attempts): recompute the
+   derived grading fields of stored attempts from CURRENT problem docs. The
+   wrappers mirror bt-firebase.js gradeBidding/gradeLead, but operate on RAW
+   Firestore records (accepted may be a string, rows in verdict.table) — the
+   normalization btScoreBidding/btScoreLead already handle.
+   argv[2]: JSON file {jobs: [{key, problem, action, mode}]}
+   stdout:  JSON {key: derived-fields} */
+const fs = require("fs");
+function metaOf(P) {
+  const cls = P.classification || {};
+  return {problemVersion: P.created_at || "",
+          type: cls.type || P.type || null,
+          difficultyLevel: cls.difficulty_level || null};
+}
+function regradeBidding(P, action) {
+  const sp = btScoreBidding(P, action);      // normalizes accepted + dead
+  const accepted = sp.accepted || [];
+  const correct = accepted.includes(action);
+  const v = (P && P.verdict) || {};
+  const rows = (v.corrected && v.corrected.length) ? v.corrected
+             : (v.table || []);
+  const row = rows.find(r => (r.bid || r.action) === action);
+  const ev = row === undefined ? undefined
+    : (row.ev !== undefined ? row.ev : row.ev_imp_vs_top);
+  const best = v.best || accepted[0] ||
+    (rows[0] && (rows[0].bid || rows[0].action));
+  let outcomeClass = "suboptimal";
+  if (action === best) outcomeClass = "winner";
+  else if (correct) outcomeClass = "accepted-alt";
+  else if (sp.dead) outcomeClass = "dead";
+  return {...metaOf(P), correct, outcomeClass, score: sp.score,
+          gradedCost: (!correct && ev !== undefined && ev !== null)
+            ? Math.max(0, -ev) : 0,
+          acceptedSet: accepted};
+}
+function regradeLead(P, card, mode) {
+  const v = P.verdict || {};
+  const trainingMode = mode === "IMP" ? "IMP" : "MP";
+  const bm = (v.by_mode && v.by_mode[trainingMode]) || null;
+  const accepted = (bm && bm.accepted && bm.accepted.length)
+    ? bm.accepted : (v.accepted || []);
+  const correct = accepted.includes(card);
+  const row = (v.table || []).find(r => r.card === card);
+  const rankKey = trainingMode === "IMP" ? "rank_imp" : "rank_mp";
+  let gradedCost = 0;
+  if (row && !correct) {
+    if (trainingMode === "IMP" && row.exp_imps !== undefined) {
+      const best = (v.table || []).find(r => accepted.includes(r.card));
+      if (best && best.exp_imps !== undefined)
+        gradedCost = Math.max(0, +best.exp_imps - +row.exp_imps);
+    } else if (row.vs_best !== undefined) {
+      gradedCost = Math.max(0, -(+row.vs_best));
+    }
+  }
+  const primaryValue = row
+    ? (trainingMode === "IMP" ? row.exp_imps : row.avg_def_tricks) : null;
+  return {...metaOf(P), correct, gradedCost,
+          score: btScoreLead(P, card, trainingMode).score,
+          rankingMetric: trainingMode === "IMP" ? "exp_imps"
+                                                : "exp_def_tricks",
+          chosenRank: row && row[rankKey] !== undefined ? row[rankKey] : null,
+          recommendedLead: (bm && bm.recommended) || accepted[0] || null,
+          primaryValue: primaryValue === undefined ? null : primaryValue,
+          outcomeClass: correct ? "winner" : "suboptimal",
+          acceptedSet: accepted};
+}
+const inp = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+const out = {};
+for (const j of inp.jobs) {
+  out[j.key] = (j.problem.kind || "bidding") === "lead"
+    ? regradeLead(j.problem, j.action, j.mode)
+    : regradeBidding(j.problem, j.action);
+}
+console.log(JSON.stringify(out));
+"""
+
+
+def recompute_attempt_grades(problems: dict, attempts: list[dict]) -> dict:
+    """Recompute derived grading fields for *attempts* against *problems*.
+
+    ``problems``: {problemId: raw problem doc}; ``attempts``: dicts with
+    ``key`` (opaque, returned as-is), ``problemId``, ``action`` (the stored
+    guess) and optional ``mode`` (lead trainingMode). Attempts whose problem
+    is missing are left out of the result — the caller decides what a
+    deleted problem means. Pure but shells out to node (see module note)."""
+    import json as _json
+    import shutil
+    import subprocess
+    import tempfile
+
+    from ..app.webapp import _SCORE_JS
+
+    if shutil.which("node") is None:
+        raise RuntimeError("regrading needs `node` on PATH: the score is "
+                           "recomputed with the client's own scoring module "
+                           "(_SCORE_JS) to guarantee parity")
+    jobs = [{"key": a["key"], "problem": problems[a["problemId"]],
+             "action": a["action"], "mode": a.get("mode")}
+            for a in attempts if a.get("problemId") in problems]
+    if not jobs:
+        return {}
+    with tempfile.TemporaryDirectory() as td:
+        script = Path(td) / "regrade.js"
+        payload = Path(td) / "jobs.json"
+        script.write_text(_SCORE_JS + _REGRADE_JS, encoding="utf-8")
+        payload.write_text(_json.dumps({"jobs": jobs}), encoding="utf-8")
+        res = subprocess.run(["node", str(script), str(payload)],
+                             capture_output=True, text=True)
+    if res.returncode != 0:
+        raise RuntimeError(f"regrade driver failed: {res.stderr.strip()}")
+    return _json.loads(res.stdout.strip().splitlines()[-1])
+
+
+def changed_grade_fields(stored: dict, want: dict) -> dict:
+    """The subset of *want* that differs from *stored* (the write payload).
+    Float noise within 1e-9 is not a change, so reruns are no-ops."""
+    out = {}
+    for k, v in want.items():
+        cur = stored.get(k)
+        if isinstance(cur, bool) or isinstance(v, bool):
+            if cur is v:
+                continue
+        elif isinstance(cur, (int, float)) and isinstance(v, (int, float)):
+            if abs(cur - v) < 1e-9:
+                continue
+        elif cur == v:
+            continue
+        out[k] = v
+    return out
+
+
+def regrade_attempts(key_path: str | None = None,
+                     dry_run: bool = False) -> dict:
+    """Fix user history after problem changes: recompute every stored
+    attempt's derived grading fields (see _REGRADE_FIELDS) from the CURRENT
+    problem docs and rewrite only the attempts where something differs.
+
+    Run this after any migration that changes published verdicts or scores
+    (e.g. backfill_dead_options) so dashboards stop carrying stale grades.
+    Idempotent — a second run finds nothing to change. The guess itself
+    (chosenCall/answer, trainingMode, timestamps, attemptCount) is never
+    modified; ``ts`` is bumped on rewritten docs so other devices'
+    incremental sync picks the regrade up (firstTs, the dashboard's
+    ordering key, is immutable and untouched). Attempts on problems that
+    were DELETED from the pool are left as-is (their snapshot is the only
+    record left; the dashboard already renders them as removed).
+
+    Returns {attempts, regraded, unchanged, missing_problem}. ``dry_run``
+    reports without writing."""
+    from firebase_admin import firestore as _fs
+
+    remote = FirestorePool(key_path)
+    db = remote._db
+    snaps = list(db.collection_group("attempts").stream())
+
+    metas = []
+    for s in snaps:
+        a = s.to_dict() or {}
+        pid = a.get("problemId") or s.id
+        action = a.get("chosenCall") or a.get("answer")
+        if not action:
+            continue
+        metas.append({"key": s.reference.path, "problemId": pid,
+                      "action": action, "mode": a.get("trainingMode"),
+                      "_snap": s, "_stored": a})
+
+    pids = sorted({m["problemId"] for m in metas})
+    problems = {}
+    for snap in db.get_all([remote._col.document(p) for p in pids]):
+        if snap.exists:
+            problems[snap.id] = snap.to_dict()
+
+    recomputed = recompute_attempt_grades(
+        problems, [{k: m[k] for k in ("key", "problemId", "action", "mode")}
+                   for m in metas])
+
+    regraded = unchanged = missing = 0
+    for m in metas:
+        if m["problemId"] not in problems:
+            missing += 1
+            continue
+        diff = changed_grade_fields(m["_stored"], recomputed[m["key"]])
+        if not diff:
+            unchanged += 1
+            continue
+        regraded += 1
+        if not dry_run:
+            _retry_transient(lambda ref=m["_snap"].reference, d=diff:
+                             ref.set({**d, "ts": _fs.SERVER_TIMESTAMP},
+                                     merge=True))
+    return {"attempts": len(metas), "regraded": regraded,
+            "unchanged": unchanged, "missing_problem": missing}
