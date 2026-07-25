@@ -305,6 +305,16 @@ def cmd_pool_purge_forcing_pass(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pool_purge_orphan_attempts(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import purge_orphan_attempts
+    summary = purge_orphan_attempts(key_path=args.key, dry_run=args.dry_run)
+    verb = "would delete" if args.dry_run else "deleted"
+    print(f"{verb} {summary['orphans']} of {summary['attempts']} stored "
+          f"attempts whose problem no longer exists "
+          f"({summary['live_problems']} problems in the pool)")
+    return 0
+
+
 def cmd_pool_regrade_attempts(args: argparse.Namespace) -> int:
     from ..pool.firestore_store import regrade_attempts
     summary = regrade_attempts(key_path=args.key, dry_run=args.dry_run)
@@ -347,6 +357,7 @@ _POOL_SCRIPTS = {
     "classify": "classify_pool.py",
     "reexplain": "reexplain_pool.py",
     "backfill-notes": "backfill_bot_notes.py",
+    "audit": "audit_pool.py",
 }
 
 
@@ -579,6 +590,18 @@ def main(argv: list[str] | None = None) -> int:
                     help="report the offenders without deleting")
     pf.set_defaults(func=cmd_pool_purge_forcing_pass)
 
+    po = pool_sub.add_parser(
+        "purge-orphan-attempts",
+        help="delete stored attempts whose problem no longer exists (they "
+             "cannot be regraded or re-practiced); the guesses on live "
+             "problems are untouched")
+    po.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    po.add_argument("--dry-run", action="store_true",
+                    help="report counts without deleting")
+    po.set_defaults(func=cmd_pool_purge_orphan_attempts)
+
     pr = pool_sub.add_parser(
         "regrade-attempts",
         help="fix user history after problem changes: recompute every "
@@ -600,6 +623,8 @@ def main(argv: list[str] | None = None) -> int:
         "classify": "classify pool records (difficulty + type)",
         "reexplain": "regenerate every problem's explanations from GIB",
         "backfill-notes": "backfill engine notes on pool records",
+        "audit": "re-run the explanation gates over published problems "
+                 "(--band adds the engine check; --remove deletes offenders)",
     }
     for name, filename in _POOL_SCRIPTS.items():
         pool_sub.add_parser(

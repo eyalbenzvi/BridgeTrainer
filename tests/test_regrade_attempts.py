@@ -135,3 +135,31 @@ def test_cli_wires_regrade_attempts(monkeypatch):
                         lambda a: seen.update(hit=True, dry=a.dry_run) or 0)
     assert cli.main(["pool", "regrade-attempts", "--dry-run"]) == 0
     assert seen == {"hit": True, "dry": True}
+
+
+# ---- orphan attempts: history on problems that no longer exist -------------
+
+def test_orphan_attempt_keys_selects_only_the_dead_ones():
+    from bridge_trainer.pool.firestore_store import orphan_attempt_keys
+
+    live = {"ben1-live", "lead1-live"}
+    attempts = [
+        {"key": "users/u/attempts/ben1-live", "problemId": "ben1-live"},
+        {"key": "users/u/attempts/lead1-live", "problemId": "lead1-live"},
+        {"key": "users/u/attempts/ben1-gone", "problemId": "ben1-gone"},
+        {"key": "users/u/attempts/no-id"},          # legacy doc, no field
+    ]
+    assert orphan_attempt_keys(live, attempts) == [
+        "users/u/attempts/ben1-gone", "users/u/attempts/no-id"]
+    # an empty pool would orphan everything — the caller must pass real ids
+    assert len(orphan_attempt_keys(set(), attempts)) == 4
+
+
+def test_cli_wires_purge_orphan_attempts(monkeypatch):
+    from bridge_trainer.app import cli
+
+    seen = {}
+    monkeypatch.setattr(cli, "cmd_pool_purge_orphan_attempts",
+                        lambda a: seen.update(hit=True, dry=a.dry_run) or 0)
+    assert cli.main(["pool", "purge-orphan-attempts", "--dry-run"]) == 0
+    assert seen == {"hit": True, "dry": True}

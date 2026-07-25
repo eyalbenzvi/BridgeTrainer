@@ -91,7 +91,15 @@ BAND_N_MIN = 30        # below this many samples a band proves nothing
 BAND_P5_SURE = 0.90    # measured "the bid promises 5+ here"
 BAND_LEN_SLACK = 2.0   # gloss says N+, band average below N-2 refutes it
 BAND_P5_REFUTED = 0.5  # gloss says 5+/6+, most sampled hands lack even 5
-BAND_HCP_GAP = 2       # gloss and band HCP ranges must at least touch ±this
+BAND_HCP_GAP = 2       # gloss and band HCP ranges must at least touch ±this.
+                       # Confirmed empirically 2026-07-25 (docs/
+                       # forcing_pass_gate.md): over 249 stem/option rows on
+                       # 80 published boards this fires on 0 — GIB states
+                       # floors ~1.8 HCP above Ben's measured mean (p95 +1.0,
+                       # max +2.0), so ±2 is the smallest tolerance that is
+                       # clean, and no tighter HCP rule catches a false
+                       # FORCING claim without killing ~25% of the pool.
+                       # That class is caught by forcing_pass_violations.
 
 _HCP_W = {"A": 4, "K": 3, "Q": 2, "J": 1}
 _NUM_WORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
