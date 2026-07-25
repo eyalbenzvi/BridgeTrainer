@@ -294,6 +294,16 @@ def cmd_pool_backfill_dead(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pool_regrade_attempts(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import regrade_attempts
+    summary = regrade_attempts(key_path=args.key, dry_run=args.dry_run)
+    verb = "would regrade" if args.dry_run else "regraded"
+    print(f"{verb} {summary['regraded']} of {summary['attempts']} stored "
+          f"attempts ({summary['unchanged']} already current, "
+          f"{summary['missing_problem']} on deleted problems left as-is)")
+    return 0
+
+
 def _run_pool_script(filename: str, argv: list[str]) -> int:
     """Delegate a `trainer pool <cmd>` to a stable maintenance script under
     scripts/ (ARCH-11). The script is executed as __main__ with *argv* so it
@@ -546,6 +556,19 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("--dry-run", action="store_true",
                     help="report counts without writing")
     pd.set_defaults(func=cmd_pool_backfill_dead)
+
+    pr = pool_sub.add_parser(
+        "regrade-attempts",
+        help="fix user history after problem changes: recompute every "
+             "stored attempt's derived grading fields (score/outcome/"
+             "acceptedSet/...) from the current problem docs; guesses and "
+             "timestamps are never touched (needs node)")
+    pr.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pr.add_argument("--dry-run", action="store_true",
+                    help="report counts without writing")
+    pr.set_defaults(func=cmd_pool_regrade_attempts)
 
     # ARCH-11: stable pool-maintenance scripts, surfaced as discoverable pool
     # subcommands. The actual dispatch is intercepted in main() (before
