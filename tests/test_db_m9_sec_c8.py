@@ -61,7 +61,10 @@ def test_dashboard_marks_orphan_attempts():
 
 # ---- SEC-A-6: esc() on user-owned attempt fields in the dashboard -----------
 def test_dashboard_escapes_attempt_fields():
-    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("const missList"):]
+    # every miss row on the page is built by this one function, so escaping it
+    # here covers both the tier-1 "3 to revisit" card and the full list
+    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("function missRowHtml"):
+                        _DASHBOARD_JS.index("function section(")]
     assert "esc(m.chosenCall)" in seg
     assert "esc(m.acceptedSet.join" in seg
     assert "esc(OUTCOME_HE[m.outcomeClass]" in seg
@@ -94,30 +97,30 @@ def test_dashboard_js_still_parses():
 # User report: stored history went stale as problems changed or were deleted
 # and the score formula was fixed. `trainer pool regrade-attempts` fixes every
 # attempt whose problem still exists, but an attempt on a DELETED problem has
-# nothing left to regrade against — and the ones predating the stored score
-# fall back to btScoreOfAttempt's cost-only estimate, which lacks the CI
-# haircut, stakes stretch and policy leniency the real scorer applies (up to
-# 27 points harsher, measured on the live attempts of the production account).
-# So they are excluded from the aggregates and counted out loud instead.
+# nothing left to regrade against: its verdict is gone. The hero already
+# excludes scoreless legacy attempts for the same reason (their fallback score
+# reads harsher — measured up to 27 points on the production account); a grade
+# that can never be verified again is excluded too, and counted out loud.
 
-def test_aggregates_skip_attempts_on_deleted_problems():
+def test_hero_excludes_attempts_on_deleted_problems():
     seg = _DASHBOARD_JS[_DASHBOARD_JS.index("function render(attempts)"):]
-    assert "const graded = LIVE_IDS" in seg
-    assert "first.filter(a => LIVE_IDS.has(a.problemId))" in seg
-    # every aggregate reads `graded`, never `first`
-    assert "graded.reduce((s, a) => s + btScoreOfAttempt(a), 0)" in seg
-    assert "const n = graded.length;" in seg
-    assert "const recent = [...graded]" in seg          # streak
-    assert "const chrono = [...graded]" in seg           # trend
-    assert "for (const a of graded) scen[" in seg        # per-scenario cards
-    assert "for (const a of graded) { const kd" in seg   # by-kind card
-    # ... and the miss list still shows the removed ones, marked
-    assert "const recentAll = [...first]" in seg
-    assert "misses = recentAll.filter" in seg
-    assert "בעיה שהוסרה" in seg
+    assert "first.filter(btHasStoredScore).filter(a => !btOrphan(a))" in seg
+    # legacyN keeps its own meaning (no stored score); the deleted-problem
+    # ones are counted separately so the disclosure can name both reasons
+    assert "const legacyN = first.filter(a => !btHasStoredScore(a)).length;" \
+        in seg
+    assert "const goneN = first.length - scored.length - legacyN;" in seg
+    assert "heroHtml(heroSet, legacyN, goneN)" in seg
 
 
-def test_orphan_count_is_shown_not_hidden():
-    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("const statCard"):]
-    assert "orphans" in seg
-    assert "אינן נכללות" in seg
+def test_orphan_predicate_is_null_safe():
+    assert "function btOrphan(a) { return !!LIVE_IDS" in _DASHBOARD_JS
+
+
+def test_deleted_problem_count_is_shown_not_hidden():
+    hero = _DASHBOARD_JS[_DASHBOARD_JS.index("function heroHtml("):
+                         _DASHBOARD_JS.index("function mixHtml(")]
+    assert "goneN" in hero
+    assert "שהוסרו מהמאגר" in hero
+    # ... and their rows are still on the page, marked
+    assert "בעיה שהוסרה" in _DASHBOARD_JS
