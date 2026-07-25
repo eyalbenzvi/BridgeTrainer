@@ -570,3 +570,81 @@ def backfill_lead_types(key_path: str | None = None,
         remote.write_index(build_index(records))     # rebuild from memory
     return {"lead_total": lead_total, "updated": updated,
             "total": len(records)}
+
+
+# Kept in sync with engine/verdict.py DEAD_SHARE (imported lazily there
+# would drag numpy into this module; the value is a published contract).
+_DEAD_SHARE = 0.005
+_DEAD_SENTENCE = " Never the winner on any simulated layout."
+
+
+def vet_dead_options(verdict: dict) -> tuple[list, list[str]]:
+    """Split a bidding verdict's ``dead_options`` into (kept, stale bids).
+
+    A flag is STALE when the option's own evidence row contradicts it: the
+    row ties-or-beats the accepted call on at least DEAD_SHARE of the
+    layouts (``p_gain + p_push``), so it cannot be an option that "never
+    won a single simulated layout". Records forged before the tied-wins
+    fix in engine/verdict.py required an option to be the strictly-UNIQUE
+    per-sample winner, which flagged calls that merely tied another call's
+    winning result (ben1-19f939859fa: 3S at -1.6 IMP, 52% wins vs the
+    winner, scored 0 while the worse Pass scored 78). This test is
+    strictly stronger than the forge's own share floor, so a genuinely
+    dead option is never un-deaded. Pure — shared by the backfill and its
+    tests."""
+    rows = {r.get("bid"): r for r in (verdict.get("table") or [])}
+    kept, stale = [], []
+    for entry in verdict.get("dead_options") or []:
+        bid = entry.get("bid") if isinstance(entry, dict) else entry
+        row = rows.get(bid)
+        if row is not None and (row.get("p_gain") or 0) + \
+                (row.get("p_push") or 0) >= _DEAD_SHARE:
+            stale.append(bid)
+        else:
+            kept.append(entry)
+    return kept, stale
+
+
+def backfill_dead_options(key_path: str | None = None,
+                          dry_run: bool = False) -> dict:
+    """Migration: remove stale dead-option flags from bidding problems *in
+    Firestore* (see ``vet_dead_options``), and strip the baked "Never the
+    winner on any simulated layout." sentence from the un-deaded options'
+    explanation texts so the record stays self-consistent. The index is
+    untouched (it carries no verdict data). Bidding docs whose flags all
+    survive vetting — and every lead doc — are read but never written.
+
+    Returns {with_dead, updated, stale_flags, total}. ``dry_run`` reports
+    without writing."""
+    remote = FirestorePool(key_path)
+    records = remote.stream_records(
+        fields=["kind", "verdict", "explanations"])
+    updated = with_dead = stale_flags = 0
+    for rec in records:
+        if rec.get("kind") == "lead":
+            continue
+        verdict = rec.get("verdict") or {}
+        if not verdict.get("dead_options"):
+            continue
+        with_dead += 1
+        kept, stale = vet_dead_options(verdict)
+        if not stale:
+            continue
+        updated += 1
+        stale_flags += len(stale)
+        payload = {"verdict": {"dead_options": kept}}
+        options = (rec.get("explanations") or {}).get("options")
+        if options and any(_DEAD_SENTENCE.strip() in (o.get("text") or "")
+                           for o in options if o.get("bid") in stale):
+            # arrays replace wholesale under merge, so write the full list
+            # back exactly as read, minus the stale sentence
+            for o in options:
+                if o.get("bid") in stale and o.get("text"):
+                    o["text"] = o["text"].replace(_DEAD_SENTENCE, "").replace(
+                        _DEAD_SENTENCE.strip(), "").strip()
+            payload["explanations"] = {"options": options}
+        if not dry_run:
+            _retry_transient(lambda rid=rec["id"], p=payload:
+                             remote._col.document(rid).set(p, merge=True))
+    return {"with_dead": with_dead, "updated": updated,
+            "stale_flags": stale_flags, "total": len(records)}

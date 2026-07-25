@@ -801,7 +801,10 @@ const BAND_TONE = {best: "win", near: "win", minor: "gold",
    noise margin), a stakes-stretched scale (slam swings are judged wider than
    part-score battles), and field leniency by the engine's policy weight.
    Handles both the raw record shape (verdict.table / accepted as a string)
-   and the page-normalized shape (verdict.corrected / accepted as an array). */
+   and the page-normalized shape (verdict.corrected / accepted as an array).
+   The dead pin trusts verdict.dead_options as stored: the forge counts tied
+   wins (engine/verdict.py), and stale strictly-unique flags on old records
+   were removed by the one-off `trainer pool backfill-dead` migration. */
 function btScoreBidding(P, action) {
   const v = (P && P.verdict) || {};
   const accepted = (Array.isArray(v.accepted) ? v.accepted
