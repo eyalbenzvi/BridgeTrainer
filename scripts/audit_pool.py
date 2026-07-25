@@ -7,12 +7,13 @@ gap: it re-runs them over stored records — the live Firestore pool or a local
 pool dir — using the cards the record itself carries (no GIB refetch, so the
 verdict of the audit is exactly what the stored explanations say).
 
-Two levels:
+Three levels:
 
   cheap (default, no engine, no network)
       ``record_violations``: every stem call and offered option's gloss vs the
-      13 actual cards of the bidder, plus the forcing-pass rule (Pass offered
-      while the hero's side is under a live force).
+      13 actual cards of the bidder, the forcing-pass rule (Pass offered while
+      the hero's side is under a live force), an unexplained conventional call
+      (R2) and a forcing candidate the rollout leaves in as the contract (R3).
 
   --band (needs the Ben engine: BEN_HOME + the Ben venv)
       ``band_violations`` as well: Ben's OWN measured meaning of each non-pass
@@ -21,13 +22,24 @@ Two levels:
       Costs one sampling pass per checked call (~7 s per board), which is why
       it is opt-in.
 
+  --rollout (needs the Ben engine too)
+      R1, ``answer_insensitive_violations``: re-rolls the board's candidates
+      and fires when partner answered differently on different layouts while
+      the final contract never moved. No record stores the rollout auctions, so
+      this is the only way to vet a published board for it — and it is the only
+      way to tell that defect from a legitimately forced continuation, which is
+      why ``point_mass_suspects`` (printed as SUSPECT, never removed) is a
+      pre-filter and not a verdict. ~40 s per board; combine with --ids or
+      --suspects-only to pay it on the shortlist.
+
 Lead problems are audited with ``lead_record_violations`` — the same
 gloss-vs-cards rule over the complete auction they display, which is the whole
-evidence a leader reads. The band check does not apply to them (they offer
-cards, not calls), so --band changes nothing for leads.
+evidence a leader reads. The band and rollout checks do not apply to them (they
+offer cards, not calls), so those flags change nothing for leads.
 
 Usage:
     python3 scripts/audit_pool.py --firestore [--key K] [--band] [--remove]
+    python3 scripts/audit_pool.py --firestore --rollout --suspects-only
     python3 scripts/audit_pool.py <pool_dir> [--band]
     trainer pool audit --firestore --band            # same thing
 
@@ -41,8 +53,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from bridge_trainer.engine.explain_check import (band_violations,
+from bridge_trainer.engine.explain_check import (answer_insensitive_violations,
+                                                 band_violations,
                                                  lead_record_violations,
+                                                 point_mass_suspects,
                                                  record_violations)
 from bridge_trainer.engine.scanner import SEATS, VUL_NAMES, Spot
 
@@ -65,10 +79,35 @@ def spot_from_record(rec: dict) -> Spot:
         p_top=0.0, full_auction=list(rec.get("engine_auction_complete") or []))
 
 
-def audit_record(rec: dict, engine=None) -> list[str]:
+ROLLOUT_SAMPLES = 128   # R1 is structural (argmax on a fixed hero hand), so
+                        # the screen-size pool shows it as clearly as 512 and
+                        # costs a quarter as much
+
+
+def rollout_violations(rec: dict, engine) -> list[str]:
+    """R1 for a stored record: re-roll the board's own candidates on freshly
+    sampled layouts and run ``answer_insensitive_violations`` on the result.
+
+    The record keeps only the contract counts, so the rollout has to be redone
+    to see partner's replies. Ben's sampler reseeds deterministically off the
+    hero's hand, so this is a faithful re-run of the same board rather than a
+    fresh experiment."""
+    spot = spot_from_record(rec)
+    bot = engine.bot(spot.hands[spot.hero_i], spot.hero_i, spot.dealer_i,
+                     spot.vul)
+    cands = [c for c, _p in spot.candidates]
+    padded, hands_np, hands_pbn, quality = engine.sample_for_auction(
+        bot, spot.dealer_i, spot.stem, n_samples=ROLLOUT_SAMPLES)
+    ev = engine.rollout_eval(bot, padded, cands, hands_np, hands_pbn, quality,
+                             dd_memo={})
+    return answer_insensitive_violations(ev, spot.stem)
+
+
+def audit_record(rec: dict, engine=None, rollout: bool = False) -> list[str]:
     """Every violation the current gates find in *rec*. With *engine*, the
-    band half runs too (bidding boards only — a lead board has no candidate
-    calls whose measured meaning could be sampled)."""
+    band half runs too, and with *rollout* the R1 re-roll as well (bidding
+    boards only — a lead board has no candidate calls whose measured meaning
+    could be sampled)."""
     if rec.get("kind") == "lead":
         return lead_record_violations(rec)
     fatal, _soft = record_violations(rec)
@@ -77,8 +116,19 @@ def audit_record(rec: dict, engine=None) -> list[str]:
     ex = rec.get("explanations") or {}
     option_cards = {o["bid"]: o.get("card") for o in (ex.get("options") or [])
                     if o.get("bid")}
-    return fatal + band_violations(engine, spot_from_record(rec),
-                                   ex.get("stem") or [], option_cards)
+    fatal = fatal + band_violations(engine, spot_from_record(rec),
+                                    ex.get("stem") or [], option_cards)
+    if rollout:
+        fatal += rollout_violations(rec, engine)
+    return fatal
+
+
+def record_suspects(rec: dict) -> list[str]:
+    """R1's record-only pre-filter — reported, never removed."""
+    if rec.get("kind") == "lead":
+        return []
+    return point_mass_suspects((rec.get("verdict") or {}).get("table") or [],
+                               (rec.get("quality") or {}).get("n_samples") or 0)
 
 
 def _local_records(pool_dir: str) -> list[dict]:
@@ -100,6 +150,13 @@ def main(argv=None) -> int:
     ap.add_argument("--band", action="store_true",
                     help="also run the engine band check on bidding boards "
                          "(needs Ben)")
+    ap.add_argument("--rollout", action="store_true",
+                    help="also re-roll each bidding board and run R1, the "
+                         "answer-insensitive-ask check (needs Ben; ~40s/board)")
+    ap.add_argument("--suspects-only", action="store_true",
+                    help="audit only the boards R1's cheap pre-filter flags "
+                         "(a point-mass projection past the candidate) — the "
+                         "shortlist --rollout is worth paying for")
     ap.add_argument("--remove", action="store_true",
                     help="delete the offenders from Firestore (index first)")
     ap.add_argument("--limit", type=int, default=0,
@@ -133,18 +190,26 @@ def main(argv=None) -> int:
         missing = want - {r["id"] for r in records}
         if missing:
             print(f"not in the pool: {', '.join(sorted(missing))}")
+    suspects = {}
+    for rec in records:
+        s = record_suspects(rec)
+        if s:
+            suspects[rec["id"]] = s
+    if args.suspects_only:
+        records = [r for r in records if r["id"] in suspects]
+        print(f"auditing the {len(records)} point-mass suspect(s) only")
     if args.limit:
         records = records[:args.limit]
 
     engine = None
-    if args.band:
+    if args.band or args.rollout:
         from bridge_trainer.engine.ben import get_engine
         engine = get_engine()
 
     findings = {}
     for i, rec in enumerate(records, 1):
         try:
-            bad = audit_record(rec, engine)
+            bad = audit_record(rec, engine, rollout=args.rollout)
         except Exception as e:                       # never lose the report
             bad = [f"audit error ({type(e).__name__}: {e})"]
         if bad:
@@ -157,12 +222,27 @@ def main(argv=None) -> int:
             print(f"[{i}/{len(records)}] clean so far: "
                   f"{i - len(findings)}/{i}", flush=True)
 
+    level = "cheap only"
+    if engine:
+        level = "cheap + " + " + ".join(
+            k for k, on in (("band", args.band), ("rollout", args.rollout))
+            if on)
     print(f"\n{len(findings)} of {len(records)} problems violate the "
-          f"current gates ({'cheap + band' if engine else 'cheap only'})")
+          f"current gates ({level})")
+    # R1's pre-filter is reported, never acted on: 5 of the 11 rows it flagged
+    # on the published pool were legitimate (partner had one action on every
+    # layout). --rollout is what decides.
+    unconfirmed = {p: s for p, s in suspects.items() if p not in findings}
+    if unconfirmed and not args.rollout:
+        print(f"\n{len(unconfirmed)} point-mass SUSPECT(S) — re-roll with "
+              f"--rollout to confirm or clear (never removed on this "
+              f"evidence):")
+        for pid, s in sorted(unconfirmed.items()):
+            print(f"  {pid}: {s[0]}")
     if args.out:
-        Path(args.out).write_text(json.dumps(findings, indent=1,
-                                            ensure_ascii=False),
-                                 encoding="utf-8")
+        Path(args.out).write_text(
+            json.dumps({"findings": findings, "suspects": suspects},
+                       indent=1, ensure_ascii=False), encoding="utf-8")
         print(f"findings written to {args.out}")
     if findings and args.remove:
         gone = sum(bool(remote.remove(pid)) for pid in findings)

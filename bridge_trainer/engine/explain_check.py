@@ -87,7 +87,22 @@ from .conventions import seat_of
 SEATS = "NESW"
 SLACK_HCP = 2          # GIB band may be shaded by a couple of points
 SLACK_LEN = 1          # ... and a promised length by one card
-BAND_N_MIN = 30        # below this many samples a band proves nothing
+BAND_N_MIN = 30        # below this many samples an HCP PERCENTILE proves
+                       # nothing (p10/p90 of a handful of layouts is noise)
+BAND_LEN_N_MIN = 12    # ... but a suit-length mean/share still does, and the
+                       # gap matters: Ben's sampler answers "I cannot place
+                       # this call in any system" by falling back to its rescue
+                       # floor (min_sample_hands_auction = 15 layouts, filter
+                       # off — sample.py), so a blanket n < 30 skip disabled
+                       # the whole check on exactly the calls that needed it.
+                       # ben1-19f975cad49 offered four such candidates (n = 15,
+                       # sampler quality 0.48-0.56 against its own 0.70
+                       # threshold) and its 4♦ gloss — "5+ !C" against a
+                       # measured avg 3.6, P5+ 0.07 — went unchecked. The
+                       # returned layouts are the BEST-fitting ones, so a
+                       # length refutation measured on them is conservative;
+                       # 12 keeps the rescue floor in and genuine noise out.
+                       # See docs/4nt_projection_and_gloss_gate.md §4.
 BAND_P5_SURE = 0.90    # measured "the bid promises 5+ here"
 BAND_LEN_SLACK = 2.0   # gloss says N+, band average below N-2 refutes it
 BAND_P5_REFUTED = 0.5  # gloss says 5+/6+, most sampled hands lack even 5
@@ -361,6 +376,297 @@ def forcing_pass_violations(stem_entries: list[dict], option_cards: dict,
     return []
 
 
+# ---------------------------------------------------------------------------
+# The ben1-19f975cad49 rules (docs/4nt_projection_and_gloss_gate.md).
+#
+# One board, three faults, three predicates. R2/R3 are record-only (they read
+# the stored cards and the verdict table, so `scripts/audit_pool.py` vets the
+# published pool with them); R1 needs the rollout auctions and therefore runs
+# in the forge, with a cheap record-only pre-filter for the audit.
+# ---------------------------------------------------------------------------
+
+CONTRACT_RE = re.compile(r"^(\d)([NSHDC])([NESW])$")
+FORCING_CONTRACT_SHARE = 0.05   # R3: the observed shares jump from 8.5% to
+                                # 1.2%, so any floor in (2%, 8%] picks the
+                                # same rows — this is not a fitted knob.
+ASK_REPLY_SHARE = 0.05          # R1: a reply this common counts as an answer
+ASK_SETTLED_SHARE = 0.99        # R1: ... and the contract this stable counts
+                                # as "the answer changed nothing"
+NT_ASK_LEVELS = (4, 5)          # 4NT/5NT cannot be a natural contract bid
+
+
+def contract_call(contract: str) -> str | None:
+    """'6CS' -> '6C', '3NN' -> '3NT'; None when it isn't a contract token
+    (``PASS``, a doubled contract like ``5DXW``)."""
+    m = CONTRACT_RE.match(str(contract or ""))
+    if not m:
+        return None
+    level, strain, _decl = m.groups()
+    return level + ("NT" if strain == "N" else strain)
+
+
+def contract_pairs(top_contracts) -> list[tuple]:
+    """``verdict.table[i]["top_contracts"]`` as plain (contract, count) pairs.
+
+    Accepts both shapes the same field takes in this codebase: the forge's
+    ``Counter.most_common`` list of tuples, and the Firestore round-trip where
+    ``_firestore_safe`` has wrapped each inner list in ``{"items": [...]}``."""
+    out = []
+    for e in top_contracts or []:
+        if isinstance(e, dict):
+            e = e.get("items") or []
+        if isinstance(e, (list, tuple)) and len(e) >= 2:
+            out.append((e[0], e[1]))
+    return out
+
+
+def conventional_call(call: str, auction: list[str], dealer_i: int,
+                      hero_i: int) -> str | None:
+    """Why *call* cannot be read off its own denomination — '4NT/5NT ask' or
+    'cue-bid' — or None when the call may be natural.
+
+    A natural call needs no stated meaning: the strain says what it is and
+    only the level is in question. A 4NT/5NT ask and a bid in a suit only the
+    opponents have shown are the two cases where the denomination carries no
+    meaning at all, so the gloss is the whole explanation."""
+    if not call or call in ("P", "X", "XX"):
+        return None
+    level, den = int(call[0]), call[1:]
+    if den == "NT":
+        return "4NT/5NT ask" if level in NT_ASK_LEVELS else None
+    ours, theirs = set(), set()
+    for i, tok in enumerate(auction or []):
+        if tok in ("P", "X", "XX"):
+            continue
+        side = ours if seat_of(dealer_i, i) % 2 == hero_i % 2 else theirs
+        side.add(tok[1:])
+    return "cue-bid" if den in theirs and den not in ours else None
+
+
+def hero_prior_card(stem_entries: list[dict], dealer_i: int,
+                    hero_i: int) -> dict:
+    """What the hero's OWN earlier calls have already established: cumulative
+    suit minima/maxima, the widest HCP and total-point bands stated, and
+    whether a force is already live. Same accumulation ``band_violations``
+    does for ``known_minlen``, over one seat and every band."""
+    prior = {"minlen": {}, "maxlen": {}, "hcp": None, "pts": None,
+             "forcing": False, "calls": []}
+    for e in stem_entries or []:
+        if e.get("call") == "P" or seat_of(dealer_i, e["idx"]) != hero_i:
+            continue
+        card = e.get("card") or {}
+        prior["calls"].append(e.get("call"))
+        for st, v in stated_minlen(card).items():
+            prior["minlen"][st] = max(prior["minlen"].get(st, 0), v)
+        for st, mx in (card.get("maxlen") or {}).items():
+            prior["maxlen"][st] = min(prior["maxlen"].get(st, 13), mx)
+        for key in ("hcp", "pts"):
+            b = card.get(key)
+            if b:
+                lo, hi = int(b[0]), int(b[1])
+                cur = prior[key]
+                prior[key] = (lo, hi) if cur is None else (min(cur[0], lo),
+                                                           max(cur[1], hi))
+        prior["forcing"] = prior["forcing"] or bool(card.get("forcing"))
+    return prior
+
+
+def gloss_adds_nothing(card: dict, prior: dict) -> bool:
+    """True when *card* states no constraint *prior* had not established, and
+    names no convention — i.e. it is not an explanation of anything.
+
+    This is deliberately not "GIB gave no convention name": GIB describes most
+    cue-bids by constraints alone ("4+ !S; 12+ HCP; forcing to 3N") and those
+    glosses are informative. What is not informative is a card that repeats
+    the seat's own earlier one, which is what GIB returns when it has no rule
+    for the call (ben1-19f975cad49: 4NT glossed with North's 1♠ card,
+    ``4+ !S; 6+ total points``)."""
+    if (card.get("text") or "").strip():
+        return False                      # named a convention
+    if _HOLDING_RE.search(card.get("gib_raw") or ""):
+        return False                      # asserts specific cards
+    if card.get("forcing") and not prior.get("forcing"):
+        return False                      # states a force that is new
+    for st, v in stated_minlen(card).items():
+        if v > (prior.get("minlen") or {}).get(st, 0):
+            return False                  # a length the seat had not shown
+    for st, mx in (card.get("maxlen") or {}).items():
+        if mx < 13 and mx < (prior.get("maxlen") or {}).get(st, 13):
+            return False                  # a cap the seat had not shown
+    for key in ("hcp", "pts"):
+        b = card.get(key)
+        p = prior.get(key)
+        if b and (p is None or int(b[0]) > p[0] or int(b[1]) < p[1]):
+            return False                  # a narrower strength band
+    return True
+
+
+def meaningless_gloss_violations(stem_entries: list[dict], option_cards: dict,
+                                 auction: list[str], dealer_i: int,
+                                 hero_i: int) -> list[str]:
+    """R2, fatal: an offered candidate that cannot be natural is displayed
+    with a gloss that explains nothing (ben1-19f975cad49).
+
+    The trainee is asked to choose 4NT — or a cue-bid — and the line that is
+    supposed to say what it means either is empty (GIB returned nothing) or
+    restates the constraints the hero's own earlier calls already established.
+    Whatever the rollout then says about the call, the board teaches a
+    decision it never explains, and the hero is graded on it.
+
+    Fatal rather than option-dropping, for the reason ``forcing_pass_
+    violations`` gives: the rollout that ranked the other calls sampled the
+    same partner behind the same undefined auction."""
+    out = []
+    prior = hero_prior_card(stem_entries, dealer_i, hero_i)
+    for call, card in (option_cards or {}).items():
+        why = conventional_call(call, auction, dealer_i, hero_i)
+        if not why:
+            continue
+        card = card or {}
+        raw = (card.get("gib_raw") or "").strip()
+        if not raw:
+            out.append(f"option {call}: a {why} with no meaning stated at all")
+        elif gloss_adds_nothing(card, prior):
+            shown = "/".join(prior["calls"]) or "the auction so far"
+            out.append(f"option {call}: a {why} glossed {raw!r} — exactly "
+                       f"what {shown} already showed, so the option the board "
+                       f"teaches is never explained")
+    return out
+
+
+def forcing_contract_violations(table: list[dict], option_cards: dict,
+                                auction: list[str], dealer_i: int, hero_i: int,
+                                n_samples: int,
+                                floor: float = FORCING_CONTRACT_SHARE
+                                ) -> list[str]:
+    """R3, fatal: the rollout leaves a FORCING candidate in as the final
+    contract (ben1-19f975cad49's 4♦, ``forcing to 5C``, played by North on
+    36 of 423 layouts).
+
+    ``forcing_pass_violations`` covers the adjacent case — Pass offered to the
+    hero under a live force — and never looks inside the rollout. This does:
+    if the projection the board publishes has partner passing a call the board
+    itself calls forcing, then that option's evidence (and the EV gap measured
+    against it) comes from a partner nobody plays with, and the trainee is
+    shown "leads to 4♦N 9%" as if playing the opponents' suit were a real
+    outcome of the choice."""
+    out = []
+    if not n_samples:
+        return out
+    for row in table or []:
+        call = row.get("bid")
+        if not call or call in ("P", "X", "XX"):
+            continue
+        card = (option_cards or {}).get(call) or {}
+        cue = conventional_call(call, auction, dealer_i, hero_i) == "cue-bid"
+        if not (card.get("forcing") or cue):
+            continue
+        for contract, cnt in contract_pairs(row.get("top_contracts")):
+            if contract_call(contract) != call:
+                continue
+            decl = CONTRACT_RE.match(str(contract)).group(3)
+            if SEATS.index(decl) % 2 != hero_i % 2:
+                continue        # they bought it — the force was discharged
+            share = cnt / n_samples
+            if share >= floor:
+                what = (_forcing_clause(card) if card.get("forcing")
+                        else "a cue-bid in their suit")
+                out.append(
+                    f"option {call} is {what!r} yet the rollout leaves it as "
+                    f"the contract ({contract}) on {cnt}/{n_samples} "
+                    f"({share:.0%}) layouts")
+    return out
+
+
+def point_mass_suspects(table: list[dict], n_samples: int) -> list[str]:
+    """R1's cheap pre-filter, for auditing records whose rollout auctions are
+    gone: a candidate whose projection is ONE contract on every layout, and
+    that contract is not the candidate itself.
+
+    Not a verdict. Measured over the published pool, 5 of the 11 rows this
+    flags are boards where partner had a single action on all 128 layouts, so
+    the point mass is a fact about the auction. Only
+    ``answer_insensitive_violations`` can tell the two apart, so this reports
+    suspects to re-roll."""
+    out = []
+    if not n_samples:
+        return out
+    for row in table or []:
+        call = row.get("bid")
+        if not call or call in ("P", "X", "XX"):
+            continue
+        pairs = contract_pairs(row.get("top_contracts"))
+        if not pairs:
+            continue
+        contract, cnt = pairs[0]
+        if contract_call(contract) in (None, call):
+            continue            # sign-off: the call IS the contract
+        if cnt >= n_samples:
+            out.append(f"option {call}: {contract} on {cnt}/{n_samples} "
+                       f"layouts — the auction ran past the candidate, so no "
+                       f"sampled hand changed the outcome (re-roll to confirm)")
+    return out
+
+
+def answer_insensitive_violations(ev, stem: list[str],
+                                  reply_share: float = ASK_REPLY_SHARE,
+                                  settled_share: float = ASK_SETTLED_SHARE
+                                  ) -> list[str]:
+    """R1, fatal: a candidate that asks a question and then ignores the answer
+    (ben1-19f975cad49).
+
+    Over the rollouts of one candidate, look at partner's first call after it
+    and at the final contract:
+
+    * partner's reply takes two or more distinct non-pass values (each on at
+      least *reply_share* of layouts) — so the call functioned as an ask or a
+      force, and the sampled layouts genuinely differed in what came back;
+    * the final contract is nevertheless the same on *settled_share* of them.
+
+    Then the projection the board publishes ("Leads to 6♣S 100%") is a
+    property of the search, not of bridge: Ben's ``bidding_rollout`` takes the
+    argmax for every sample, the hero's hand is identical in all of them, so
+    the hero's own continuation is a constant — 4NT answered 5♥/5♣/5♦/5♠ and
+    6♣ bid over every one of them.
+
+    Both halves are load-bearing. Without the first, this would also kill the
+    legitimate case where partner has one action on every layout (a splinter
+    partner signs off over): measured on the published pool, 5 of the 11
+    point-mass rows are exactly that, and 22 boards drawn at random produce no
+    hit in 56 option rows.
+
+    *ev* is an ``engine.ben.Evaluation`` (its ``auctions``/``contracts`` maps
+    are what ``rollout_eval`` already builds); *stem* is the spot's stem, so
+    ``len(stem) + 2`` indexes partner's reply (hero, LHO, partner, RHO)."""
+    from collections import Counter
+
+    out = []
+    k = len(stem or [])
+    for call in getattr(ev, "bids", []) or []:
+        if call in ("P", "X", "XX"):
+            continue
+        auctions = [a.split() if isinstance(a, str) else list(a)
+                    for a in (ev.auctions or {}).get(call, [])]
+        contracts = (ev.contracts or {}).get(call, [])
+        n = len(auctions)
+        if not n or not contracts:
+            continue
+        replies = Counter(a[k + 2] if len(a) > k + 2 else "-" for a in auctions)
+        answered = {r: c for r, c in replies.items()
+                    if r not in ("P", "-") and c / n >= reply_share}
+        if len(answered) < 2:
+            continue                      # no question was asked
+        contract, cnt = Counter(contracts).most_common(1)[0]
+        if cnt / n < settled_share:
+            continue                      # the answer moved the contract
+        shown = ", ".join(f"{r} x{c}" for r, c in
+                          sorted(answered.items(), key=lambda kv: -kv[1]))
+        out.append(f"option {call}: partner answered {shown} yet the contract "
+                   f"is {contract} on {cnt}/{n} ({cnt / n:.0%}) layouts — the "
+                   f"rollout discards the information the call asks for")
+    return out
+
+
 # GIB states suit length in prose too; parse_meaning ignores these, so the
 # band check reads them itself lest it accuse a gloss of omitting a suit it
 # stated in words. ("biddable" ~4+, "rebiddable" ~5+, "twice rebiddable" ~6+)
@@ -385,9 +691,16 @@ def band_vs_card(card: dict, feats: dict, call: str,
     known_minlen — suit minima already STATED for this seat by earlier
     glosses (cumulative). A response needn't restate shape its earlier
     bids established, so the omitted-suit rule only fires on suits absent
-    from the whole story so far."""
+    from the whole story so far.
+
+    Two sample floors, not one (R0, docs/4nt_projection_and_gloss_gate.md §4):
+    the suit-length rules need ``BAND_LEN_N_MIN`` layouts, the HCP-percentile
+    rule needs ``BAND_N_MIN``. A single n < 30 skip silenced the length rules
+    on every call Ben could not place — which it signals by returning exactly
+    its 15-layout rescue floor."""
     out = []
-    if not card or feats.get("n", 0) < BAND_N_MIN:
+    n = feats.get("n", 0)
+    if not card or n < BAND_LEN_N_MIN:
         return out
     denom = call[1:] if len(call) > 1 else ""
     minlen = stated_minlen(card)
@@ -415,7 +728,7 @@ def band_vs_card(card: dict, feats: dict, call: str,
                        f"avg {feats['len_avg'][st]:.1f} "
                        f"(P5+={feats['len5plus'][st]:.2f})")
     hcp = card.get("hcp")
-    if hcp:
+    if hcp and n >= BAND_N_MIN:
         lo, hi = int(hcp[0]), int(hcp[1])
         if feats["hcp_p90"] < lo - BAND_HCP_GAP or \
                 feats["hcp_p10"] > hi + BAND_HCP_GAP:
@@ -461,7 +774,7 @@ def band_violations(engine, spot, stem_entries: list[dict],
         acc = known.setdefault(bidder_i, {})
         for st, v in stated_minlen(card).items():
             acc[st] = max(acc.get(st, 0), v)
-        if feats.get("n", 0) >= BAND_N_MIN:
+        if feats.get("n", 0) >= BAND_LEN_N_MIN:
             # once the band itself establishes a suit it is "known" — an
             # omission fires at the first call that hides it, not again on
             # every later call by the same seat
@@ -487,18 +800,33 @@ def band_violations(engine, spot, stem_entries: list[dict],
 
 def record_violations(rec: dict) -> tuple[list[str], list[str]]:
     """The cheap (no-engine) audit for an already-built problem record: the
-    stored stem/option cards vs the stored full deal, plus the pass-under-
-    a-force check. Lets the same gate vet historical pools and freshly
-    forged batches alike. Returns (fatal, soft) as ``hand_violations``
-    does."""
+    stored stem/option cards vs the stored full deal, the pass-under-a-force
+    check, and the two record-only ben1-19f975cad49 rules (an unexplained
+    conventional call, a forcing call the rollout leaves in as the contract).
+    Lets the same gate vet historical pools and freshly forged batches alike.
+    Returns (fatal, soft) as ``hand_violations`` does.
+
+    R1 (``answer_insensitive_violations``) is deliberately NOT here: it needs
+    the rollout auctions, which no record stores. ``point_mass_suspects`` is
+    its record-only pre-filter and is reported separately by the audit, as a
+    list to re-roll rather than a verdict."""
     hands = [rec["full_deal"][s] for s in SEATS]
     dealer_i = SEATS.index(rec["dealer"])
     hero_i = SEATS.index(rec["seat"])
+    auction = list(rec.get("auction") or [])
     stem_entries = (rec.get("explanations") or {}).get("stem") or []
     option_cards = {o["bid"]: o.get("card")
                     for o in (rec.get("explanations") or {}).get(
                         "options") or []}
+    verdict = rec.get("verdict") or {}
+    n_samples = (rec.get("quality") or {}).get("n_samples") or 0
     fatal, soft = hand_violations(stem_entries, option_cards, hands,
                                   dealer_i, hero_i)
-    return (fatal + forcing_pass_violations(stem_entries, option_cards,
-                                            dealer_i, hero_i), soft)
+    fatal += forcing_pass_violations(stem_entries, option_cards,
+                                     dealer_i, hero_i)
+    fatal += meaningless_gloss_violations(stem_entries, option_cards, auction,
+                                          dealer_i, hero_i)
+    fatal += forcing_contract_violations(verdict.get("table") or [],
+                                         option_cards, auction, dealer_i,
+                                         hero_i, n_samples)
+    return fatal, soft
