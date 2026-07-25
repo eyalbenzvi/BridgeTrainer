@@ -388,6 +388,12 @@ the 5-band reference table.
 | 4 | `כל ההחלטות לשיפור` | `23 מתחת ל־85` |
 | 5 | `איך מחושב הציון` | `0–100 · 5 רמות` |
 
+Section 5 stays a section (rather than collapsing into a gloss entry) because
+the 5-band reference table is tabular content a `.glosscard` cannot hold. It is
+the *long-form* explainer; the per-term glosses of §4.9 are the *inline* ones,
+and both ship — a user who wants one term tapped answers it in place, a user
+who wants the whole model opens section 5.
+
 **Tier 3 — nested `<details class="dsub">` inside a scenario section**, max 3
 each. Within a scenario, **the breakdown whose worst qualifying cell is lowest
 renders `open`** — that buys the reachability of a flat 8-header list at a
@@ -540,7 +546,18 @@ intended cost ordering, done correctly.
   each matching the visible text word-for-word (the current band's aria-label
   and visible legend use two different vocabularies).
 - Every `<summary>` ≥ 44px; `<details>` gives `aria-expanded` free.
-- **No tooltips.** Touch-first, and every number is already visible as text.
+- **Every term that needs explaining is tap-to-explain** — see §4.8. The
+  design review's original ruling here was "this dashboard ships no tooltips
+  at all", justified as touch-first. That ruling is **overridden**: it
+  conflated two different things. A *hover* tooltip is indeed unreachable on
+  touch and must never gate a value — that part stands. But the app already
+  has a touch-native **tap-to-explain** mechanism (`GLOSS` / `glossHtml` /
+  `data-glosstext`, opening a `.glosscard` above the bottom nav, closed by a
+  second tap, the X, or Escape), used throughout the problem pages for exactly
+  this purpose. The dashboard must use it for every piece of professional
+  jargon, consistently with those pages. The invariant that survives is
+  narrower and still absolute: **no value is ever only available behind an
+  interaction** — the gloss explains a term, it never hides a number.
 - New colours are `color-mix()` against `--card`/`--fg`, both already themed,
   so **dark mode needs no parallel palette**. One dark-specific rule for
   `.dsec`'s border, mirroring the existing `.card` rule.
@@ -565,7 +582,60 @@ intended cost ordering, done correctly.
 `מיטבי` is kept: not what Israeli players say at the table (they would say
 *ההכרזה הנכונה*), but it is consistent across the app and already glossed.
 
-### 4.8 Rewritten footnote (body of `איך מחושב הציון`)
+### 4.8 Tap-to-explain inventory
+
+Matching the problem pages: anything a club player cannot be assumed to know
+is a `.gloss` button (`glossHtml(key, label)`) or an `ⓘ` (`infoHtml(text)`)
+that opens the explainer card on tap. The redesign introduces several concepts
+the current `GLOSS` table has no entry for, so the table grows.
+
+**Rules.** Gloss the term at its *first* visible occurrence in reading order,
+not every occurrence — repeated `.gloss` buttons on one screen turn into
+visual noise. The label inside the button is the normal Hebrew label, so a
+user who already knows the term sees no jargon and no decoration beyond the
+existing dotted affordance. Never gloss a bare number.
+
+**Existing entries reused:** `panel` (the 0–100 score), `imp`, `mp`, `diff`,
+`ben`, `dd`, `sd`.
+
+**Entries to remove:** `streak` — the metric it documents is retired (§2.2).
+
+**New entries:**
+
+| key | label shown | explanation (verbatim) |
+|---|---|---|
+| `form` | `הטופס הנוכחי` | הציון הראשי מחושב על 50 ההחלטות האחרונות שלך בלבד (או על כל ההחלטות, אם פתרת פחות מ-50). כך הוא מגיב לשיפור בתוך שבוע, במקום להיתקע על ממוצע של כל הזמנים. |
+| `ci` | `טווח סביר` | הציון מחושב על מדגם של החלטות, ולכן הוא אינו מדויק לחלוטין. הטווח מציין את התחום שבו סביר שנמצא הציון ה"אמיתי" שלך. טווח רחב = פתרת מעט בעיות. |
+| `agg` | `דירוג השיפוט` | תיאור מילולי של הציון הממוצע שלך. הוא מתאר את איכות הבחירות שלך מול פתרון המנוע - ולא מול שחקנים אחרים. |
+| `sig` | `שינוי מובהק` | הצגת חץ שיפור רק כאשר ההפרש גדול מהתנודה הטבעית של המדידה. הפרש קטן יכול לנבוע מהגרלת הבעיות בלבד, ולא משינוי אמיתי ביכולת. |
+| `blunderfree` | `רצף נקי` | כמה בעיות פתרת ברצף בלי טעות חמורה (ציון מתחת ל-40). בקבוצות ובאימפים, הימנעות מתקלות היא מה שמנצח - החמצה קטנה נסלחת. |
+| `mix` | `פילוח התשובות` | ממוצע לבדו מסתיר את ההרכב: 85 יכול להיות "תמיד קרוב למיטבי" או "מושלם לרוב, עם כמה תקלות". הפילוח מראה איזה מהשניים. |
+| `scale40` | `הסולם מתחיל ב-40` | בגרפים של הפילוח לפי נושא הסולם מתחיל ב-40 ולא ב-0, כדי שההבדלים בין הנושאים יהיו נראים. הנקודה מסמנת את הציון והפס סביבה את הטווח הסביר. |
+| `cost` | `מחיר הטעות` | כמה עלתה הבחירה שלך מול המיטבית - ב-IMP בהכרזה ובהובלת IMP, ובלקיחות בהובלת מאצ'פוינטס. מוצג רק על החלטות שבהן טעית. |
+| `leadrank` | `דירוג ההובלה` | באיזה מקום דורגה ההובלה שלך מבין ההובלות האפשריות. בתחרות זוגות זה מה שקובע: הובלה שנייה-הכי-טובה עדיין מנצחת חלק מהאולם. |
+| `weakspot` | `מה כדאי לחזק` | הנושא נבחר רק אם הציון בו נמוך מהממוצע שלך בשאר הנושאים ביותר ממה שניתן להסביר ברעש המדידה, ורק אם פתרת בו לפחות 12 בעיות. |
+| `pattern` | `נטיות שחוזרות` | דפוסים שחוזרים בטעויות שלך - למשל נטייה להכריז גבוה מהמיטבי. מוצגים רק כשהדפוס חוזר על עצמו מספר פעמים ובאופן חד-צדדי. |
+| `coverage` | `היקף התרגול` | כמה בעיות פתרת בכל נושא, מול מה שקיים במאגר. נושא שכמעט לא תרגלת אינו "חולשה" - פשוט אין עליו מספיק נתונים. |
+| `firstonly` | `ניסיון ראשון` | הלוח מציג רק את התשובה הראשונה שלך לכל בעיה. תשובה שנייה לבעיה שראית את פתרונה היא זכירה, לא שיפוט. |
+
+Placement, so the coverage is deliberate rather than accidental:
+
+| where | glossed |
+|---|---|
+| hero numeral caption | `form`, `ci`, `firstonly` |
+| `AGG_HE` chip | `agg` |
+| trend caption | `sig` |
+| blunder-free run line | `blunderfree` |
+| mix-bar key line | `mix` |
+| difficulty-mix clause | `diff` (existing) |
+| first breakdown in a scenario | `scale40` |
+| `המספרים המלאים` body | `cost`, `imp` / `mp` (existing) |
+| lead rank line | `leadrank` |
+| `.nextup` heading | `weakspot` |
+| `נטיות שחוזרות` summary | `pattern` |
+| zero/low-n coverage rows | `coverage` |
+
+### 4.9 Rewritten footnote (body of `איך מחושב הציון`)
 
 > כל החלטה מקבלת ציון 0–100 לפי כמה היא רחוקה מהפעולה המיטבית.
 > **100** — הפעולה המיטבית (או שקולה לה). **0** — אפשרות שלא ניצחה באף חלוקה.
@@ -580,7 +650,8 @@ Plus the 5-band reference table with a swatch per row — the one place the full
 ## 5. Implementation order
 
 1. Shared-layer fixes: `meanCI` floors, `bidHeight`, `.stars` CSS scope,
-   `GLOSS.streak` → `blunderfree`.
+   `GLOSS.streak` → `blunderfree`, and the rest of the §4.8 `GLOSS` entries
+   (they are shared-layer, so the problem pages can reuse any of them later).
 2. Aggregation layer: window/hero stats, `AGG_HE`, blunder-free run,
    coverage map from `fetchIndex()`, difficulty mix (null-guarded — omit the
    line if >20% of the window has no `difficultyLevel`).
@@ -588,7 +659,8 @@ Plus the 5-band reference table with a swatch per row — the one place the full
    (exact) → wrong-suit/card → over-under-bid → difficulty cliff.
 4. New `weakArea` per §2.6 with its fallback ladder.
 5. Components: hero, nextup, tocheck, `.dsec`/`.dsub`, dot rows, mix bar,
-   sparkline, miss list.
+   sparkline, miss list — each wired to its §4.8 gloss as it is built, not in
+   a sweep afterwards (a later sweep is how terms get missed).
 6. Delete: tabs, statgrid, per-card drilldown, suit rows, cumulative path,
    old `costBand`, dead CSS.
 7. Tests, then screenshots in both themes.
@@ -617,3 +689,10 @@ explicitly); `bidHeight` returns `null` for `P`/`X`/`XX` and orders contract
 bids correctly; wrong-suit uses `acceptedSet` not `recommendedLead`; every
 `<details>` has a non-empty `.dsum`; no `--accent` used as a data fill inside
 `#dash`; the deleted blocks are actually gone.
+
+Gloss coverage gets its own test, because this is the class of thing that
+silently rots: **every key referenced by a `data-gloss` in `_DASHBOARD_JS` must
+exist in `GLOSS`**, and every new key in §4.8 must be referenced somewhere in
+the dashboard. A `data-gloss` pointing at a missing key fails silently today —
+the click handler looks up `GLOSS[key]`, finds nothing, and simply does not
+open the card, so a typo is invisible in manual testing. Pin both directions.
