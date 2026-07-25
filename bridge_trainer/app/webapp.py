@@ -3696,22 +3696,38 @@ function render(attempts) {
     return;
   }
   const first = attempts.filter(a => a.isFirstAttempt !== false);
-  const n = first.length;
+  // An attempt on a problem that has since been DELETED from the pool cannot
+  // be regraded: the verdict it was scored against is gone, so
+  // `trainer pool regrade-attempts` leaves it alone (missing_problem) and
+  // legacy ones that predate the stored score are scored here by
+  // btScoreOfAttempt's cost-only fallback — no CI haircut, no stakes
+  // stretch, no field leniency, hence systematically harsher than the real
+  // scorer (measured on live attempts: up to 27 points low). Such grades
+  // must not move an average, a streak or a trend line, and several of those
+  // boards were deleted BECAUSE their verdict was wrong. They stay visible
+  // in the miss list, marked "בעיה שהוסרה", and are counted out loud below.
+  // LIVE_IDS null = the index fetch failed; then nothing is known to be
+  // orphaned and the prior behaviour (count everything) stands.
+  const graded = LIVE_IDS
+    ? first.filter(a => LIVE_IDS.has(a.problemId)) : first;
+  const orphans = first.length - graded.length;
+  const n = graded.length;
   const avgAll = n
-    ? first.reduce((s, a) => s + btScoreOfAttempt(a), 0) / n : 0;
-  const recent = [...first].sort((a, b) => firstMs(b) - firstMs(a));
+    ? graded.reduce((s, a) => s + btScoreOfAttempt(a), 0) / n : 0;
+  const recentAll = [...first].sort((a, b) => firstMs(b) - firstMs(a));
+  const recent = [...graded].sort((a, b) => firstMs(b) - firstMs(a));
   let streak = 0;
   for (const a of recent) { if (btScoreOfAttempt(a) >= 100) streak++; else break; }
   // split first-attempts by scenario, and leads further by training mode
   // (cost units differ: MP grades in tricks, IMP in IMPs)
   const scen = {bidding: [], lead: []};
-  for (const a of first) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
+  for (const a of graded) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
   const leadMP = scen.lead.filter(a => a.trainingMode !== "IMP");
   const leadIMP = scen.lead.filter(a => a.trainingMode === "IMP");
   const byKind = {};
-  for (const a of first) { const kd = a.kind || "bidding";
+  for (const a of graded) { const kd = a.kind || "bidding";
     (byKind[kd] ??= []).push(btScoreOfAttempt(a)); }
-  const chrono = [...first].sort((a, b) => firstMs(a) - firstMs(b));
+  const chrono = [...graded].sort((a, b) => firstMs(a) - firstMs(b));
   let trend = "";
   if (chrono.length >= MIN_TREND) {
     let cum = 0; const pts = [];
@@ -3749,7 +3765,10 @@ function render(attempts) {
       (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
         `${"★".repeat(d)}</span><span class="off">${"★".repeat(5 - d)}</span></span>` : "");
   };
-  const misses = recent.filter(a => btScoreOfAttempt(a) < REVIEW_MIN).slice(0, 10);
+  // the miss list keeps the removed problems (marked, non-link): they are
+  // still decisions worth re-reading, they just cannot be re-practiced
+  const misses = recentAll.filter(a => btScoreOfAttempt(a) < REVIEW_MIN)
+    .slice(0, 10);
   const missList = misses.length
     ? '<div class="card"><b>לשיפור — החלטות מתחת ל־' + REVIEW_MIN + '</b> <span class="muted">(הקש לחזרה)</span>' +
       '<ul class="misslist">' + misses.map(m => {
@@ -3786,7 +3805,15 @@ function render(attempts) {
     `<span class="muted">${glossHtml("streak", "רצף מיטבי")}</span></div>` +
     `<div class="stat"><b>${n}</b><span class="muted">בעיות שנענו</span></div>` +
     `<div class="stat"><b>${attempts.length}</b><span class="muted">סה"כ ניסיונות</span></div>` +
-    '</div></div>';
+    '</div>' +
+    (orphans
+      ? `<div class="muted" style="margin-top:8px;font-size:12px">` +
+        `עוד ${orphans} ` +
+        (orphans === 1 ? "החלטה על בעיה שהוסרה" : "החלטות על בעיות שהוסרו") +
+        ` מהמאגר — הציון שלהן לא ניתן לחישוב מחדש, ולכן אינן נכללות ` +
+        `בממוצעים ובגרפים.</div>`
+      : "") +
+    '</div>';
   const byKindCard = '<div class="card"><b>לפי תרחיש</b>' +
     Object.keys(byKind).map(kd =>
       row(kd === "lead" ? "הובלה" : "הכרזה", byKind[kd])).join("") +

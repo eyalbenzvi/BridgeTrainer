@@ -87,3 +87,37 @@ def test_dashboard_js_still_parses():
         assert res.returncode == 0, res.stderr
     finally:
         os.unlink(path)
+
+
+# ---- orphan attempts must not move the dashboard's numbers ------------------
+#
+# User report: stored history went stale as problems changed or were deleted
+# and the score formula was fixed. `trainer pool regrade-attempts` fixes every
+# attempt whose problem still exists, but an attempt on a DELETED problem has
+# nothing left to regrade against — and the ones predating the stored score
+# fall back to btScoreOfAttempt's cost-only estimate, which lacks the CI
+# haircut, stakes stretch and policy leniency the real scorer applies (up to
+# 27 points harsher, measured on the live attempts of the production account).
+# So they are excluded from the aggregates and counted out loud instead.
+
+def test_aggregates_skip_attempts_on_deleted_problems():
+    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("function render(attempts)"):]
+    assert "const graded = LIVE_IDS" in seg
+    assert "first.filter(a => LIVE_IDS.has(a.problemId))" in seg
+    # every aggregate reads `graded`, never `first`
+    assert "graded.reduce((s, a) => s + btScoreOfAttempt(a), 0)" in seg
+    assert "const n = graded.length;" in seg
+    assert "const recent = [...graded]" in seg          # streak
+    assert "const chrono = [...graded]" in seg           # trend
+    assert "for (const a of graded) scen[" in seg        # per-scenario cards
+    assert "for (const a of graded) { const kd" in seg   # by-kind card
+    # ... and the miss list still shows the removed ones, marked
+    assert "const recentAll = [...first]" in seg
+    assert "misses = recentAll.filter" in seg
+    assert "בעיה שהוסרה" in seg
+
+
+def test_orphan_count_is_shown_not_hidden():
+    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("const statCard"):]
+    assert "orphans" in seg
+    assert "אינן נכללות" in seg
