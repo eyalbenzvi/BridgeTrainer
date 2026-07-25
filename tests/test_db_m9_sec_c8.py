@@ -110,7 +110,7 @@ def test_hero_excludes_attempts_on_deleted_problems():
     assert "const legacyN = first.filter(a => !btHasStoredScore(a)).length;" \
         in seg
     assert "const goneN = first.length - scored.length - legacyN;" in seg
-    assert "heroHtml(heroSet, legacyN, goneN)" in seg
+    assert "heroHtml(heroSet, legacyN, goneN, pendingN)" in seg
 
 
 def test_orphan_predicate_is_null_safe():
@@ -124,3 +124,40 @@ def test_deleted_problem_count_is_shown_not_hidden():
     assert "שהוסרו מהמאגר" in hero
     # ... and their rows are still on the page, marked
     assert "בעיה שהוסרה" in _DASHBOARD_JS
+
+
+# ---- stale grades on the dashboard (user report) -----------------------------
+#
+# The dashboard showed 0 for a 3S that scores 83 today. An attempt stores a
+# grading SNAPSHOT; `trainer pool regrade-attempts` refreshes the stored copy
+# when a verdict changes, but two cases escape it: an answer still queued in
+# the client's PENDING list has never reached the server at all, and
+# problemVersion (the problem's created_at) does not move when a migration
+# rewrites a verdict in place, so no version comparison can spot the staleness.
+
+def test_dashboard_regrades_the_low_rows_from_current_problems():
+    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("async function healLowGrades"):]
+    # only rows where a stale grade actually shows, worst first, bounded reads
+    assert "btScoreOfAttempt(a) < REVIEW_MIN" in seg
+    assert "slice(0, HEAL_MAX)" in seg
+    assert "const HEAL_MAX = 10;" in _DASHBOARD_JS
+    # graded by the same functions the answer path uses
+    assert "window.BT.gradeLead(P, action, a.trainingMode)" in seg
+    assert "window.BT.gradeBidding(P, action)" in seg
+    # a deleted problem is skipped, not guessed at
+    assert "if (!P) continue;" in seg
+    # derived fields only; the guess and the timestamps stay
+    assert "Object.assign(a, fresh);" in seg
+    # painted from cache first, re-rendered only when something changed
+    init = _DASHBOARD_JS[_DASHBOARD_JS.index("async function init()"):]
+    assert "render(attempts);" in init
+    assert "if (await healLowGrades(attempts)) render(attempts);" in init
+
+
+def test_unsynced_answers_are_declared_not_presented_as_settled():
+    assert "pendingCount: () => Object.keys(PENDING).length," in _FB
+    assert "window.BT.pendingCount" in _DASHBOARD_JS
+    hero = _DASHBOARD_JS[_DASHBOARD_JS.index("function heroHtml("):
+                         _DASHBOARD_JS.index("function mixHtml(")]
+    assert "pendingN" in hero
+    assert "לא נשמרו לענן" in hero

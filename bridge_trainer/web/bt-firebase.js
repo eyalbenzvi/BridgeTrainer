@@ -436,6 +436,11 @@ function gradeLead(P, card, mode) {
 const BT = {
   user: () => USER,
   attempts: () => ATTEMPTS,
+  // Answers whose write has not landed yet (queued in PENDING). They are real
+  // history the SERVER has never seen, so `trainer pool regrade-attempts`
+  // cannot repair their grades and no sync can refresh them — the dashboard
+  // says so instead of presenting their snapshot as settled.
+  pendingCount: () => Object.keys(PENDING).length,
   gradeBidding, gradeLead,
   signIn: () => doSignIn(),
   signOut: () => signOut(auth).catch((e) => console.error(e)),

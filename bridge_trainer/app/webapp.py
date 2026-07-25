@@ -4123,7 +4123,7 @@ function sparkHtml(tr) {
 }
 
 /* ---- hero -------------------------------------------------------------- */
-function heroHtml(scored, legacyN, goneN) {
+function heroHtml(scored, legacyN, goneN, pendingN) {
   const n = scored.length;
   const chrono = [...scored].sort((a, b) => firstMs(a) - firstMs(b));
   const win = chrono.slice(-HERO_WIN);
@@ -4218,6 +4218,12 @@ function heroHtml(scored, legacyN, goneN) {
       ? ` ${legacyN ? "וכן" : glossHtml("legacy", "לא נכללות")} ` +
         `${nProblems(goneN)} שהוסרו מהמאגר — הציון שלהן לא ניתן לחישוב מחדש.`
       : "") +
+    // an answer still queued locally is history the server has never seen, so
+    // no regrade or sync can settle its score — say so rather than let it pass
+    // for a confirmed grade
+    (pendingN
+      ? ` <b>${nDecisions(pendingN)}</b> עדיין לא נשמרו לענן, כך שהציון שלהן ` +
+        `לא אושר מול השרת.` : "") +
     '</div></div>';
 }
 function mixHtml(ok, mid, bad, n) {
@@ -4440,6 +4446,7 @@ function render(attempts) {
   const scored = first.filter(btHasStoredScore).filter(a => !btOrphan(a));
   const legacyN = first.filter(a => !btHasStoredScore(a)).length;
   const goneN = first.length - scored.length - legacyN;
+  const pendingN = (window.BT.pendingCount && window.BT.pendingCount()) || 0;
   const heroSet = scored.length ? scored : first;
   const scen = {bidding: [], lead: []};
   for (const a of first) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
@@ -4491,7 +4498,7 @@ function render(attempts) {
     ? `ציון ${Math.round(mean(list.map(btScoreOfAttempt)))} · ${nDecisions(list.length)}` : "";
 
   el.innerHTML =
-    heroHtml(heroSet, legacyN, goneN) + nextup + tocheck +
+    heroHtml(heroSet, legacyN, goneN, pendingN) + nextup + tocheck +
     section("bidding", "הכרזה", sumOf(scen.bidding), bidBody, open.has("bidding")) +
     section("lead", "הובלה", sumOf(scen.lead), leadBody, open.has("lead")) +
     section("pat", "נטיות שחוזרות",
@@ -4550,6 +4557,47 @@ function howHtml(first) {
     `<div class="rmore">ממוצע כל הזמנים <b>${lifetime}</b> · ` +
     `${nProblems(first.length)} (${glossHtml("firstonly", "ניסיון ראשון")} בלבד)</div>`;
 }
+/* Re-grade the low rows against the CURRENT problem docs (user report: the
+   dashboard showed 0 for a 3S that scores 83 today).
+
+   An attempt stores a grading SNAPSHOT. `trainer pool regrade-attempts` fixes
+   the stored copy whenever a verdict changes, and bumps `ts` so other devices
+   re-sync — but two cases slip through it and land here:
+     * an attempt that never reached Firestore (its write is still queued in
+       the client's PENDING list) is invisible to the server-side tool, so it
+       keeps its original grade for ever;
+     * `problemVersion` is the problem's created_at, which a verdict migration
+       does NOT change, so a stale grade cannot be spotted by comparing
+       versions — only by re-grading.
+   So the dashboard re-grades the rows where a stale grade actually shows and
+   hurts: the ones BELOW the review line, worst first, at most HEAL_MAX of them
+   (that many single-doc reads, once per load). Grading uses the same
+   BT.gradeBidding/gradeLead the answer path uses, so the numbers match the
+   problem page exactly; the user's own guess and timestamps are untouched, and
+   nothing is written back — the stored copy stays the CLI's job. */
+const HEAL_MAX = 10;
+async function healLowGrades(attempts) {
+  if (!window.BT.getProblem) return 0;
+  const low = attempts
+    .filter(a => !btOrphan(a) && btScoreOfAttempt(a) < REVIEW_MIN)
+    .sort((a, b) => btScoreOfAttempt(a) - btScoreOfAttempt(b))
+    .slice(0, HEAL_MAX);
+  let changed = 0;
+  for (const a of low) {
+    const action = a.chosenCall || a.answer;
+    if (!action) continue;
+    let P = null;
+    try { P = await window.BT.getProblem(a.problemId); } catch (e) { continue; }
+    if (!P) continue;                       // deleted between index and read
+    const fresh = (a.kind || "bidding") === "lead"
+      ? window.BT.gradeLead(P, action, a.trainingMode)
+      : window.BT.gradeBidding(P, action);
+    if (typeof fresh.score !== "number" || fresh.score === a.score) continue;
+    Object.assign(a, fresh);                // derived fields only
+    changed++;
+  }
+  return changed;
+}
 async function init() {
   try {
     // Learn which problems still exist so deleted ones can be flagged in the
@@ -4569,7 +4617,9 @@ async function init() {
         POOL_BY_TYPE.get(p.type).ids.add(p.id);
       }
     } catch (e) { LIVE_IDS = null; POOL_BY_TYPE = null; }
-    render(await window.BT.allAttempts());
+    const attempts = await window.BT.allAttempts();
+    render(attempts);                       // paint from cache first
+    if (await healLowGrades(attempts)) render(attempts);
   } catch (e) {
     const el = document.getElementById("dash");
     el.innerHTML = 'לא ניתן לטעון את הנתונים שלך: <span class="en"></span>';
@@ -4579,7 +4629,11 @@ async function init() {
 // refresh the dashboard once the background sync (T4) lands. render() reads
 // the persisted open-set, so a sync can't collapse a section the user opened.
 window.addEventListener("bt-attempts-synced", async () => {
-  try { render(await window.BT.allAttempts()); } catch (e) { /* keep prior */ }
+  try {
+    const attempts = await window.BT.allAttempts();
+    render(attempts);
+    if (await healLowGrades(attempts)) render(attempts);
+  } catch (e) { /* keep prior */ }
 });
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
