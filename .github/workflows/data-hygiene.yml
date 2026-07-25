@@ -1,0 +1,77 @@
+name: Data hygiene
+
+# Keeps the live data self-consistent, daily:
+#
+#   * regrade-attempts — an attempt stores a grading SNAPSHOT, so a verdict fix
+#     (a migration, a re-forge) leaves stored history stale. Nothing on the
+#     client may repair it: the dashboard shows what is stored, full stop. This
+#     is the only repair path, and it must therefore run on its own, not only
+#     when someone remembers. It rewrites derived fields only — the guess and
+#     firstTs are never touched — and is a no-op when everything is current.
+#     It matters most right after a client's queued write finally lands: that
+#     doc carries whatever grade the client computed when it was answered.
+#
+#   * pool audit — re-runs the explanation gates over every published problem.
+#     REPORT ONLY (no --remove): deleting problems is an owner decision, so a
+#     violation reddens this job instead of disappearing quietly.
+#
+# Needs the FIREBASE_SERVICE_ACCOUNT secret (same one the forge workflows use).
+
+on:
+  schedule:
+    - cron: "40 3 * * *"        # 03:40 UTC, clear of the forge runs
+  workflow_dispatch:
+
+concurrency:
+  group: data-hygiene
+  cancel-in-progress: false
+
+jobs:
+  hygiene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4      # regrade runs the client's scorer
+        with:
+          node-version: "20"
+      - name: Install
+        run: pip install -e ".[firestore]"
+
+      - name: Write the service-account key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not set"
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > sa-key.json
+
+      - name: Repair stored attempt grades
+        run: |
+          trainer pool regrade-attempts --key sa-key.json | tee regrade.log
+
+      - name: Audit published problems (report only)
+        run: |
+          python3 scripts/audit_pool.py --firestore --key sa-key.json \
+            --out audit.json | tee audit.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Data hygiene"
+            echo
+            echo '```'
+            cat regrade.log 2>/dev/null || true
+            tail -3 audit.log 2>/dev/null || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Drop the key
+        if: always()
+        run: rm -f sa-key.json

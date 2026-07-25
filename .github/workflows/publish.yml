@@ -28,6 +28,22 @@ jobs:
         run: pip install -e .[dev]
       - name: Tests
         run: pytest -q
+      # Security rules are code and ship with it. They were previously
+      # published by hand, so the deployed allowlist drifted behind the client
+      # and every first-attempt write was rejected (permission-denied, queued in
+      # the browser for ever) the moment `firstTs` shipped. No-op when the live
+      # ruleset already matches the file.
+      - name: Deploy Firestore rules
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not set — rules not deployed"
+            exit 1
+          fi
+          pip install -q firebase-admin
+          python3 scripts/deploy_rules.py
+
       - name: Build app shell
         # Problems and per-user data live in Firestore; the client reads them
         # at runtime (see web/bt-firebase.js). The deploy ships only the
