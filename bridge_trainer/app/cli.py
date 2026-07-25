@@ -294,6 +294,17 @@ def cmd_pool_backfill_dead(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pool_purge_forcing_pass(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import purge_forcing_pass
+    summary = purge_forcing_pass(key_path=args.key, dry_run=args.dry_run)
+    verb = "would delete" if args.dry_run else "deleted"
+    print(f"{verb} {len(summary['flagged'])} problem(s) offering Pass under "
+          f"a live force ({summary['total']} docs total)")
+    for pid in summary["flagged"]:
+        print(f"  {pid}: {summary['reasons'][pid]}")
+    return 0
+
+
 def cmd_pool_regrade_attempts(args: argparse.Namespace) -> int:
     from ..pool.firestore_store import regrade_attempts
     summary = regrade_attempts(key_path=args.key, dry_run=args.dry_run)
@@ -556,6 +567,17 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("--dry-run", action="store_true",
                     help="report counts without writing")
     pd.set_defaults(func=cmd_pool_backfill_dead)
+
+    pf = pool_sub.add_parser(
+        "purge-forcing-pass",
+        help="migration: delete bidding problems that offer Pass while the "
+             "hero's side is under a live force (pre-gate boards)")
+    pf.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pf.add_argument("--dry-run", action="store_true",
+                    help="report the offenders without deleting")
+    pf.set_defaults(func=cmd_pool_purge_forcing_pass)
 
     pr = pool_sub.add_parser(
         "regrade-attempts",

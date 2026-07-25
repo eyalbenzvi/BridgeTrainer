@@ -650,6 +650,63 @@ def backfill_dead_options(key_path: str | None = None,
             "stale_flags": stale_flags, "total": len(records)}
 
 
+def forcing_pass_offenders(records: list[dict]) -> dict:
+    """{problemId: reason} for bidding records that offer Pass while the
+    hero's side is still under a live force (engine/explain_check
+    .forcing_pass_violations). Pure — shared by the purge and its tests.
+
+    Needs only ``kind``/``dealer``/``seat``/``explanations``: the check is
+    an auction fact, so no hand and no verdict are read."""
+    from ..engine.conventions import SEATS as _SEATS
+    from ..engine.explain_check import forcing_pass_violations
+
+    out = {}
+    for rec in records:
+        if rec.get("kind") == "lead" or not rec.get("dealer") \
+                or not rec.get("seat"):
+            continue
+        ex = rec.get("explanations") or {}
+        bad = forcing_pass_violations(
+            ex.get("stem") or [],
+            {o["bid"]: o.get("card") for o in (ex.get("options") or [])
+             if o.get("bid")},
+            _SEATS.index(rec["dealer"]), _SEATS.index(rec["seat"]))
+        if bad:
+            out[rec["id"]] = bad[0]
+    return out
+
+
+def purge_forcing_pass(key_path: str | None = None,
+                       dry_run: bool = False) -> dict:
+    """Migration: DELETE bidding problems published before the forcing-pass
+    gate (engine/explain_check.forcing_pass_violations, engine/maker) — the
+    ones offering Pass in an auction their own glosses call forcing.
+
+    Deletion, not repair: the option cannot simply be dropped, because the
+    verdict's rows are pairwise against a reference call and its samples
+    were drawn from a partner distribution that disagreed with the gloss
+    (see the gate's docstring). Each doc goes through ``remove``, so the
+    index entry is dropped first and the pool count stays honest; the
+    generator replaces the boards on the next run.
+
+    Any stored attempts on a purged problem are left untouched, and
+    ``regrade_attempts`` counts them as ``missing_problem`` — deleting a
+    problem must not erase what the user actually answered.
+
+    Returns {flagged, reasons, removed, total}. ``dry_run`` reports without
+    deleting."""
+    remote = FirestorePool(key_path)
+    records = remote.stream_records(
+        fields=["kind", "dealer", "seat", "explanations"])
+    reasons = forcing_pass_offenders(records)
+    removed = 0
+    if not dry_run:
+        for pid in reasons:      # remove() retries its own writes
+            removed += bool(remote.remove(pid))
+    return {"flagged": sorted(reasons), "reasons": reasons,
+            "removed": removed, "total": len(records)}
+
+
 # ---- attempt regrading (fix user history after problem changes) ----------
 #
 # Attempts store a grading SNAPSHOT (score/correct/outcomeClass/gradedCost/

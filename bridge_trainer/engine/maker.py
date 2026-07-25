@@ -135,7 +135,7 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
     # they ARE the training content. GIB fetches are cached, so the stem
     # explanations computed here are reused for the published record.
     from .explain import stem_explanations
-    from .explain_check import hand_violations
+    from .explain_check import forcing_pass_violations, hand_violations
     from .gib_explain import card_for_auction
 
     stem_expl = stem_explanations(spot)
@@ -148,6 +148,16 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
             seed, "rejected", "expl_vs_hand", timings=t,
             detail="expl_vs_hand " + "; ".join(fatal[:3]) +
                    (f" (+{len(fatal) - 3} more)" if len(fatal) > 3 else ""))
+
+    # ... and the auction-only half: Pass offered while the hero's side is
+    # still under a live force (ben1-19f93c01296). Rejected as a board, not
+    # patched by dropping the option — the rollout behind the other calls
+    # samples the same partner (see forcing_pass_violations).
+    forcing_bad = forcing_pass_violations(stem_expl, option_cards,
+                                          spot.dealer_i, spot.hero_i)
+    if forcing_bad:
+        return BoardOutcome(seed, "rejected", "forcing_pass", timings=t,
+                            detail="forcing_pass " + "; ".join(forcing_bad))
 
     hero_bot = engine.bot(spot.hands[spot.hero_i], spot.hero_i,
                           spot.dealer_i, spot.vul)
