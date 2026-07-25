@@ -1,0 +1,1929 @@
+{
+ "tight_s33": {
+  "model": "tight",
+  "n_layouts": 800,
+  "proposals": 400000,
+  "acceptance": 0.002,
+  "elapsed_s": 10.8,
+  "ranking": [
+   [
+    "♣A",
+    2.039,
+    0.152,
+    0.095
+   ],
+   [
+    "♦3",
+    1.844,
+    0.47,
+    0.14
+   ],
+   [
+    "♦6",
+    1.841,
+    0.468,
+    0.14
+   ],
+   [
+    "♦8",
+    1.84,
+    0.479,
+    0.141
+   ],
+   [
+    "♦J",
+    1.788,
+    0.385,
+    0.136
+   ],
+   [
+    "♠T",
+    1.734,
+    0.109,
+    0.115
+   ],
+   [
+    "♠4",
+    1.71,
+    0.061,
+    0.113
+   ],
+   [
+    "♥2",
+    1.585,
+    -0.14,
+    0.1
+   ],
+   [
+    "♥8",
+    1.585,
+    -0.14,
+    0.1
+   ],
+   [
+    "♣9",
+    1.561,
+    -0.446,
+    0.076
+   ],
+   [
+    "♣7",
+    1.56,
+    -0.449,
+    0.076
+   ],
+   [
+    "♣Q",
+    1.546,
+    -0.468,
+    0.076
+   ],
+   [
+    "♥K",
+    1.415,
+    -0.472,
+    0.081
+   ]
+  ],
+  "winner": "♣A",
+  "runner_up": "♦3",
+  "delta_tricks": 0.195,
+  "delta_ci95": [
+   0.1375,
+   0.2575
+  ],
+  "winner_flip_rate_bootstrap": 0.0,
+  "winner_by_imps": "♦8",
+  "CA_vs_D3": {
+   "tricks": {
+    "CA_minus_D3": 0.195,
+    "ci95": [
+     0.1362,
+     0.2538
+    ],
+    "significant": true
+   },
+   "imps": {
+    "CA_minus_D3": -0.3175,
+    "ci95": [
+     -0.5513,
+     -0.0862
+    ],
+    "significant": true
+   },
+   "set": {
+    "CA_minus_D3": -0.045,
+    "ci95": [
+     -0.0638,
+     -0.0262
+    ],
+    "significant": true
+   }
+  },
+  "strata_by_W_club_length": {
+   "W_clubs_0": {
+    "n": 15,
+    "CA": 2.03875,
+    "best_overall_card_mean": 0.8,
+    "CA_mean": 0.8,
+    "winner_in_stratum": "♦3",
+    "top4": [
+     [
+      "♦3",
+      1.1333333333333333
+     ],
+     [
+      "♦6",
+      1.1333333333333333
+     ],
+     [
+      "♦8",
+      1.1333333333333333
+     ],
+     [
+      "♦J",
+      1.0
+     ]
+    ]
+   },
+   "W_clubs_1": {
+    "n": 127,
+    "CA": 2.03875,
+    "best_overall_card_mean": 1.8976377952755905,
+    "CA_mean": 1.8976377952755905,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      1.8976377952755905
+     ],
+     [
+      "♦3",
+      1.4409448818897639
+     ],
+     [
+      "♦6",
+      1.4409448818897639
+     ],
+     [
+      "♦8",
+      1.4330708661417322
+     ]
+    ]
+   },
+   "W_clubs_2plus": {
+    "n": 658,
+    "CA": 2.03875,
+    "best_overall_card_mean": 2.094224924012158,
+    "CA_mean": 2.094224924012158,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.094224924012158
+     ],
+     [
+      "♦3",
+      1.9376899696048633
+     ],
+     [
+      "♦6",
+      1.9346504559270516
+     ],
+     [
+      "♦8",
+      1.9346504559270516
+     ]
+    ]
+   }
+  },
+  "stats": {
+   "♠4": {
+    "avg_def_tricks": 1.71,
+    "set_prob": 0.1125,
+    "exp_defender_score": -408.45,
+    "exp_imps_vs_datum": 0.061
+   },
+   "♠T": {
+    "avg_def_tricks": 1.73375,
+    "set_prob": 0.115,
+    "exp_defender_score": -406.6125,
+    "exp_imps_vs_datum": 0.109
+   },
+   "♣7": {
+    "avg_def_tricks": 1.56,
+    "set_prob": 0.07625,
+    "exp_defender_score": -429.275,
+    "exp_imps_vs_datum": -0.449
+   },
+   "♣9": {
+    "avg_def_tricks": 1.56125,
+    "set_prob": 0.07625,
+    "exp_defender_score": -429.2375,
+    "exp_imps_vs_datum": -0.446
+   },
+   "♣A": {
+    "avg_def_tricks": 2.03875,
+    "set_prob": 0.095,
+    "exp_defender_score": -406.3875,
+    "exp_imps_vs_datum": 0.152
+   },
+   "♣Q": {
+    "avg_def_tricks": 1.54625,
+    "set_prob": 0.07625,
+    "exp_defender_score": -429.6375,
+    "exp_imps_vs_datum": -0.468
+   },
+   "♥2": {
+    "avg_def_tricks": 1.585,
+    "set_prob": 0.1,
+    "exp_defender_score": -417.675,
+    "exp_imps_vs_datum": -0.14
+   },
+   "♥8": {
+    "avg_def_tricks": 1.585,
+    "set_prob": 0.1,
+    "exp_defender_score": -417.675,
+    "exp_imps_vs_datum": -0.14
+   },
+   "♥K": {
+    "avg_def_tricks": 1.415,
+    "set_prob": 0.08125,
+    "exp_defender_score": -431.325,
+    "exp_imps_vs_datum": -0.472
+   },
+   "♦3": {
+    "avg_def_tricks": 1.84375,
+    "set_prob": 0.14,
+    "exp_defender_score": -392.2125,
+    "exp_imps_vs_datum": 0.47
+   },
+   "♦6": {
+    "avg_def_tricks": 1.84125,
+    "set_prob": 0.14,
+    "exp_defender_score": -392.2875,
+    "exp_imps_vs_datum": 0.468
+   },
+   "♦8": {
+    "avg_def_tricks": 1.84,
+    "set_prob": 0.14125,
+    "exp_defender_score": -391.775,
+    "exp_imps_vs_datum": 0.479
+   },
+   "♦J": {
+    "avg_def_tricks": 1.7875,
+    "set_prob": 0.13625,
+    "exp_defender_score": -395.7,
+    "exp_imps_vs_datum": 0.385
+   }
+  }
+ },
+ "loose_s11": {
+  "model": "loose",
+  "n_layouts": 800,
+  "proposals": 200000,
+  "acceptance": 0.004,
+  "elapsed_s": 9.5,
+  "ranking": [
+   [
+    "♣A",
+    2.268,
+    0.084,
+    0.136
+   ],
+   [
+    "♦3",
+    2.174,
+    0.546,
+    0.186
+   ],
+   [
+    "♦6",
+    2.172,
+    0.546,
+    0.186
+   ],
+   [
+    "♦8",
+    2.171,
+    0.532,
+    0.185
+   ],
+   [
+    "♦J",
+    2.125,
+    0.417,
+    0.177
+   ],
+   [
+    "♠T",
+    1.971,
+    0.168,
+    0.165
+   ],
+   [
+    "♠4",
+    1.949,
+    0.096,
+    0.16
+   ],
+   [
+    "♥2",
+    1.839,
+    -0.172,
+    0.142
+   ],
+   [
+    "♥8",
+    1.837,
+    -0.174,
+    0.142
+   ],
+   [
+    "♣7",
+    1.825,
+    -0.491,
+    0.116
+   ],
+   [
+    "♣9",
+    1.825,
+    -0.502,
+    0.115
+   ],
+   [
+    "♣Q",
+    1.812,
+    -0.552,
+    0.111
+   ],
+   [
+    "♥K",
+    1.65,
+    -0.618,
+    0.115
+   ]
+  ],
+  "winner": "♣A",
+  "runner_up": "♦3",
+  "delta_tricks": 0.0938,
+  "delta_ci95": [
+   0.035,
+   0.1562
+  ],
+  "winner_flip_rate_bootstrap": 0.0,
+  "winner_by_imps": "♦3",
+  "CA_vs_D3": {
+   "tricks": {
+    "CA_minus_D3": 0.0938,
+    "ci95": [
+     0.0337,
+     0.1562
+    ],
+    "significant": true
+   },
+   "imps": {
+    "CA_minus_D3": -0.4625,
+    "ci95": [
+     -0.7175,
+     -0.2175
+    ],
+    "significant": true
+   },
+   "set": {
+    "CA_minus_D3": -0.05,
+    "ci95": [
+     -0.0712,
+     -0.03
+    ],
+    "significant": true
+   }
+  },
+  "strata_by_W_club_length": {
+   "W_clubs_0": {
+    "n": 29,
+    "CA": 2.2675,
+    "best_overall_card_mean": 0.9655172413793104,
+    "CA_mean": 0.9655172413793104,
+    "winner_in_stratum": "♦3",
+    "top4": [
+     [
+      "♦3",
+      1.1724137931034482
+     ],
+     [
+      "♦6",
+      1.1724137931034482
+     ],
+     [
+      "♦8",
+      1.1724137931034482
+     ],
+     [
+      "♦J",
+      1.1724137931034482
+     ]
+    ]
+   },
+   "W_clubs_1": {
+    "n": 109,
+    "CA": 2.2675,
+    "best_overall_card_mean": 2.256880733944954,
+    "CA_mean": 2.256880733944954,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.256880733944954
+     ],
+     [
+      "♦3",
+      1.9541284403669725
+     ],
+     [
+      "♦6",
+      1.9541284403669725
+     ],
+     [
+      "♦8",
+      1.9541284403669725
+     ]
+    ]
+   },
+   "W_clubs_2plus": {
+    "n": 662,
+    "CA": 2.2675,
+    "best_overall_card_mean": 2.326283987915408,
+    "CA_mean": 2.326283987915408,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.326283987915408
+     ],
+     [
+      "♦3",
+      2.2537764350453173
+     ],
+     [
+      "♦6",
+      2.2522658610271904
+     ],
+     [
+      "♦8",
+      2.2507552870090635
+     ]
+    ]
+   }
+  },
+  "stats": {
+   "♠4": {
+    "avg_def_tricks": 1.94875,
+    "set_prob": 0.16,
+    "exp_defender_score": -379.7875,
+    "exp_imps_vs_datum": 0.096
+   },
+   "♠T": {
+    "avg_def_tricks": 1.97125,
+    "set_prob": 0.165,
+    "exp_defender_score": -376.8125,
+    "exp_imps_vs_datum": 0.168
+   },
+   "♣7": {
+    "avg_def_tricks": 1.825,
+    "set_prob": 0.11625,
+    "exp_defender_score": -403.15,
+    "exp_imps_vs_datum": -0.491
+   },
+   "♣9": {
+    "avg_def_tricks": 1.825,
+    "set_prob": 0.115,
+    "exp_defender_score": -403.7,
+    "exp_imps_vs_datum": -0.502
+   },
+   "♣A": {
+    "avg_def_tricks": 2.2675,
+    "set_prob": 0.13625,
+    "exp_defender_score": -380.975,
+    "exp_imps_vs_datum": 0.084
+   },
+   "♣Q": {
+    "avg_def_tricks": 1.8125,
+    "set_prob": 0.11125,
+    "exp_defender_score": -405.7,
+    "exp_imps_vs_datum": -0.552
+   },
+   "♥2": {
+    "avg_def_tricks": 1.83875,
+    "set_prob": 0.1425,
+    "exp_defender_score": -390.8625,
+    "exp_imps_vs_datum": -0.172
+   },
+   "♥8": {
+    "avg_def_tricks": 1.8375,
+    "set_prob": 0.1425,
+    "exp_defender_score": -390.9,
+    "exp_imps_vs_datum": -0.174
+   },
+   "♥K": {
+    "avg_def_tricks": 1.65,
+    "set_prob": 0.115,
+    "exp_defender_score": -408.95,
+    "exp_imps_vs_datum": -0.618
+   },
+   "♦3": {
+    "avg_def_tricks": 2.17375,
+    "set_prob": 0.18625,
+    "exp_defender_score": -361.2375,
+    "exp_imps_vs_datum": 0.546
+   },
+   "♦6": {
+    "avg_def_tricks": 2.1725,
+    "set_prob": 0.18625,
+    "exp_defender_score": -361.275,
+    "exp_imps_vs_datum": 0.546
+   },
+   "♦8": {
+    "avg_def_tricks": 2.17125,
+    "set_prob": 0.185,
+    "exp_defender_score": -361.8625,
+    "exp_imps_vs_datum": 0.532
+   },
+   "♦J": {
+    "avg_def_tricks": 2.125,
+    "set_prob": 0.1775,
+    "exp_defender_score": -366.7,
+    "exp_imps_vs_datum": 0.417
+   }
+  }
+ },
+ "tight_s11": {
+  "model": "tight",
+  "n_layouts": 800,
+  "proposals": 400000,
+  "acceptance": 0.002,
+  "elapsed_s": 9.7,
+  "ranking": [
+   [
+    "♣A",
+    2.06,
+    0.131,
+    0.085
+   ],
+   [
+    "♦3",
+    1.916,
+    0.366,
+    0.119
+   ],
+   [
+    "♦6",
+    1.915,
+    0.366,
+    0.119
+   ],
+   [
+    "♦8",
+    1.911,
+    0.351,
+    0.117
+   ],
+   [
+    "♦J",
+    1.867,
+    0.266,
+    0.113
+   ],
+   [
+    "♠T",
+    1.745,
+    0.169,
+    0.111
+   ],
+   [
+    "♠4",
+    1.728,
+    0.144,
+    0.11
+   ],
+   [
+    "♥2",
+    1.613,
+    -0.101,
+    0.095
+   ],
+   [
+    "♥8",
+    1.613,
+    -0.101,
+    0.095
+   ],
+   [
+    "♣7",
+    1.564,
+    -0.414,
+    0.071
+   ],
+   [
+    "♣9",
+    1.561,
+    -0.43,
+    0.07
+   ],
+   [
+    "♣Q",
+    1.559,
+    -0.46,
+    0.068
+   ],
+   [
+    "♥K",
+    1.43,
+    -0.489,
+    0.072
+   ]
+  ],
+  "winner": "♣A",
+  "runner_up": "♦3",
+  "delta_tricks": 0.1438,
+  "delta_ci95": [
+   0.0862,
+   0.2
+  ],
+  "winner_flip_rate_bootstrap": 0.0,
+  "winner_by_imps": "♦3",
+  "CA_vs_D3": {
+   "tricks": {
+    "CA_minus_D3": 0.1438,
+    "ci95": [
+     0.085,
+     0.2012
+    ],
+    "significant": true
+   },
+   "imps": {
+    "CA_minus_D3": -0.235,
+    "ci95": [
+     -0.4775,
+     0.01
+    ],
+    "significant": false
+   },
+   "set": {
+    "CA_minus_D3": -0.0337,
+    "ci95": [
+     -0.0537,
+     -0.0137
+    ],
+    "significant": true
+   }
+  },
+  "strata_by_W_club_length": {
+   "W_clubs_0": {
+    "n": 21,
+    "CA": 2.06,
+    "best_overall_card_mean": 0.47619047619047616,
+    "CA_mean": 0.47619047619047616,
+    "winner_in_stratum": "♠4",
+    "top4": [
+     [
+      "♠4",
+      0.6190476190476191
+     ],
+     [
+      "♠T",
+      0.6190476190476191
+     ],
+     [
+      "♦3",
+      0.6190476190476191
+     ],
+     [
+      "♦6",
+      0.6190476190476191
+     ]
+    ]
+   },
+   "W_clubs_1": {
+    "n": 124,
+    "CA": 2.06,
+    "best_overall_card_mean": 1.9596774193548387,
+    "CA_mean": 1.9596774193548387,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      1.9596774193548387
+     ],
+     [
+      "♦3",
+      1.5725806451612903
+     ],
+     [
+      "♦6",
+      1.5725806451612903
+     ],
+     [
+      "♦8",
+      1.564516129032258
+     ]
+    ]
+   },
+   "W_clubs_2plus": {
+    "n": 655,
+    "CA": 2.06,
+    "best_overall_card_mean": 2.1297709923664123,
+    "CA_mean": 2.1297709923664123,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.1297709923664123
+     ],
+     [
+      "♦3",
+      2.0229007633587788
+     ],
+     [
+      "♦6",
+      2.021374045801527
+     ],
+     [
+      "♦8",
+      2.018320610687023
+     ]
+    ]
+   }
+  },
+  "stats": {
+   "♠4": {
+    "avg_def_tricks": 1.7275,
+    "set_prob": 0.11,
+    "exp_defender_score": -409.275,
+    "exp_imps_vs_datum": 0.144
+   },
+   "♠T": {
+    "avg_def_tricks": 1.745,
+    "set_prob": 0.11125,
+    "exp_defender_score": -408.175,
+    "exp_imps_vs_datum": 0.169
+   },
+   "♣7": {
+    "avg_def_tricks": 1.56375,
+    "set_prob": 0.07125,
+    "exp_defender_score": -431.3875,
+    "exp_imps_vs_datum": -0.414
+   },
+   "♣9": {
+    "avg_def_tricks": 1.56125,
+    "set_prob": 0.07,
+    "exp_defender_score": -432.0375,
+    "exp_imps_vs_datum": -0.43
+   },
+   "♣A": {
+    "avg_def_tricks": 2.06,
+    "set_prob": 0.085,
+    "exp_defender_score": -410.25,
+    "exp_imps_vs_datum": 0.131
+   },
+   "♣Q": {
+    "avg_def_tricks": 1.55875,
+    "set_prob": 0.0675,
+    "exp_defender_score": -433.1875,
+    "exp_imps_vs_datum": -0.46
+   },
+   "♥2": {
+    "avg_def_tricks": 1.6125,
+    "set_prob": 0.095,
+    "exp_defender_score": -419.275,
+    "exp_imps_vs_datum": -0.101
+   },
+   "♥8": {
+    "avg_def_tricks": 1.6125,
+    "set_prob": 0.095,
+    "exp_defender_score": -419.275,
+    "exp_imps_vs_datum": -0.101
+   },
+   "♥K": {
+    "avg_def_tricks": 1.43,
+    "set_prob": 0.0725,
+    "exp_defender_score": -434.775,
+    "exp_imps_vs_datum": -0.489
+   },
+   "♦3": {
+    "avg_def_tricks": 1.91625,
+    "set_prob": 0.11875,
+    "exp_defender_score": -399.5375,
+    "exp_imps_vs_datum": 0.366
+   },
+   "♦6": {
+    "avg_def_tricks": 1.915,
+    "set_prob": 0.11875,
+    "exp_defender_score": -399.575,
+    "exp_imps_vs_datum": 0.366
+   },
+   "♦8": {
+    "avg_def_tricks": 1.91125,
+    "set_prob": 0.1175,
+    "exp_defender_score": -400.2375,
+    "exp_imps_vs_datum": 0.351
+   },
+   "♦J": {
+    "avg_def_tricks": 1.8675,
+    "set_prob": 0.1125,
+    "exp_defender_score": -403.775,
+    "exp_imps_vs_datum": 0.266
+   }
+  }
+ },
+ "uniform_s11": {
+  "model": "uniform",
+  "n_layouts": 800,
+  "proposals": 1600,
+  "acceptance": 0.5,
+  "elapsed_s": 23.2,
+  "ranking": [
+   [
+    "♠T",
+    5.673,
+    0.346,
+    0.769
+   ],
+   [
+    "♠4",
+    5.668,
+    0.329,
+    0.767
+   ],
+   [
+    "♦3",
+    5.615,
+    0.34,
+    0.776
+   ],
+   [
+    "♦6",
+    5.615,
+    0.34,
+    0.776
+   ],
+   [
+    "♦8",
+    5.603,
+    0.314,
+    0.775
+   ],
+   [
+    "♦J",
+    5.5,
+    0.106,
+    0.766
+   ],
+   [
+    "♣A",
+    5.45,
+    0.04,
+    0.769
+   ],
+   [
+    "♥2",
+    5.433,
+    -0.069,
+    0.759
+   ],
+   [
+    "♥8",
+    5.429,
+    -0.06,
+    0.76
+   ],
+   [
+    "♣7",
+    5.281,
+    -0.34,
+    0.751
+   ],
+   [
+    "♣9",
+    5.27,
+    -0.366,
+    0.75
+   ],
+   [
+    "♣Q",
+    5.209,
+    -0.551,
+    0.739
+   ],
+   [
+    "♥K",
+    5.197,
+    -0.739,
+    0.716
+   ]
+  ],
+  "winner": "♠T",
+  "runner_up": "♠4",
+  "delta_tricks": 0.005,
+  "delta_ci95": [
+   -0.0075,
+   0.0175
+  ],
+  "winner_flip_rate_bootstrap": 0.234,
+  "winner_by_imps": "♠T",
+  "CA_vs_D3": {
+   "tricks": {
+    "CA_minus_D3": -0.165,
+    "ci95": [
+     -0.2138,
+     -0.115
+    ],
+    "significant": true
+   },
+   "imps": {
+    "CA_minus_D3": -0.3,
+    "ci95": [
+     -0.4763,
+     -0.11
+    ],
+    "significant": true
+   },
+   "set": {
+    "CA_minus_D3": -0.0075,
+    "ci95": [
+     -0.0225,
+     0.0075
+    ],
+    "significant": false
+   }
+  },
+  "strata_by_W_club_length": {
+   "W_clubs_0": {
+    "n": 9,
+    "CA": 5.45,
+    "best_overall_card_mean": 4.444444444444445,
+    "CA_mean": 3.6666666666666665,
+    "winner_in_stratum": "♠T",
+    "top4": [
+     [
+      "♠T",
+      4.444444444444445
+     ],
+     [
+      "♠4",
+      4.333333333333333
+     ],
+     [
+      "♦3",
+      4.0
+     ],
+     [
+      "♦6",
+      4.0
+     ]
+    ]
+   },
+   "W_clubs_1": {
+    "n": 91,
+    "CA": 5.45,
+    "best_overall_card_mean": 4.318681318681318,
+    "CA_mean": 4.351648351648351,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      4.351648351648351
+     ],
+     [
+      "♦3",
+      4.329670329670329
+     ],
+     [
+      "♦6",
+      4.329670329670329
+     ],
+     [
+      "♠T",
+      4.318681318681318
+     ]
+    ]
+   },
+   "W_clubs_2plus": {
+    "n": 700,
+    "CA": 5.45,
+    "best_overall_card_mean": 5.864285714285714,
+    "CA_mean": 5.615714285714286,
+    "winner_in_stratum": "♠T",
+    "top4": [
+     [
+      "♠T",
+      5.864285714285714
+     ],
+     [
+      "♠4",
+      5.862857142857143
+     ],
+     [
+      "♦3",
+      5.8028571428571425
+     ],
+     [
+      "♦6",
+      5.8028571428571425
+     ]
+    ]
+   }
+  },
+  "stats": {
+   "♠4": {
+    "avg_def_tricks": 5.6675,
+    "set_prob": 0.7675,
+    "exp_defender_score": 39.4,
+    "exp_imps_vs_datum": 0.329
+   },
+   "♠T": {
+    "avg_def_tricks": 5.6725,
+    "set_prob": 0.76875,
+    "exp_defender_score": 40.1,
+    "exp_imps_vs_datum": 0.346
+   },
+   "♣7": {
+    "avg_def_tricks": 5.28125,
+    "set_prob": 0.75125,
+    "exp_defender_score": 13.7875,
+    "exp_imps_vs_datum": -0.34
+   },
+   "♣9": {
+    "avg_def_tricks": 5.27,
+    "set_prob": 0.75,
+    "exp_defender_score": 12.725,
+    "exp_imps_vs_datum": -0.366
+   },
+   "♣A": {
+    "avg_def_tricks": 5.45,
+    "set_prob": 0.76875,
+    "exp_defender_score": 28.475,
+    "exp_imps_vs_datum": 0.04
+   },
+   "♣Q": {
+    "avg_def_tricks": 5.20875,
+    "set_prob": 0.73875,
+    "exp_defender_score": 4.9375,
+    "exp_imps_vs_datum": -0.551
+   },
+   "♥2": {
+    "avg_def_tricks": 5.4325,
+    "set_prob": 0.75875,
+    "exp_defender_score": 24.525,
+    "exp_imps_vs_datum": -0.069
+   },
+   "♥8": {
+    "avg_def_tricks": 5.42875,
+    "set_prob": 0.76,
+    "exp_defender_score": 24.9375,
+    "exp_imps_vs_datum": -0.06
+   },
+   "♥K": {
+    "avg_def_tricks": 5.1975,
+    "set_prob": 0.71625,
+    "exp_defender_score": -3.95,
+    "exp_imps_vs_datum": -0.739
+   },
+   "♦3": {
+    "avg_def_tricks": 5.615,
+    "set_prob": 0.77625,
+    "exp_defender_score": 40.225,
+    "exp_imps_vs_datum": 0.34
+   },
+   "♦6": {
+    "avg_def_tricks": 5.615,
+    "set_prob": 0.77625,
+    "exp_defender_score": 40.225,
+    "exp_imps_vs_datum": 0.34
+   },
+   "♦8": {
+    "avg_def_tricks": 5.6025,
+    "set_prob": 0.775,
+    "exp_defender_score": 39.15,
+    "exp_imps_vs_datum": 0.314
+   },
+   "♦J": {
+    "avg_def_tricks": 5.5,
+    "set_prob": 0.76625,
+    "exp_defender_score": 30.825,
+    "exp_imps_vs_datum": 0.106
+   }
+  }
+ },
+ "tight_s22": {
+  "model": "tight",
+  "n_layouts": 800,
+  "proposals": 400000,
+  "acceptance": 0.002,
+  "elapsed_s": 9.2,
+  "ranking": [
+   [
+    "♣A",
+    1.999,
+    0.221,
+    0.081
+   ],
+   [
+    "♦3",
+    1.782,
+    0.526,
+    0.128
+   ],
+   [
+    "♦6",
+    1.782,
+    0.526,
+    0.128
+   ],
+   [
+    "♦8",
+    1.781,
+    0.525,
+    0.128
+   ],
+   [
+    "♦J",
+    1.741,
+    0.401,
+    0.119
+   ],
+   [
+    "♠T",
+    1.623,
+    0.077,
+    0.096
+   ],
+   [
+    "♠4",
+    1.59,
+    -0.006,
+    0.091
+   ],
+   [
+    "♣7",
+    1.491,
+    -0.416,
+    0.059
+   ],
+   [
+    "♣9",
+    1.49,
+    -0.417,
+    0.059
+   ],
+   [
+    "♥2",
+    1.481,
+    -0.203,
+    0.079
+   ],
+   [
+    "♥8",
+    1.481,
+    -0.203,
+    0.079
+   ],
+   [
+    "♣Q",
+    1.472,
+    -0.472,
+    0.055
+   ],
+   [
+    "♥K",
+    1.31,
+    -0.386,
+    0.074
+   ]
+  ],
+  "winner": "♣A",
+  "runner_up": "♦3",
+  "delta_tricks": 0.2163,
+  "delta_ci95": [
+   0.1587,
+   0.275
+  ],
+  "winner_flip_rate_bootstrap": 0.0,
+  "winner_by_imps": "♦3",
+  "CA_vs_D3": {
+   "tricks": {
+    "CA_minus_D3": 0.2163,
+    "ci95": [
+     0.1575,
+     0.2725
+    ],
+    "significant": true
+   },
+   "imps": {
+    "CA_minus_D3": -0.305,
+    "ci95": [
+     -0.535,
+     -0.0887
+    ],
+    "significant": true
+   },
+   "set": {
+    "CA_minus_D3": -0.0462,
+    "ci95": [
+     -0.065,
+     -0.0287
+    ],
+    "significant": true
+   }
+  },
+  "strata_by_W_club_length": {
+   "W_clubs_0": {
+    "n": 14,
+    "CA": 1.99875,
+    "best_overall_card_mean": 0.7142857142857143,
+    "CA_mean": 0.7142857142857143,
+    "winner_in_stratum": "♦3",
+    "top4": [
+     [
+      "♦3",
+      1.0714285714285714
+     ],
+     [
+      "♦6",
+      1.0714285714285714
+     ],
+     [
+      "♦8",
+      1.0714285714285714
+     ],
+     [
+      "♦J",
+      1.0714285714285714
+     ]
+    ]
+   },
+   "W_clubs_1": {
+    "n": 134,
+    "CA": 1.99875,
+    "best_overall_card_mean": 1.828358208955224,
+    "CA_mean": 1.828358208955224,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      1.828358208955224
+     ],
+     [
+      "♦3",
+      1.3805970149253732
+     ],
+     [
+      "♦6",
+      1.3805970149253732
+     ],
+     [
+      "♦8",
+      1.3805970149253732
+     ]
+    ]
+   },
+   "W_clubs_2plus": {
+    "n": 652,
+    "CA": 1.99875,
+    "best_overall_card_mean": 2.061349693251534,
+    "CA_mean": 2.061349693251534,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.061349693251534
+     ],
+     [
+      "♦3",
+      1.8803680981595092
+     ],
+     [
+      "♦6",
+      1.8803680981595092
+     ],
+     [
+      "♦8",
+      1.8788343558282208
+     ]
+    ]
+   }
+  },
+  "stats": {
+   "♠4": {
+    "avg_def_tricks": 1.59,
+    "set_prob": 0.09125,
+    "exp_defender_score": -421.8,
+    "exp_imps_vs_datum": -0.006
+   },
+   "♠T": {
+    "avg_def_tricks": 1.6225,
+    "set_prob": 0.09625,
+    "exp_defender_score": -418.625,
+    "exp_imps_vs_datum": 0.077
+   },
+   "♣7": {
+    "avg_def_tricks": 1.49125,
+    "set_prob": 0.05875,
+    "exp_defender_score": -439.1875,
+    "exp_imps_vs_datum": -0.416
+   },
+   "♣9": {
+    "avg_def_tricks": 1.49,
+    "set_prob": 0.05875,
+    "exp_defender_score": -439.25,
+    "exp_imps_vs_datum": -0.417
+   },
+   "♣A": {
+    "avg_def_tricks": 1.99875,
+    "set_prob": 0.08125,
+    "exp_defender_score": -414.0625,
+    "exp_imps_vs_datum": 0.221
+   },
+   "♣Q": {
+    "avg_def_tricks": 1.4725,
+    "set_prob": 0.055,
+    "exp_defender_score": -441.5,
+    "exp_imps_vs_datum": -0.472
+   },
+   "♥2": {
+    "avg_def_tricks": 1.48125,
+    "set_prob": 0.07875,
+    "exp_defender_score": -430.6125,
+    "exp_imps_vs_datum": -0.203
+   },
+   "♥8": {
+    "avg_def_tricks": 1.48125,
+    "set_prob": 0.07875,
+    "exp_defender_score": -430.6125,
+    "exp_imps_vs_datum": -0.203
+   },
+   "♥K": {
+    "avg_def_tricks": 1.31,
+    "set_prob": 0.07375,
+    "exp_defender_score": -438.025,
+    "exp_imps_vs_datum": -0.386
+   },
+   "♦3": {
+    "avg_def_tricks": 1.7825,
+    "set_prob": 0.1275,
+    "exp_defender_score": -399.925,
+    "exp_imps_vs_datum": 0.526
+   },
+   "♦6": {
+    "avg_def_tricks": 1.7825,
+    "set_prob": 0.1275,
+    "exp_defender_score": -399.925,
+    "exp_imps_vs_datum": 0.526
+   },
+   "♦8": {
+    "avg_def_tricks": 1.78125,
+    "set_prob": 0.1275,
+    "exp_defender_score": -399.9625,
+    "exp_imps_vs_datum": 0.525
+   },
+   "♦J": {
+    "avg_def_tricks": 1.74125,
+    "set_prob": 0.11875,
+    "exp_defender_score": -405.0375,
+    "exp_imps_vs_datum": 0.401
+   }
+  }
+ },
+ "tight_s1": {
+  "model": "tight",
+  "n_layouts": 60,
+  "proposals": 200000,
+  "acceptance": 0.0003,
+  "elapsed_s": 2.2,
+  "ranking": [
+   [
+    "♣A",
+    2.1,
+    0.867,
+    0.15
+   ],
+   [
+    "♦3",
+    1.9,
+    0.633,
+    0.15
+   ],
+   [
+    "♦6",
+    1.9,
+    0.633,
+    0.15
+   ],
+   [
+    "♦8",
+    1.883,
+    0.617,
+    0.15
+   ],
+   [
+    "♦J",
+    1.85,
+    0.767,
+    0.167
+   ],
+   [
+    "♠T",
+    1.8,
+    0.133,
+    0.117
+   ],
+   [
+    "♠4",
+    1.783,
+    -0.05,
+    0.1
+   ],
+   [
+    "♥2",
+    1.5,
+    -0.617,
+    0.067
+   ],
+   [
+    "♥8",
+    1.5,
+    -0.617,
+    0.067
+   ],
+   [
+    "♣7",
+    1.45,
+    -0.5,
+    0.083
+   ],
+   [
+    "♣9",
+    1.45,
+    -0.5,
+    0.083
+   ],
+   [
+    "♣Q",
+    1.45,
+    -0.483,
+    0.083
+   ],
+   [
+    "♥K",
+    1.3,
+    -0.933,
+    0.05
+   ]
+  ],
+  "winner": "♣A",
+  "runner_up": "♦3",
+  "delta_tricks": 0.2,
+  "delta_ci95": [
+   -0.0333,
+   0.4333
+  ],
+  "winner_flip_rate_bootstrap": 0.045,
+  "winner_by_imps": "♣A",
+  "strata_by_W_club_length": {
+   "W_clubs_0": {
+    "n": 2,
+    "CA": 2.1,
+    "best_overall_card_mean": 0.0,
+    "CA_mean": 0.0,
+    "winner_in_stratum": "♠4",
+    "top4": [
+     [
+      "♠4",
+      0.5
+     ],
+     [
+      "♠T",
+      0.5
+     ],
+     [
+      "♥2",
+      0.5
+     ],
+     [
+      "♥8",
+      0.5
+     ]
+    ]
+   },
+   "W_clubs_1": {
+    "n": 9,
+    "CA": 2.1,
+    "best_overall_card_mean": 2.3333333333333335,
+    "CA_mean": 2.3333333333333335,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.3333333333333335
+     ],
+     [
+      "♠4",
+      2.2222222222222223
+     ],
+     [
+      "♠T",
+      2.2222222222222223
+     ],
+     [
+      "♦3",
+      2.2222222222222223
+     ]
+    ]
+   },
+   "W_clubs_2plus": {
+    "n": 49,
+    "CA": 2.1,
+    "best_overall_card_mean": 2.142857142857143,
+    "CA_mean": 2.142857142857143,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.142857142857143
+     ],
+     [
+      "♦3",
+      1.9183673469387754
+     ],
+     [
+      "♦6",
+      1.9183673469387754
+     ],
+     [
+      "♦8",
+      1.9183673469387754
+     ]
+    ]
+   }
+  },
+  "stats": {
+   "♠4": {
+    "avg_def_tricks": 1.7833333333333334,
+    "set_prob": 0.1,
+    "exp_defender_score": -412.1666666666667,
+    "exp_imps_vs_datum": -0.05
+   },
+   "♠T": {
+    "avg_def_tricks": 1.8,
+    "set_prob": 0.11666666666666667,
+    "exp_defender_score": -404.3333333333333,
+    "exp_imps_vs_datum": 0.133
+   },
+   "♣7": {
+    "avg_def_tricks": 1.45,
+    "set_prob": 0.08333333333333333,
+    "exp_defender_score": -429.5,
+    "exp_imps_vs_datum": -0.5
+   },
+   "♣9": {
+    "avg_def_tricks": 1.45,
+    "set_prob": 0.08333333333333333,
+    "exp_defender_score": -429.5,
+    "exp_imps_vs_datum": -0.5
+   },
+   "♣A": {
+    "avg_def_tricks": 2.1,
+    "set_prob": 0.15,
+    "exp_defender_score": -380.3333333333333,
+    "exp_imps_vs_datum": 0.867
+   },
+   "♣Q": {
+    "avg_def_tricks": 1.45,
+    "set_prob": 0.08333333333333333,
+    "exp_defender_score": -429.5,
+    "exp_imps_vs_datum": -0.483
+   },
+   "♥2": {
+    "avg_def_tricks": 1.5,
+    "set_prob": 0.06666666666666667,
+    "exp_defender_score": -435.6666666666667,
+    "exp_imps_vs_datum": -0.617
+   },
+   "♥8": {
+    "avg_def_tricks": 1.5,
+    "set_prob": 0.06666666666666667,
+    "exp_defender_score": -435.6666666666667,
+    "exp_imps_vs_datum": -0.617
+   },
+   "♥K": {
+    "avg_def_tricks": 1.3,
+    "set_prob": 0.05,
+    "exp_defender_score": -449.0,
+    "exp_imps_vs_datum": -0.933
+   },
+   "♦3": {
+    "avg_def_tricks": 1.9,
+    "set_prob": 0.15,
+    "exp_defender_score": -386.6666666666667,
+    "exp_imps_vs_datum": 0.633
+   },
+   "♦6": {
+    "avg_def_tricks": 1.9,
+    "set_prob": 0.15,
+    "exp_defender_score": -386.6666666666667,
+    "exp_imps_vs_datum": 0.633
+   },
+   "♦8": {
+    "avg_def_tricks": 1.8833333333333333,
+    "set_prob": 0.15,
+    "exp_defender_score": -387.1666666666667,
+    "exp_imps_vs_datum": 0.617
+   },
+   "♦J": {
+    "avg_def_tricks": 1.85,
+    "set_prob": 0.16666666666666666,
+    "exp_defender_score": -380.8333333333333,
+    "exp_imps_vs_datum": 0.767
+   }
+  }
+ },
+ "loose_s22": {
+  "model": "loose",
+  "n_layouts": 800,
+  "proposals": 200000,
+  "acceptance": 0.004,
+  "elapsed_s": 9.6,
+  "ranking": [
+   [
+    "♣A",
+    2.246,
+    0.109,
+    0.146
+   ],
+   [
+    "♦3",
+    2.115,
+    0.542,
+    0.196
+   ],
+   [
+    "♦6",
+    2.115,
+    0.542,
+    0.196
+   ],
+   [
+    "♦8",
+    2.111,
+    0.526,
+    0.195
+   ],
+   [
+    "♦J",
+    2.07,
+    0.401,
+    0.186
+   ],
+   [
+    "♠T",
+    1.917,
+    0.081,
+    0.168
+   ],
+   [
+    "♠4",
+    1.905,
+    0.015,
+    0.163
+   ],
+   [
+    "♥2",
+    1.816,
+    -0.105,
+    0.155
+   ],
+   [
+    "♥8",
+    1.816,
+    -0.105,
+    0.155
+   ],
+   [
+    "♣7",
+    1.78,
+    -0.496,
+    0.125
+   ],
+   [
+    "♣9",
+    1.775,
+    -0.501,
+    0.125
+   ],
+   [
+    "♣Q",
+    1.755,
+    -0.611,
+    0.116
+   ],
+   [
+    "♥K",
+    1.631,
+    -0.316,
+    0.15
+   ]
+  ],
+  "winner": "♣A",
+  "runner_up": "♦3",
+  "delta_tricks": 0.1312,
+  "delta_ci95": [
+   0.075,
+   0.19
+  ],
+  "winner_flip_rate_bootstrap": 0.0,
+  "winner_by_imps": "♦3",
+  "CA_vs_D3": {
+   "tricks": {
+    "CA_minus_D3": 0.1312,
+    "ci95": [
+     0.075,
+     0.19
+    ],
+    "significant": true
+   },
+   "imps": {
+    "CA_minus_D3": -0.4337,
+    "ci95": [
+     -0.6963,
+     -0.1775
+    ],
+    "significant": true
+   },
+   "set": {
+    "CA_minus_D3": -0.05,
+    "ci95": [
+     -0.0725,
+     -0.0287
+    ],
+    "significant": true
+   }
+  },
+  "strata_by_W_club_length": {
+   "W_clubs_0": {
+    "n": 23,
+    "CA": 2.24625,
+    "best_overall_card_mean": 0.9130434782608695,
+    "CA_mean": 0.9130434782608695,
+    "winner_in_stratum": "♦3",
+    "top4": [
+     [
+      "♦3",
+      1.2608695652173914
+     ],
+     [
+      "♦6",
+      1.2608695652173914
+     ],
+     [
+      "♦8",
+      1.2608695652173914
+     ],
+     [
+      "♦J",
+      1.2608695652173914
+     ]
+    ]
+   },
+   "W_clubs_1": {
+    "n": 138,
+    "CA": 2.24625,
+    "best_overall_card_mean": 2.0072463768115942,
+    "CA_mean": 2.0072463768115942,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.0072463768115942
+     ],
+     [
+      "♦3",
+      1.7173913043478262
+     ],
+     [
+      "♦6",
+      1.7173913043478262
+     ],
+     [
+      "♦8",
+      1.7028985507246377
+     ]
+    ]
+   },
+   "W_clubs_2plus": {
+    "n": 639,
+    "CA": 2.24625,
+    "best_overall_card_mean": 2.3458528951486697,
+    "CA_mean": 2.3458528951486697,
+    "winner_in_stratum": "♣A",
+    "top4": [
+     [
+      "♣A",
+      2.3458528951486697
+     ],
+     [
+      "♦3",
+      2.2316118935837244
+     ],
+     [
+      "♦6",
+      2.2316118935837244
+     ],
+     [
+      "♦8",
+      2.2300469483568075
+     ]
+    ]
+   }
+  },
+  "stats": {
+   "♠4": {
+    "avg_def_tricks": 1.905,
+    "set_prob": 0.1625,
+    "exp_defender_score": -380.175,
+    "exp_imps_vs_datum": 0.015
+   },
+   "♠T": {
+    "avg_def_tricks": 1.9175,
+    "set_prob": 0.1675,
+    "exp_defender_score": -377.55,
+    "exp_imps_vs_datum": 0.081
+   },
+   "♣7": {
+    "avg_def_tricks": 1.78,
+    "set_prob": 0.125,
+    "exp_defender_score": -400.7,
+    "exp_imps_vs_datum": -0.496
+   },
+   "♣9": {
+    "avg_def_tricks": 1.775,
+    "set_prob": 0.125,
+    "exp_defender_score": -400.9,
+    "exp_imps_vs_datum": -0.501
+   },
+   "♣A": {
+    "avg_def_tricks": 2.24625,
+    "set_prob": 0.14625,
+    "exp_defender_score": -377.3125,
+    "exp_imps_vs_datum": 0.109
+   },
+   "♣Q": {
+    "avg_def_tricks": 1.755,
+    "set_prob": 0.11625,
+    "exp_defender_score": -405.475,
+    "exp_imps_vs_datum": -0.611
+   },
+   "♥2": {
+    "avg_def_tricks": 1.81625,
+    "set_prob": 0.155,
+    "exp_defender_score": -385.9625,
+    "exp_imps_vs_datum": -0.105
+   },
+   "♥8": {
+    "avg_def_tricks": 1.81625,
+    "set_prob": 0.155,
+    "exp_defender_score": -385.9625,
+    "exp_imps_vs_datum": -0.105
+   },
+   "♥K": {
+    "avg_def_tricks": 1.63125,
+    "set_prob": 0.15,
+    "exp_defender_score": -394.0125,
+    "exp_imps_vs_datum": -0.316
+   },
+   "♦3": {
+    "avg_def_tricks": 2.115,
+    "set_prob": 0.19625,
+    "exp_defender_score": -358.775,
+    "exp_imps_vs_datum": 0.542
+   },
+   "♦6": {
+    "avg_def_tricks": 2.115,
+    "set_prob": 0.19625,
+    "exp_defender_score": -358.775,
+    "exp_imps_vs_datum": 0.542
+   },
+   "♦8": {
+    "avg_def_tricks": 2.11125,
+    "set_prob": 0.195,
+    "exp_defender_score": -359.4625,
+    "exp_imps_vs_datum": 0.526
+   },
+   "♦J": {
+    "avg_def_tricks": 2.07,
+    "set_prob": 0.18625,
+    "exp_defender_score": -364.65,
+    "exp_imps_vs_datum": 0.401
+   }
+  }
+ }
+}

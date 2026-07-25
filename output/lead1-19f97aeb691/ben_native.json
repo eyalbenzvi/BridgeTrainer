@@ -1,0 +1,169 @@
+{
+ "seed": 1784956237457,
+ "reproduced": {
+  "hands": {
+   "N": "T4.K82.J863.AQ97",
+   "E": "9.AT754.AQ7.KJT8",
+   "S": "Q6.Q96.T95.65432",
+   "W": "AKJ87532.J3.K42."
+  },
+  "dealer": "W",
+  "vul": "None",
+  "auction": [
+   "1S",
+   "P",
+   "2H",
+   "P",
+   "4S",
+   "P",
+   "P",
+   "P"
+  ],
+  "contract": "4SW",
+  "leader": "N"
+ },
+ "ben_native_lead_evaluate_300": {
+  "n_samples": 300,
+  "winner": "CA",
+  "runner_up": "D8",
+  "table": [
+   {
+    "card": "CA",
+    "avg_def_tricks": 1.57,
+    "ben_softmax": 0.0923
+   },
+   {
+    "card": "D8",
+    "avg_def_tricks": 1.22,
+    "ben_softmax": 0.0655
+   },
+   {
+    "card": "D6",
+    "avg_def_tricks": 1.22,
+    "ben_softmax": 0.3559
+   },
+   {
+    "card": "D3",
+    "avg_def_tricks": 1.22,
+    "ben_softmax": 0.3559
+   },
+   {
+    "card": "DJ",
+    "avg_def_tricks": 1.1533,
+    "ben_softmax": 0.0597
+   },
+   {
+    "card": "ST",
+    "avg_def_tricks": 1.0567,
+    "ben_softmax": 0.3019
+   },
+   {
+    "card": "S4",
+    "avg_def_tricks": 1.05,
+    "ben_softmax": 0.0383
+   },
+   {
+    "card": "CQ",
+    "avg_def_tricks": 0.9567,
+    "ben_softmax": 0.0008
+   },
+   {
+    "card": "C9",
+    "avg_def_tricks": 0.94,
+    "ben_softmax": 0.0019
+   },
+   {
+    "card": "C7",
+    "avg_def_tricks": 0.94,
+    "ben_softmax": 0.0157
+   },
+   {
+    "card": "H8",
+    "avg_def_tricks": 0.8033,
+    "ben_softmax": 0.0018
+   },
+   {
+    "card": "H2",
+    "avg_def_tricks": 0.8033,
+    "ben_softmax": 0.0557
+   },
+   {
+    "card": "HK",
+    "avg_def_tricks": 0.6267,
+    "ben_softmax": 0.0105
+   }
+  ]
+ },
+ "ben_native_lead_evaluate_600": {
+  "n_samples": 600,
+  "winner": "CA",
+  "runner_up": "D8",
+  "table": [
+   {
+    "card": "CA",
+    "avg_def_tricks": 1.5583,
+    "ben_softmax": 0.0923
+   },
+   {
+    "card": "D8",
+    "avg_def_tricks": 1.17,
+    "ben_softmax": 0.0655
+   },
+   {
+    "card": "D6",
+    "avg_def_tricks": 1.17,
+    "ben_softmax": 0.3559
+   },
+   {
+    "card": "D3",
+    "avg_def_tricks": 1.17,
+    "ben_softmax": 0.3559
+   },
+   {
+    "card": "DJ",
+    "avg_def_tricks": 1.1217,
+    "ben_softmax": 0.0597
+   },
+   {
+    "card": "ST",
+    "avg_def_tricks": 1.0283,
+    "ben_softmax": 0.3019
+   },
+   {
+    "card": "S4",
+    "avg_def_tricks": 1.01,
+    "ben_softmax": 0.0383
+   },
+   {
+    "card": "CQ",
+    "avg_def_tricks": 0.93,
+    "ben_softmax": 0.0008
+   },
+   {
+    "card": "C9",
+    "avg_def_tricks": 0.9233,
+    "ben_softmax": 0.0019
+   },
+   {
+    "card": "C7",
+    "avg_def_tricks": 0.9233,
+    "ben_softmax": 0.0157
+   },
+   {
+    "card": "H8",
+    "avg_def_tricks": 0.8417,
+    "ben_softmax": 0.0018
+   },
+   {
+    "card": "H2",
+    "avg_def_tricks": 0.8417,
+    "ben_softmax": 0.0557
+   },
+   {
+    "card": "HK",
+    "avg_def_tricks": 0.6683,
+    "ben_softmax": 0.0105
+   }
+  ]
+ }
+}
