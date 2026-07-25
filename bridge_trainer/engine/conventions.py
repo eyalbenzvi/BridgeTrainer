@@ -47,6 +47,32 @@ def final_contract(auction: list[str], dealer_i: int) -> dict | None:
             "declarer_i": declarer_i, "doubled": doubled}
 
 
+def contract_side(contract: str, hero_i: int):
+    """0 = the hero's side declares, 1 = theirs, None = passed out.
+    ``contract`` is the rendered form ('4HE', '3NTSx', 'PASS')."""
+    if contract.upper() == "PASS":
+        return None
+    return ("NESW".index(contract[-1]) - hero_i) % 2
+
+
+def contract_class(contract: str) -> str:
+    """pass / partscore / game / slam — the level bracket a contract sits in.
+    Mechanical: 6+ is a slam, 3NT/4M/5m is a game, the rest partscore."""
+    if contract.upper() == "PASS":
+        return "pass"
+    level, strain = int(contract[0]), contract[1]
+    if level >= 6:
+        return "slam"
+    if (strain == "N" and level >= 3) or (strain in "HS" and level >= 4) \
+            or (strain in "CD" and level >= 5):
+        return "game"
+    return "partscore"
+
+
+# ordering of the brackets, for "did the auction reach at least a game?"
+CLASS_RANK = {"pass": 0, "partscore": 1, "game": 2, "slam": 3}
+
+
 def opening_leader(declarer_i: int) -> int:
     """The player on lead: left-hand opponent of declarer."""
     return (declarer_i + 1) % 4

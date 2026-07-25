@@ -45,7 +45,23 @@ would not have forced. Either way the board is unpublishable — it either
 grades a system violation as best or narrates a force nobody is playing —
 and ``forcing_pass_violations`` catches it from the stored cards alone.
 
-Three independent checks:
+Fifth motivating board (ben1-19f947b9723): after 2NT-P-3D-P-3H-P the
+hero (9 HCP, six hearts) was offered 4♥ glossed "Mild slam try" and 4NT
+glossed "Quantitative invite", and the board's winner was a direct 6♥.
+But the rollout behind those two options ends in 4♥ on 512 of 512
+layouts and in a slam on 512 of 512 respectively: in the system that
+produced the evidence, neither call is an invitation — 4♥ is a signoff
+partner never accepts and 4NT is a commitment partner never declines.
+So the 5.3 IMPs charged against 4♥ (the call Ben's own policy gives 51%)
+measure the partner model's refusal to accept a try the same evidence
+says should be accepted — the winner reaches slam and makes it — not the
+bridge merit of inviting, and the board teaches "never invite, blast".
+``invite_violations`` catches both halves from the stored record alone.
+
+Independent checks — these four, plus the three rollout rules of
+docs/4nt_projection_and_gloss_gate.md (``meaningless_gloss_violations``,
+``forcing_contract_violations``, ``answer_insensitive_violations``), which
+are documented at their own definitions:
 
 ``hand_violations`` (cheap, no engine)
     GIB's parsed card for every stem call and every offered candidate is
@@ -77,12 +93,22 @@ Three independent checks:
     the forcing call discharges it and the clause disappears — so the
     flag ``parse_meaning`` already sets is the whole test. Purely an
     auction fact: no cards, no sampling, same answer for every hand.
+
+``invite_violations`` (cheap, no engine, no hand — reads the rollout that
+    was already paid for)
+    An option GIB glosses as an invitation ("Invitational to 3NT game",
+    "Game try suit", "Quantitative invite", "Mild slam try") whose
+    rollout gives partner no decision to make: the invited level is
+    reached on essentially every sampled layout, or on none of them while
+    the board's own winner gets there and beats the invitation. Both
+    halves compare the displayed MEANING against the EVIDENCE the board
+    publishes, which is why they need neither the engine nor the cards.
 """
 from __future__ import annotations
 
 import re
 
-from .conventions import seat_of
+from .conventions import CLASS_RANK, contract_class, contract_side, seat_of
 
 SEATS = "NESW"
 SLACK_HCP = 2          # GIB band may be shaded by a couple of points
@@ -115,6 +141,22 @@ BAND_HCP_GAP = 2       # gloss and band HCP ranges must at least touch ±this.
                        # clean, and no tighter HCP rule catches a false
                        # FORCING claim without killing ~25% of the pool.
                        # That class is caught by forcing_pass_violations.
+
+# Invitation gate (ben1-19f947b9723). Thresholds are deliberately at the
+# extremes: acceptance rate is a genuine bridge quantity (the hero's hand
+# is fixed, partner's is sampled), so a try partner accepts 3% of the time
+# is a thin invitation, not a mislabelled one. Measured 2026-07-25 over the
+# 477 published bidding boards (docs/invitation_gate.md): 57 offered
+# options carry an invitational gloss, their acceptance rates spread
+# smoothly from 0.00 to 1.00, and only 5 rows on 4 boards sit at the
+# extremes below.
+INVITE_NEVER = 0.02      # partner essentially never accepts
+INVITE_ALWAYS = 0.98     # ... or essentially never declines
+INVITE_N_MIN = 100       # same evidence floor as verdict.N_MIN
+INVITE_COVER_MIN = 0.95  # the distribution must account for the samples
+INVITE_OURS_MIN = 0.90   # ... and our side must be the one deciding
+INVITE_WINNER_REACH = 0.5   # the winner does reach the invited level
+INVITE_MARGIN_IMPS = 1.0    # ... and the refused invitation is charged for it
 
 _HCP_W = {"A": 4, "K": 3, "Q": 2, "J": 1}
 _NUM_WORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
@@ -798,13 +840,133 @@ def band_violations(engine, spot, stem_entries: list[dict],
     return out
 
 
+# GIB's invitational vocabulary, and the half of it that invites to SLAM
+# rather than to game ("Quantitative invite to 6NT", "Mild slam try").
+_INVITE_RE = re.compile(
+    r"(?i)\b(invitational|invites?|invited|game try|quantitative|slam try)\b")
+_SLAM_INVITE_RE = re.compile(r"(?i)\bslam\b|\bquantitative\b|\b6\s*N")
+
+
+def invited_class(card: dict) -> str | None:
+    """The level bracket a gloss invites partner to — "slam", "game", or
+    None when the gloss is not an invitation at all."""
+    raw = f"{card.get('gib_raw') or ''} {card.get('text') or ''}"
+    if not _INVITE_RE.search(raw):
+        return None
+    return "slam" if _SLAM_INVITE_RE.search(raw) else "game"
+
+
+def _reach_share(pairs: list[tuple[str, int]], hero_i: int, want: str,
+                 n_samples: int) -> float | None:
+    """Share of the rollout's layouts that end at or above level bracket
+    *want*, counted over the layouts the hero's side declares.
+
+    None = "this distribution cannot answer the question", for either
+    reason: the pairs account for less than INVITE_COVER_MIN of the
+    samples (a stored row keeps only the top three contracts, so a diffuse
+    branch is deliberately not judged), or the opponents declare too often
+    (INVITE_OURS_MIN) — then partner's decision was overtaken by their
+    bidding rather than declined."""
+    dist = [(str(k), int(c)) for k, c in pairs]
+    total = sum(c for _, c in dist)
+    if not dist or n_samples <= 0 or total < INVITE_COVER_MIN * n_samples:
+        return None
+    ours = [(k, c) for k, c in dist if contract_side(k, hero_i) == 0]
+    n_ours = sum(c for _, c in ours)
+    if n_ours < INVITE_OURS_MIN * total:
+        return None
+    rank = CLASS_RANK[want]
+    return sum(c for k, c in ours
+               if CLASS_RANK[contract_class(k)] >= rank) / n_ours
+
+
+def invite_violations(option_cards: dict, table: list[dict], accepted: str,
+                      hero_i: int, n_samples: int,
+                      dists: dict | None = None) -> list[str]:
+    """Fatal: an option the board narrates as an invitation that the
+    rollout behind it never treats as one (ben1-19f947b9723).
+
+    Two halves, both read off evidence the board already paid for — the
+    per-candidate contract distributions:
+
+    never accepted
+        the invited level is reached on <= INVITE_NEVER of the layouts,
+        while the board's own accepted call reaches it on at least
+        INVITE_WINNER_REACH of its own and beats the invitation by
+        INVITE_MARGIN_IMPS or more. The board then says two contradictory
+        things about one partner over one set of layouts: that the level is
+        right, and that the systemic invitation to it never gets there. The
+        IMPs charged against the invitation measure the refusal, so the
+        lesson a trainee draws ("inviting costs 5 IMPs, blast instead") is
+        an artifact of the partner model.
+
+    never declined
+        the invited level is reached on >= INVITE_ALWAYS of the layouts.
+        Partner has no decision at all: the call is a commitment in the
+        system that produced the evidence, however the gloss labels it, and
+        every number shown for it was measured under that reading.
+
+    A thin invitation is NOT a violation. With the hero's hand fixed and
+    partner's sampled, a low acceptance rate is ordinary bridge (partner
+    needs a maximum); only the extremes say the call is not invitational.
+
+    Rejects the board rather than the option, for the reason
+    ``forcing_pass_violations`` gives: the same partner model produced the
+    rollout behind every other candidate, so dropping the misdescribed
+    option would leave the rest of the evidence resting on it."""
+    if n_samples < INVITE_N_MIN:
+        return []
+    rows = {r.get("bid"): r for r in table or []}
+
+    def dist(bid):
+        """*dists* (the forge's full Counter per candidate) when given,
+        else the row's stored top-three — which _reach_share refuses to
+        judge unless it accounts for the samples."""
+        d = (dists or {}).get(bid)
+        if d is not None:
+            return list(d.items()) if hasattr(d, "items") \
+                else contract_pairs(d)
+        return contract_pairs((rows.get(bid) or {}).get("top_contracts"))
+
+    out = []
+    for bid, card in (option_cards or {}).items():
+        if bid == "P" or not card:
+            continue        # a pass invites nothing
+        want = invited_class(card)
+        if want is None or bid not in rows:
+            continue
+        share = _reach_share(dist(bid), hero_i, want, n_samples)
+        if share is None:
+            continue
+        gloss = (card.get("text") or card.get("gib_raw") or "").strip()
+        if share >= INVITE_ALWAYS:
+            out.append(f"option {bid}: gloss {gloss!r} invites to a {want}, "
+                       f"but the rollout reaches one on {share:.0%} of "
+                       f"layouts — partner never declines, so the call is a "
+                       f"commitment, not an invitation")
+            continue
+        if share > INVITE_NEVER or not accepted or accepted == bid:
+            continue
+        margin = -float(rows[bid].get("ev_imp_vs_top") or 0.0)
+        won = _reach_share(dist(accepted), hero_i, want, n_samples)
+        if won is not None and won >= INVITE_WINNER_REACH \
+                and margin >= INVITE_MARGIN_IMPS:
+            out.append(f"option {bid}: gloss {gloss!r} invites to a {want} "
+                       f"and is charged {margin:.1f} IMPs for missing it, "
+                       f"but the rollout reaches one on {share:.0%} of its "
+                       f"layouts against {won:.0%} for the winning "
+                       f"{accepted} — partner never accepts the try")
+    return out
+
+
 def record_violations(rec: dict) -> tuple[list[str], list[str]]:
     """The cheap (no-engine) audit for an already-built problem record: the
     stored stem/option cards vs the stored full deal, the pass-under-a-force
-    check, and the two record-only ben1-19f975cad49 rules (an unexplained
-    conventional call, a forcing call the rollout leaves in as the contract).
-    Lets the same gate vet historical pools and freshly forged batches alike.
-    Returns (fatal, soft) as ``hand_violations`` does.
+    check, the two record-only ben1-19f975cad49 rules (an unexplained
+    conventional call, a forcing call the rollout leaves in as the contract)
+    and the invitation check against the record's own rollout. Lets the same
+    gate vet historical pools and freshly forged batches alike. Returns
+    (fatal, soft) as ``hand_violations`` does.
 
     R1 (``answer_insensitive_violations``) is deliberately NOT here: it needs
     the rollout auctions, which no record stores. ``point_mass_suspects`` is
@@ -829,4 +991,7 @@ def record_violations(rec: dict) -> tuple[list[str], list[str]]:
     fatal += forcing_contract_violations(verdict.get("table") or [],
                                          option_cards, auction, dealer_i,
                                          hero_i, n_samples)
+    fatal += invite_violations(option_cards, verdict.get("table") or [],
+                               verdict.get("accepted") or "", hero_i,
+                               int(n_samples or 0))
     return fatal, soft

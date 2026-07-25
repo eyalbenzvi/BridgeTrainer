@@ -329,6 +329,26 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
             audit=audit,
             detail="confirm_rollout_evidence " + "; ".join(rollout_bad[:2]))
 
+    # ---- invitation gate: an option GIB glosses as an invitation whose
+    # rollout gives partner no decision — the invited level reached on
+    # every layout, or on none while the winner gets there and the
+    # invitation is charged for missing it (ben1-19f947b9723). Free (it
+    # counts the confirm rollout's own contracts) and run on the PUBLISHED
+    # evidence, so what the gate judges is exactly what the board shows.
+    # Distinct from R1 above: that rule asks whether the rollout DISCARDED
+    # partner's answer, this one whether the displayed MEANING of the call
+    # survives what partner did with it (a partner with one action passes
+    # R1 and can still be refusing an invitation the board narrates).
+    from .explain_check import invite_violations
+    invite_bad = invite_violations(
+        option_cards, v.table, v.best, spot.hero_i,
+        v.measured["n_samples"],
+        dists={b: Counter(ev.contracts[b]) for b in ev.bids})
+    if invite_bad:
+        return BoardOutcome(
+            seed, "rejected", "invite_vs_rollout", timings=t, audit=audit,
+            detail="invite_vs_rollout " + "; ".join(invite_bad))
+
     t_e = time.perf_counter()
     opt_expl = option_explanations(spot, v, dict(spot.candidates), ev=ev)
     t["explain_s"] = time.perf_counter() - t_e
