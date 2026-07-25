@@ -93,6 +93,33 @@ def test_cheap_audit_passes_a_board_without_the_pass_option():
     assert audit_record(rec) == []
 
 
+def test_each_engine_check_answers_for_itself():
+    """--rollout must not drag the band check in with it: both flags create the
+    engine, and a run asked for R1 alone should report R1 alone (otherwise a
+    board removed "by R1" may really have tripped a different gate)."""
+    rec = _record()
+    ex = rec["explanations"]
+    ex["options"] = [o for o in ex["options"] if o["bid"] != "P"]
+    rec["candidates"] = [c for c in rec["candidates"] if c["call"] != "P"]
+    calls = []
+
+    class _Engine:                       # neither check may reach a real Ben
+        pass
+
+    import audit_pool as ap
+    band, roll = ap.band_violations, ap.rollout_violations
+    try:
+        ap.band_violations = lambda *a, **k: (calls.append("band"), [])[1]
+        ap.rollout_violations = lambda *a, **k: (calls.append("rollout"), [])[1]
+        audit_record(rec, _Engine(), rollout=True, band=False)
+        assert calls == ["rollout"]
+        calls.clear()
+        audit_record(rec, _Engine(), rollout=False, band=True)
+        assert calls == ["band"]
+    finally:
+        ap.band_violations, ap.rollout_violations = band, roll
+
+
 # ---- lead boards: the displayed auction vs the cards ------------------------
 #
 # A lead problem shows the complete auction and nothing else — it IS the

@@ -36,6 +36,30 @@ def _round_trip_ok(spot) -> bool:
         sum(len(p) for p in spot.hands[spot.hero_i].split(".")) == 13
 
 
+def _rollout_violations(ev, verdict, spot, option_cards: dict) -> list[str]:
+    """The two gates that read the ROLLOUT rather than the glosses
+    (docs/4nt_projection_and_gloss_gate.md):
+
+    R1 ``answer_insensitive_violations`` — a candidate whose rollout has
+       partner answering differently on different layouts while the final
+       contract never moves. The published "Leads to 6♣S 100%" then describes
+       Ben's argmax continuation, not a bridge outcome.
+    R3 ``forcing_contract_violations`` — a candidate the board itself calls
+       forcing (or a cue-bid in their suit) that the rollout leaves in as the
+       final contract, i.e. evidence drawn from a partner who passes forces.
+
+    Both are fatal for the whole board, not for the offending option: the
+    rollout that ranked every other candidate sampled the same partner (the
+    argument ``forcing_pass_violations`` sets out)."""
+    from .explain_check import (answer_insensitive_violations,
+                                forcing_contract_violations)
+    out = answer_insensitive_violations(ev, spot.stem)
+    out += forcing_contract_violations(
+        verdict.table, option_cards, spot.stem, spot.dealer_i, spot.hero_i,
+        verdict.measured.get("n_samples") or ev.n_samples)
+    return out
+
+
 def build_record(spot, verdict, stem_expl, opt_expl, elapsed) -> dict:
     policy_map = dict(spot.candidates)
     rec = {
@@ -135,7 +159,8 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
     # they ARE the training content. GIB fetches are cached, so the stem
     # explanations computed here are reused for the published record.
     from .explain import stem_explanations
-    from .explain_check import forcing_pass_violations, hand_violations
+    from .explain_check import (forcing_pass_violations, hand_violations,
+                                meaningless_gloss_violations)
     from .gib_explain import card_for_auction
 
     stem_expl = stem_explanations(spot)
@@ -148,6 +173,17 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
             seed, "rejected", "expl_vs_hand", timings=t,
             detail="expl_vs_hand " + "; ".join(fatal[:3]) +
                    (f" (+{len(fatal) - 3} more)" if len(fatal) > 3 else ""))
+
+    # ... and R2: an offered candidate that cannot be natural (4NT/5NT, a
+    # cue-bid) whose gloss explains nothing — either empty, or a restatement
+    # of what the hero's own earlier calls already showed (ben1-19f975cad49's
+    # 4NT, glossed with North's 1♠ card). Cheap, auction-only, so it runs
+    # before any rollout money is spent.
+    gloss_bad = meaningless_gloss_violations(
+        stem_expl, option_cards, spot.stem, spot.dealer_i, spot.hero_i)
+    if gloss_bad:
+        return BoardOutcome(seed, "rejected", "expl_meaningless", timings=t,
+                            detail="expl_meaningless " + "; ".join(gloss_bad))
 
     # ... and the auction-only half: Pass offered while the hero's side is
     # still under a live force (ben1-19f93c01296). Rejected as a board, not
@@ -219,6 +255,16 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
     v = judge(ev, policy_top=policy_top,
               hero_i=spot.hero_i, policy_map=dict(spot.candidates))
 
+    # ---- rollout-evidence gates (R1/R3, docs/4nt_projection_and_gloss_gate
+    # .md). Pure python over evidence already in hand, so they run here on the
+    # screen — killing the board before the confirm and band passes — and
+    # again on the confirm evidence below, which is what gets published.
+    rollout_bad = _rollout_violations(ev, v, spot, option_cards)
+    if rollout_bad:
+        return BoardOutcome(seed, "rejected", "rollout_evidence", timings=t,
+                            detail="rollout_evidence " +
+                                   "; ".join(rollout_bad[:2]))
+
     audit = None
     if pre_reason:                  # audit mode: compare the two verdicts
         audit = {"pre_reason": pre_reason,
@@ -273,12 +319,26 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
             detail=f"confirm_{v.reason} gap={v.measured.get('gap_imps')} "
                    f"[{t['confirm_s']:.1f}s]")
 
+    # the same two rules on the evidence that will actually be published: the
+    # confirm pool is 4x bigger, so a candidate whose answer-insensitivity or
+    # passed-out force only shows up at 512 layouts still dies here
+    rollout_bad = _rollout_violations(ev, v, spot, option_cards)
+    if rollout_bad:
+        return BoardOutcome(
+            seed, "rejected", "confirm_rollout_evidence", timings=t,
+            audit=audit,
+            detail="confirm_rollout_evidence " + "; ".join(rollout_bad[:2]))
+
     # ---- invitation gate: an option GIB glosses as an invitation whose
     # rollout gives partner no decision — the invited level reached on
     # every layout, or on none while the winner gets there and the
     # invitation is charged for missing it (ben1-19f947b9723). Free (it
     # counts the confirm rollout's own contracts) and run on the PUBLISHED
     # evidence, so what the gate judges is exactly what the board shows.
+    # Distinct from R1 above: that rule asks whether the rollout DISCARDED
+    # partner's answer, this one whether the displayed MEANING of the call
+    # survives what partner did with it (a partner with one action passes
+    # R1 and can still be refusing an invitation the board narrates).
     from .explain_check import invite_violations
     invite_bad = invite_violations(
         option_cards, v.table, v.best, spot.hero_i,
