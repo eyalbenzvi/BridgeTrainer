@@ -1,0 +1,186 @@
+name: Forge lead problems (IMP)
+
+# Generates IMPs opening-lead problems on a GitHub-hosted runner and pushes
+# them straight to Firestore — no local machine needed.
+#
+# This is the IMP half of the lead forge; forge-leads-mp.yml is the MP half.
+# They were one workflow that ran both modes back-to-back; splitting them gives
+# each mode its own schedule slot, its own log, and its own failure signal.
+#
+# Two ways to run:
+#   * SCHEDULE — every 2 hours at :20 past the odd hour one IMP batch
+#     (FORGE_LEADS_IMP_COUNT problems, default 15) forges and pushes. The three
+#     forge workflows are staggered 40 minutes apart: bidding at :00, leads-MP
+#     at :40, leads-IMP at +1:20. Tune without editing this file via repository
+#     variables (Settings → Secrets and variables → Actions → Variables):
+#     FORGE_LEADS_IMP_COUNT and FORGE_LEADS_IMP_MAX_SECONDS (per-run time
+#     budget, default 4500).
+#   * MANUAL — Actions tab → "Run workflow": how many problems, and optionally
+#     a seed / time budget.
+#
+# What a run needs (all available on ubuntu-latest):
+#   * the Ben engine — cloned + built by scripts/setup_ben.sh (pinned commit,
+#     Python 3.12 venv with TensorFlow); cached between runs.
+#   * outbound HTTPS to BBO (gibrest.bridgebase.com) — GIB interprets each
+#     auction so every bid in a problem is explainable.
+#   * the FIREBASE_SERVICE_ACCOUNT repository secret — the Firebase
+#     service-account key JSON *content* (Settings → Secrets and variables →
+#     Actions). The push step fails with a clear error if it is missing.
+
+on:
+  schedule:
+    # every 2 hours at :20 past the odd hour — 40 minutes after the MP lead
+    # forge (:40 of the even hour), which is itself 40 minutes after the bidding
+    # forge (:00). A blank seed uses the script's per-run time-based default, so
+    # each firing scans fresh boards.
+    - cron: "20 1-23/2 * * *"
+  workflow_dispatch:
+    inputs:
+      count:
+        description: "Number of problems to generate"
+        type: string
+        default: "15"
+        required: true
+      seed:
+        description: "RNG seed (blank = unique per run, so re-runs add new boards)"
+        type: string
+        default: ""
+        required: false
+      max_seconds:
+        description: "Generation time budget in seconds"
+        type: string
+        default: "6000"
+        required: false
+
+# Serialize runs *of this mode*: a run that overflows its 2-hour slot must not
+# have the next firing pile on top of it. Queued, never cancelled; GitHub keeps
+# at most one pending run per group, so scheduled firings can't build a backlog.
+# The MP workflow has its own group — a slow IMP run must not starve it, and
+# concurrent pool pushes are safe (the Firestore index update is an
+# optimistic-locked read-union-write that retries on conflict).
+concurrency:
+  group: forge-leads-imp
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write        # DB-O-7: open/append a failure-notification issue
+
+jobs:
+  forge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      MODE: IMP
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          COUNT: ${{ inputs.count }}
+        run: |
+          case "$COUNT" in
+            ''|*[!0-9]*) echo "count must be a positive integer"; exit 1 ;;
+          esac
+          [ "$COUNT" -ge 1 ]
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The Ben engine (~GBs of models + a TensorFlow venv) is expensive to
+      # build; cache it keyed on the setup script (which pins the Ben commit).
+      - name: Cache Ben engine and venvs
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/ben
+            ~/benv
+            ~/fbenv
+          key: ben-${{ runner.os }}-${{ hashFiles('scripts/setup_ben.sh') }}
+
+      - name: Forge and push
+        # explicit bash => pipefail, so a forge failure isn't masked by tee
+        shell: bash
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          COUNT: ${{ inputs.count }}
+          SEED: ${{ inputs.seed }}
+          MAX_SECONDS: ${{ inputs.max_seconds }}
+          FORGE_COUNT: ${{ vars.FORGE_LEADS_IMP_COUNT }}
+          FORGE_MAX_SECONDS: ${{ vars.FORGE_LEADS_IMP_MAX_SECONDS }}
+          PYTHON: python3.12
+          # stream forge output line-by-line into the live Actions log —
+          # without this, Python buffers through the tee pipe and progress
+          # only appears in large late chunks
+          PYTHONUNBUFFERED: "1"
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            # every 2 hours: one IMP batch. The script's time-based seed default
+            # gives each firing fresh boards.
+            N="${FORGE_COUNT:-15}"
+            BUDGET="${FORGE_MAX_SECONDS:-4500}"
+            echo ">> scheduled $MODE batch: $N problems, ${BUDGET}s"
+            MAX_SECONDS="$BUDGET" \
+              scripts/generate_and_push_leads.sh "$N" 2>&1 | tee forge.log
+          else
+            # manual dispatch: empty optional inputs fall back to the
+            # script's own defaults
+            [ -z "$SEED" ] && unset SEED
+            [ -z "$MAX_SECONDS" ] && unset MAX_SECONDS
+            scripts/generate_and_push_leads.sh "$COUNT" 2>&1 | tee forge.log
+          fi
+
+      - name: Job summary
+        if: always()
+        env:
+          COUNT: ${{ inputs.count }}
+          FORGE_COUNT: ${{ vars.FORGE_LEADS_IMP_COUNT }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            HEAD="every 2h, ${FORGE_COUNT:-15} problems"
+          else
+            HEAD="requested $COUNT"
+          fi
+          {
+            echo "## Lead forge (IMP) — $HEAD"
+            echo
+            echo '```'
+            grep -E "^>> |^Done:|^lead-forge:|progress: |uploaded " \
+              forge.log | tail -60 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The generated JSON documents, for traceability/debugging (they are
+      # also in Firestore by now; the pool push skips docs already present).
+      - name: Upload forged problems
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: forged-leads-imp-${{ github.run_number }}
+          path: |
+            data/
+            forge.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      # DB-O-7: a failed run must not stay buried in the Actions log — the pool
+      # can stop growing for days unnoticed. On failure, append to (or open) a
+      # single tracking issue so the maintainer is notified. Body carries no
+      # secrets — just the run link.
+      - name: Notify on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "⚠️ Forge workflow is failing"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body="Forge run failed (leads IMP): $RUN_URL (event: $GITHUB_EVENT_NAME)."
+          n=$(gh issue list --state open --search "$TITLE in:title" \
+                --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
