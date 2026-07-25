@@ -31,10 +31,11 @@ score = clamp( 95 / (1 + (c_eff / tau)^1.6) + leniency , 1, 94 )
 * **0** is reserved for dead bidding options (`best_share < 0.5%`, where
   "winning a layout" INCLUDES tying the per-layout best result — a call
   that reaches the same winning contract as another option won those
-  layouts too, even if it is never the unique winner). Because published
-  records may carry a stale flag from the old strictly-unique rule, the
-  client honors the flag only when the option's own evidence row agrees
-  (`btIsDead`: the row never ties-or-beats the best call).
+  layouts too, even if it is never the unique winner). Records published
+  under the old strictly-unique rule carried stale flags (an option that
+  merely tied another call's winning result scored 0); those were removed
+  from Firestore by the one-off `trainer pool backfill-dead` migration
+  (2026-07-25), so the client trusts `verdict.dead_options` as stored.
 * **95 cap** — a mistake inside the noise band never quite equals best.
 * **tau** — the cost at which the base score crosses ~47. This is the
   per-scenario knob (below).

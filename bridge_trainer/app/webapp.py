@@ -797,38 +797,21 @@ const BAND_HE = {best: "מיטבי", near: "כמעט מיטבי", minor: "סטי
                  error: "טעות", blunder: "טעות חמורה", dead: "אפשרות מתה"};
 const BAND_TONE = {best: "win", near: "win", minor: "gold",
                    error: "loss", blunder: "loss", dead: "loss"};
-/* A stored dead flag is honored only when the option's own evidence row
-   agrees. Records forged before 2026-07 required an option to be the
-   strictly-UNIQUE per-sample winner, so a call that TIED the winning result
-   on many layouts (e.g. 3S when Pass reaches the same 3S contract on every
-   layout 3S wins) was published as dead despite beating the accepted call
-   on half the layouts (ben1-19f939859fa: 3S at -1.6 IMP pinned to 0 while
-   the worse Pass scored 78). Such an option must ride the normal cost
-   curve; the pin is kept only for rows that (almost) never tie-or-beat the
-   best call — a strictly stronger condition than the forge's own share
-   floor, so a genuinely dead option is never un-deaded. */
-const DEAD_SHARE = 0.005;      // mirrors engine/verdict.py DEAD_SHARE
-function btIsDead(P, action) {
-  const v = (P && P.verdict) || {};
-  if (!(v.dead_options || []).some(d => (d.bid || d) === action)) return false;
-  const rows = (v.corrected && v.corrected.length) ? v.corrected
-             : (v.table || []);
-  const row = rows.find(r => (r.bid || r.action) === action);
-  if (!row) return true;
-  return (+row.p_gain || 0) + (+row.p_push || 0) < DEAD_SHARE;
-}
 /* bidding: IMP cost below best, a CI haircut (charge the gap minus half its
    noise margin), a stakes-stretched scale (slam swings are judged wider than
    part-score battles), and field leniency by the engine's policy weight.
    Handles both the raw record shape (verdict.table / accepted as a string)
-   and the page-normalized shape (verdict.corrected / accepted as an array). */
+   and the page-normalized shape (verdict.corrected / accepted as an array).
+   The dead pin trusts verdict.dead_options as stored: the forge counts tied
+   wins (engine/verdict.py), and stale strictly-unique flags on old records
+   were removed by the one-off `trainer pool backfill-dead` migration. */
 function btScoreBidding(P, action) {
   const v = (P && P.verdict) || {};
   const accepted = (Array.isArray(v.accepted) ? v.accepted
     : (v.toss_up ? (v.toss_up_set || []) : [v.accepted])).filter(Boolean);
   const out = {kind: "bidding", unit: "IMP", accepted: accepted};
   if (accepted.includes(action)) { out.score = 100; return out; }
-  if (btIsDead(P, action)) {
+  if ((v.dead_options || []).some(d => (d.bid || d) === action)) {
     out.score = 0; out.dead = true; return out;
   }
   let row = (v.corrected || []).find(r => r.bid === action);
@@ -2541,7 +2524,7 @@ function chipsHtml(row) {{
   return `<div class="chips">${{bits.join("")}}</div>`;
 }}
 function optRowHtml(row, i, chosen, accepted) {{
-  const dead = btIsDead(P, row.bid);
+  const dead = (P.verdict.dead_options || []).some(d => d.bid === row.bid);
   const push = row.p_push !== undefined ? row.p_push
              : Math.max(0, 1 - row.p_gain - row.p_loss);
   const tags = (accepted.includes(row.bid)
@@ -2618,7 +2601,7 @@ function reveal(chosen) {{
     document.getElementById("more-box").style.display = "block";
   }}
   const feet = [];
-  if (rows.some(r => btIsDead(P, r.bid)))
+  if ((v.dead_options || []).length)
     feet.push("\\u2020 לא ניצחה באף חלוקה מדומה.");
   if ((v.flags || []).includes("doubled_heavy"))
     feet.push("חלק ניכר מהמרווח בהכפלה מניח הגנת double-dummy \\u2014 " +
@@ -2692,7 +2675,7 @@ function reveal(chosen) {{
       const push = r.p_push !== undefined ? r.p_push
         : (r.p_gain !== undefined && r.p_loss !== undefined
             ? Math.max(0, 1 - r.p_gain - r.p_loss) : undefined);
-      const dead = btIsDead(P, r.bid);
+      const dead = (v.dead_options || []).some(d => d.bid === r.bid);
       const tags = (v.accepted.includes(r.bid)
                       ? ' <span class="tag best">הטוב</span>' : "") +
         (r.bid === chosen ? ' <span class="tag you">שלך</span>' : "");

@@ -376,11 +376,6 @@ function gradeBidding(P, action) {
   const best = v.best || accepted[0] ||
     (v.corrected && v.corrected[0] && v.corrected[0].bid);
   const dead = (v.dead_options || []).map((d) => d.bid || d);
-  // btIsDead (shared inline block) vets a stored dead flag against the
-  // option's own evidence row — old records flagged calls that merely tied
-  // the winning result as dead. Fall back to the raw flag without it.
-  const isDead = (typeof window !== "undefined" && window.btIsDead)
-    ? window.btIsDead(P, action) : dead.includes(action);
   const row = (v.corrected || []).find((r) => r.bid === action);
   const correct = accepted.includes(action);
   let gradedCost = 0;
@@ -388,7 +383,7 @@ function gradeBidding(P, action) {
   let outcomeClass = "suboptimal";
   if (action === best) outcomeClass = "winner";
   else if (correct) outcomeClass = "accepted-alt";
-  else if (isDead) outcomeClass = "dead";
+  else if (dead.includes(action)) outcomeClass = "dead";
   // panel score (0-100): btScoreBidding lives in the pages' shared inline
   // script (docs/scoring_scale.md), which runs before this module. Guarded
   // so grading still works if a page omits it (score falls back to binary).

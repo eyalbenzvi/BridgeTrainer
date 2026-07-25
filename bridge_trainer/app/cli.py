@@ -284,6 +284,16 @@ def cmd_pool_backfill_leads(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pool_backfill_dead(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import backfill_dead_options
+    summary = backfill_dead_options(key_path=args.key, dry_run=args.dry_run)
+    verb = "would drop" if args.dry_run else "dropped"
+    print(f"{verb} {summary['stale_flags']} stale dead-option flag(s) from "
+          f"{summary['updated']} of {summary['with_dead']} bidding problems "
+          f"carrying dead_options ({summary['total']} docs total)")
+    return 0
+
+
 def _run_pool_script(filename: str, argv: list[str]) -> int:
     """Delegate a `trainer pool <cmd>` to a stable maintenance script under
     scripts/ (ARCH-11). The script is executed as __main__ with *argv* so it
@@ -525,6 +535,17 @@ def main(argv: list[str] | None = None) -> int:
     pb.add_argument("--dry-run", action="store_true",
                     help="report counts without writing")
     pb.set_defaults(func=cmd_pool_backfill_leads)
+
+    pd = pool_sub.add_parser(
+        "backfill-dead",
+        help="migration: drop stale dead-option flags (old strictly-unique "
+             "winner share) from bidding problems in Firestore")
+    pd.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pd.add_argument("--dry-run", action="store_true",
+                    help="report counts without writing")
+    pd.set_defaults(func=cmd_pool_backfill_dead)
 
     # ARCH-11: stable pool-maintenance scripts, surfaced as discoverable pool
     # subcommands. The actual dispatch is intercepted in main() (before
