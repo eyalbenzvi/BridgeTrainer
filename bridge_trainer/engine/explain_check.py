@@ -33,7 +33,19 @@ exempt: its "No suitable call" gloss merely restates constraints the
 seat's earlier bids established, which those bids' own entries already
 vet.
 
-Two independent checks:
+Fourth motivating board (ben1-19f93c01296): after 1♣-P-1♥-P-2♦-P-3♣-P
+the hero (opener, 16 HCP) was offered Pass — and the rollout made Pass
+the graded-best call, 2.8 IMPs ahead of 3NT. But GIB glosses partner's
+3♣ "3+ !C; 4+ !H; 8+ HCP; forcing to 3N" and repeats the commitment on
+the pass's own card, so in the system the explanations claim to teach
+("standard 2/1 Game Force") that pass is not a legal choice at all. Ben
+none the less rates it 46% of the policy, which is *why* the evidence
+favours it: the partner hands its sampler draws after 3♣ are hands that
+would not have forced. Either way the board is unpublishable — it either
+grades a system violation as best or narrates a force nobody is playing —
+and ``forcing_pass_violations`` catches it from the stored cards alone.
+
+Three independent checks:
 
 ``hand_violations`` (cheap, no engine)
     GIB's parsed card for every stem call and every offered candidate is
@@ -57,6 +69,14 @@ Two independent checks:
     a 5+ suit the bid's band refutes (Minor transfer glossed onto a natural
     invitational 2NT), or when the HCP bands are disjoint. Pass and
     low-n bands are skipped.
+
+``forcing_pass_violations`` (cheap, no engine, no hand)
+    Pass is offered while the partnership is still under a live force.
+    GIB carries the commitment on the pass's OWN card ("forcing to 3N",
+    "forcing") for exactly as long as it lives — an opponent's bid over
+    the forcing call discharges it and the clause disappears — so the
+    flag ``parse_meaning`` already sets is the whole test. Purely an
+    auction fact: no cards, no sampling, same answer for every hand.
 """
 from __future__ import annotations
 
@@ -71,7 +91,15 @@ BAND_N_MIN = 30        # below this many samples a band proves nothing
 BAND_P5_SURE = 0.90    # measured "the bid promises 5+ here"
 BAND_LEN_SLACK = 2.0   # gloss says N+, band average below N-2 refutes it
 BAND_P5_REFUTED = 0.5  # gloss says 5+/6+, most sampled hands lack even 5
-BAND_HCP_GAP = 2       # gloss and band HCP ranges must at least touch ±this
+BAND_HCP_GAP = 2       # gloss and band HCP ranges must at least touch ±this.
+                       # Confirmed empirically 2026-07-25 (docs/
+                       # forcing_pass_gate.md): over 249 stem/option rows on
+                       # 80 published boards this fires on 0 — GIB states
+                       # floors ~1.8 HCP above Ben's measured mean (p95 +1.0,
+                       # max +2.0), so ±2 is the smallest tolerance that is
+                       # clean, and no tighter HCP rule catches a false
+                       # FORCING claim without killing ~25% of the pool.
+                       # That class is caught by forcing_pass_violations.
 
 _HCP_W = {"A": 4, "K": 3, "Q": 2, "J": 1}
 _NUM_WORDS = {"zero": 0, "one": 1, "two": 2, "three": 3, "four": 4,
@@ -241,6 +269,59 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
     return fatal, soft
 
 
+# GIB's own forcing phrase, for the violation message: the ";"-clause that
+# carries it ("forcing to 3N", "forcing", "game force").
+_FORCING_CLAUSE_RE = re.compile(r"[^;]*\bforc\w*[^;]*")
+
+
+def _forcing_clause(card: dict) -> str:
+    m = _FORCING_CLAUSE_RE.search(card.get("gib_raw") or "")
+    return m.group(0).strip() if m else "forcing"
+
+
+def forcing_pass_violations(stem_entries: list[dict], option_cards: dict,
+                            dealer_i: int, hero_i: int) -> list[str]:
+    """Fatal: Pass is among the offered candidates while the hero's side is
+    still under a live force (ben1-19f93c01296).
+
+    A board that offers it is broken whichever engine is right. If GIB is,
+    the trainee is offered — and may be graded best for — a call the
+    system forbids. If Ben is (it passed the auction 46% of the time),
+    then the gloss the board displays narrates a force nobody at the table
+    is playing, and every sampled partner hand behind the evidence was
+    drawn under that disagreement. Neither is publishable, so the board
+    dies here rather than being half-repaired by dropping the option: the
+    rollout that ranked the REMAINING calls sampled the same partner.
+
+    The force is read off GIB's cards, which is why this needs no hand and
+    no sampling:
+
+    * the pass's own card asserts it ("No suitable call -- ...; forcing to
+      3N"). GIB keeps the clause exactly while the commitment lives — over
+      1♥-P-2♣-P-2♥-P-3♥-P-P it is there (passing a 2/1 game force), over
+      1♦-P-1♥-P-2♦-2♠-P-P it is gone (the overcall discharged it) — so
+      competitive auctions, where a pass is a real choice, never fire.
+    * failing that (a GIB fetch failed at generation time and left the
+      pass card empty), partner's last call asserts it and nothing but
+      passes has happened since.
+
+    Returns a one-item list (the board is already dead) or []."""
+    if "P" not in option_cards:
+        return []
+    card = option_cards.get("P") or {}
+    if card.get("forcing"):
+        return [f"option P: the pass's own gloss says "
+                f"{_forcing_clause(card)!r} — the hero's side may not pass"]
+    last = next((e for e in reversed(stem_entries)
+                 if e.get("call") != "P"), None)
+    if last is not None and (last.get("card") or {}).get("forcing") \
+            and seat_of(dealer_i, last["idx"]) == (hero_i + 2) % 4:
+        return [f"option P: partner's {last['call']} is "
+                f"{_forcing_clause(last['card'])!r} and only passes have "
+                f"followed — the hero's side may not pass"]
+    return []
+
+
 # GIB states suit length in prose too; parse_meaning ignores these, so the
 # band check reads them itself lest it accuse a gloss of omitting a suit it
 # stated in words. ("biddable" ~4+, "rebiddable" ~5+, "twice rebiddable" ~6+)
@@ -366,10 +447,11 @@ def band_violations(engine, spot, stem_entries: list[dict],
 
 
 def record_violations(rec: dict) -> tuple[list[str], list[str]]:
-    """The cheap (no-engine) audit for an already-built problem record:
-    the stored stem/option cards vs the stored full deal. Lets the same
-    gate vet historical pools and freshly forged batches alike. Returns
-    (fatal, soft) as ``hand_violations`` does."""
+    """The cheap (no-engine) audit for an already-built problem record: the
+    stored stem/option cards vs the stored full deal, plus the pass-under-
+    a-force check. Lets the same gate vet historical pools and freshly
+    forged batches alike. Returns (fatal, soft) as ``hand_violations``
+    does."""
     hands = [rec["full_deal"][s] for s in SEATS]
     dealer_i = SEATS.index(rec["dealer"])
     hero_i = SEATS.index(rec["seat"])
@@ -377,5 +459,7 @@ def record_violations(rec: dict) -> tuple[list[str], list[str]]:
     option_cards = {o["bid"]: o.get("card")
                     for o in (rec.get("explanations") or {}).get(
                         "options") or []}
-    return hand_violations(stem_entries, option_cards, hands, dealer_i,
-                           hero_i)
+    fatal, soft = hand_violations(stem_entries, option_cards, hands,
+                                  dealer_i, hero_i)
+    return (fatal + forcing_pass_violations(stem_entries, option_cards,
+                                            dealer_i, hero_i), soft)

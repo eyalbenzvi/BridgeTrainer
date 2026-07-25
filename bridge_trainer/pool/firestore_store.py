@@ -650,6 +650,63 @@ def backfill_dead_options(key_path: str | None = None,
             "stale_flags": stale_flags, "total": len(records)}
 
 
+def forcing_pass_offenders(records: list[dict]) -> dict:
+    """{problemId: reason} for bidding records that offer Pass while the
+    hero's side is still under a live force (engine/explain_check
+    .forcing_pass_violations). Pure — shared by the purge and its tests.
+
+    Needs only ``kind``/``dealer``/``seat``/``explanations``: the check is
+    an auction fact, so no hand and no verdict are read."""
+    from ..engine.conventions import SEATS as _SEATS
+    from ..engine.explain_check import forcing_pass_violations
+
+    out = {}
+    for rec in records:
+        if rec.get("kind") == "lead" or not rec.get("dealer") \
+                or not rec.get("seat"):
+            continue
+        ex = rec.get("explanations") or {}
+        bad = forcing_pass_violations(
+            ex.get("stem") or [],
+            {o["bid"]: o.get("card") for o in (ex.get("options") or [])
+             if o.get("bid")},
+            _SEATS.index(rec["dealer"]), _SEATS.index(rec["seat"]))
+        if bad:
+            out[rec["id"]] = bad[0]
+    return out
+
+
+def purge_forcing_pass(key_path: str | None = None,
+                       dry_run: bool = False) -> dict:
+    """Migration: DELETE bidding problems published before the forcing-pass
+    gate (engine/explain_check.forcing_pass_violations, engine/maker) — the
+    ones offering Pass in an auction their own glosses call forcing.
+
+    Deletion, not repair: the option cannot simply be dropped, because the
+    verdict's rows are pairwise against a reference call and its samples
+    were drawn from a partner distribution that disagreed with the gloss
+    (see the gate's docstring). Each doc goes through ``remove``, so the
+    index entry is dropped first and the pool count stays honest; the
+    generator replaces the boards on the next run.
+
+    Any stored attempts on a purged problem are left untouched, and
+    ``regrade_attempts`` counts them as ``missing_problem`` — deleting a
+    problem must not erase what the user actually answered.
+
+    Returns {flagged, reasons, removed, total}. ``dry_run`` reports without
+    deleting."""
+    remote = FirestorePool(key_path)
+    records = remote.stream_records(
+        fields=["kind", "dealer", "seat", "explanations"])
+    reasons = forcing_pass_offenders(records)
+    removed = 0
+    if not dry_run:
+        for pid in reasons:      # remove() retries its own writes
+            removed += bool(remote.remove(pid))
+    return {"flagged": sorted(reasons), "reasons": reasons,
+            "removed": removed, "total": len(records)}
+
+
 # ---- attempt regrading (fix user history after problem changes) ----------
 #
 # Attempts store a grading SNAPSHOT (score/correct/outcomeClass/gradedCost/
@@ -868,3 +925,51 @@ def regrade_attempts(key_path: str | None = None,
                                      merge=True))
     return {"attempts": len(metas), "regraded": regraded,
             "unchanged": unchanged, "missing_problem": missing}
+
+
+# ---- orphan attempts (history on problems that no longer exist) ----------
+
+def orphan_attempt_keys(live_ids: set, attempts: list[dict]) -> list[str]:
+    """Keys of *attempts* whose problem is not in *live_ids*.
+
+    ``attempts``: dicts with ``key`` (opaque) and ``problemId``. Pure —
+    shared by the purge and its tests."""
+    return [a["key"] for a in attempts if a.get("problemId") not in live_ids]
+
+
+def purge_orphan_attempts(key_path: str | None = None,
+                          dry_run: bool = False) -> dict:
+    """Delete stored attempts whose problem no longer exists in the pool.
+
+    Such an attempt is unfixable rather than merely stale: ``regrade_attempts``
+    cannot touch it (the verdict it was graded against is gone — it counts as
+    ``missing_problem``), the dashboard cannot offer it for practice (DB-M-9
+    renders it as a removed problem), and one that predates the stored
+    ``score`` field is scored at render time by btScoreOfAttempt's cost-only
+    fallback — no CI haircut, no stakes stretch, no field leniency, hence
+    systematically harsher than the real scorer. The dashboard already keeps
+    such rows out of every average; this removes them from storage for owners
+    who want history to contain only decisions that can still be verified.
+
+    Deliberately NOT automatic: it is the user's own answer history, so it
+    runs only when asked (`trainer pool purge-orphan-attempts`), and never as
+    part of a problem deletion.
+
+    Returns {attempts, orphans, deleted, live_problems}. ``dry_run`` reports
+    without deleting."""
+    remote = FirestorePool(key_path)
+    db = remote._db
+    live = {d.id for d in remote._col.list_documents()}   # ids only, no reads
+    snaps = list(db.collection_group("attempts").stream())
+    metas = [{"key": s.reference.path,
+              "problemId": (s.to_dict() or {}).get("problemId") or s.id,
+              "_ref": s.reference} for s in snaps]
+    orphans = set(orphan_attempt_keys(live, metas))
+    deleted = 0
+    if not dry_run:
+        for m in metas:
+            if m["key"] in orphans:
+                _retry_transient(m["_ref"].delete)
+                deleted += 1
+    return {"attempts": len(metas), "orphans": len(orphans),
+            "deleted": deleted, "live_problems": len(live)}

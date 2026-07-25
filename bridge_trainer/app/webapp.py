@@ -3846,6 +3846,10 @@ function firstMs(a) { return tsMillis(a && a.firstTs ? {ts: a.firstTs} : a); }
    (index unavailable) -> treat every attempt as live, as before. */
 let LIVE_IDS = null;
 let POOL_BY_TYPE = null;   // pool counts per problem type, for coverage
+/* An attempt whose problem is gone: its grade cannot be recomputed (the
+   verdict it was scored against no longer exists), so it is kept off every
+   aggregate. Unknown LIVE_IDS -> nothing is known to be orphaned. */
+function btOrphan(a) { return !!LIVE_IDS && !LIVE_IDS.has(a.problemId); }
 
 /* ---- fixed-slot open/closed state -------------------------------------- */
 function loadOpen() {
@@ -4119,7 +4123,7 @@ function sparkHtml(tr) {
 }
 
 /* ---- hero -------------------------------------------------------------- */
-function heroHtml(scored, legacyN) {
+function heroHtml(scored, legacyN, goneN) {
   const n = scored.length;
   const chrono = [...scored].sort((a, b) => firstMs(a) - firstMs(b));
   const win = chrono.slice(-HERO_WIN);
@@ -4210,6 +4214,10 @@ function heroHtml(scored, legacyN) {
     (legacyN
       ? ` ${glossHtml("legacy", "לא נכללות")} ${nProblems(legacyN)} שנפתרו לפני ` +
         `עדכון שיטת הציון.` : "") +
+    (goneN
+      ? ` ${legacyN ? "וכן" : glossHtml("legacy", "לא נכללות")} ` +
+        `${nProblems(goneN)} שהוסרו מהמאגר — הציון שלהן לא ניתן לחישוב מחדש.`
+      : "") +
     '</div></div>';
 }
 function mixHtml(ok, mid, bad, n) {
@@ -4422,8 +4430,16 @@ function render(attempts) {
   // stakes stretch, no leniency -- so it reads several points harsher than the
   // same decision made today, and any view ordered by time would drift upward
   // on its own as the window slid off them.
-  const scored = first.filter(btHasStoredScore);
-  const legacyN = first.length - scored.length;
+  // Same reasoning excludes attempts whose problem has since been DELETED from
+  // the pool, stored score or not: `trainer pool regrade-attempts` cannot
+  // refresh a grade whose verdict is gone (it counts them missing_problem),
+  // and boards do get deleted BECAUSE their verdict was wrong -- the
+  // explanation gates (engine/explain_check.py, `trainer pool audit`) remove
+  // them. Such a grade can never be verified again, so it states nothing about
+  // how the user bids today. The rows stay on the page, in the miss list.
+  const scored = first.filter(btHasStoredScore).filter(a => !btOrphan(a));
+  const legacyN = first.filter(a => !btHasStoredScore(a)).length;
+  const goneN = first.length - scored.length - legacyN;
   const heroSet = scored.length ? scored : first;
   const scen = {bidding: [], lead: []};
   for (const a of first) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
@@ -4475,7 +4491,7 @@ function render(attempts) {
     ? `ציון ${Math.round(mean(list.map(btScoreOfAttempt)))} · ${nDecisions(list.length)}` : "";
 
   el.innerHTML =
-    heroHtml(heroSet, legacyN) + nextup + tocheck +
+    heroHtml(heroSet, legacyN, goneN) + nextup + tocheck +
     section("bidding", "הכרזה", sumOf(scen.bidding), bidBody, open.has("bidding")) +
     section("lead", "הובלה", sumOf(scen.lead), leadBody, open.has("lead")) +
     section("pat", "נטיות שחוזרות",

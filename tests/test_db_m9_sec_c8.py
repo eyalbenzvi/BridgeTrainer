@@ -90,3 +90,37 @@ def test_dashboard_js_still_parses():
         assert res.returncode == 0, res.stderr
     finally:
         os.unlink(path)
+
+
+# ---- orphan attempts must not move the dashboard's numbers ------------------
+#
+# User report: stored history went stale as problems changed or were deleted
+# and the score formula was fixed. `trainer pool regrade-attempts` fixes every
+# attempt whose problem still exists, but an attempt on a DELETED problem has
+# nothing left to regrade against: its verdict is gone. The hero already
+# excludes scoreless legacy attempts for the same reason (their fallback score
+# reads harsher — measured up to 27 points on the production account); a grade
+# that can never be verified again is excluded too, and counted out loud.
+
+def test_hero_excludes_attempts_on_deleted_problems():
+    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("function render(attempts)"):]
+    assert "first.filter(btHasStoredScore).filter(a => !btOrphan(a))" in seg
+    # legacyN keeps its own meaning (no stored score); the deleted-problem
+    # ones are counted separately so the disclosure can name both reasons
+    assert "const legacyN = first.filter(a => !btHasStoredScore(a)).length;" \
+        in seg
+    assert "const goneN = first.length - scored.length - legacyN;" in seg
+    assert "heroHtml(heroSet, legacyN, goneN)" in seg
+
+
+def test_orphan_predicate_is_null_safe():
+    assert "function btOrphan(a) { return !!LIVE_IDS" in _DASHBOARD_JS
+
+
+def test_deleted_problem_count_is_shown_not_hidden():
+    hero = _DASHBOARD_JS[_DASHBOARD_JS.index("function heroHtml("):
+                         _DASHBOARD_JS.index("function mixHtml(")]
+    assert "goneN" in hero
+    assert "שהוסרו מהמאגר" in hero
+    # ... and their rows are still on the page, marked
+    assert "בעיה שהוסרה" in _DASHBOARD_JS

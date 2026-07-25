@@ -60,7 +60,8 @@ def test_maintenance_scripts_are_pool_subcommands(monkeypatch):
                         lambda f, argv: calls.append((f, argv)) or 0)
     for sub, filename in (("classify", "classify_pool.py"),
                           ("reexplain", "reexplain_pool.py"),
-                          ("backfill-notes", "backfill_bot_notes.py")):
+                          ("backfill-notes", "backfill_bot_notes.py"),
+                          ("audit", "audit_pool.py")):
         calls.clear()
         rc = cli.main(["pool", sub, "--some", "arg"])
         assert rc == 0

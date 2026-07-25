@@ -7,8 +7,8 @@ hold. The gate must kill that board, must NOT kill soft HCP stretches
 (they are the training content), and must read stored records.
 """
 from bridge_trainer.engine.explain_check import (
-    band_vs_card, card_vs_hand, hand_hcp, hand_violations, holds, keycards,
-    record_violations, suit_lengths)
+    SEATS, band_vs_card, card_vs_hand, forcing_pass_violations, hand_hcp,
+    hand_violations, holds, keycards, record_violations, suit_lengths)
 
 # ben1-01354c2d: E dealer, hero S
 HANDS = ["QJ64.Q65.A85.A62",        # N
@@ -285,3 +285,131 @@ def test_prose_lengths_and_total_points_parse_and_render():
     # an HCP band always outranks the vaguer total-points band
     o = parse_meaning("x -- 15-17 HCP; 18- total points")
     assert "pts" not in terse_meaning(o, call="1NT")
+
+
+# ---- the forcing-pass gate (ben1-19f93c01296) ---------------------------
+#
+# 1C-P-1H-P-2D-P-3C-P, hero S (opener, 16 HCP): the board offered Pass and
+# GRADED it best, 2.8 IMPs ahead of 3NT, while GIB glosses partner's 3C
+# "forcing to 3N" and repeats the commitment on the pass's own card. The
+# cards below are the ones the published record actually stored.
+
+def _fcard(gib_raw, **kw):
+    """A card as gib_explain.parse_meaning builds it (forcing flag included)."""
+    from bridge_trainer.engine.gib_explain import parse_meaning
+    return dict(parse_meaning(gib_raw), **kw)
+
+
+def _stem_19f93c01296():
+    return [
+        {"idx": 0, "seat": "S", "call": "1C",
+         "card": _fcard("Minor suit opening -- 3+ !C; 11-21 HCP")},
+        {"idx": 1, "seat": "W", "call": "P",
+         "card": _fcard("No suitable call -- 16- total points")},
+        {"idx": 2, "seat": "N", "call": "1H",
+         "card": _fcard("One over one -- 4+ !H; 6+ total points")},
+        {"idx": 3, "seat": "E", "call": "P",
+         "card": _fcard("No suitable call -- 20- total points")},
+        {"idx": 4, "seat": "S", "call": "2D",
+         "card": _fcard("Opener reverse -- 5+ !C; 4+ !D; 3- !H; 21- HCP")},
+        {"idx": 5, "seat": "W", "call": "P",
+         "card": _fcard("No suitable call -- 16- total points")},
+        {"idx": 6, "seat": "N", "call": "3C",
+         "card": _fcard("3+ !C; 4+ !H; 8+ HCP; forcing to 3N")},
+        {"idx": 7, "seat": "E", "call": "P",
+         "card": _fcard("No suitable call -- 20- total points")},
+    ]
+
+
+_PASS_UNDER_FORCE = _fcard(
+    "No suitable call -- 5+ !C; 4+ !D; 3- !H; 21- HCP; forcing to 3N")
+# S dealer, hero S -> partner N; the stem's own indices carry the seats
+_DEALER_I, _HERO_I = SEATS.index("S"), SEATS.index("S")
+
+
+def test_offered_pass_under_a_live_force_is_fatal():
+    bad = forcing_pass_violations(
+        _stem_19f93c01296(),
+        {"P": _PASS_UNDER_FORCE, "3NT": _fcard("5+ !C; 17-21 HCP"),
+         "3D": _fcard("5+ !D"), "4C": _fcard("5+ !C")},
+        _DEALER_I, _HERO_I)
+    assert len(bad) == 1
+    assert "option P" in bad[0] and "forcing to 3N" in bad[0]
+
+
+def test_partners_forcing_call_catches_an_empty_pass_card():
+    # GIB fetch failed for the pass (empty card): partner's 3C still says it
+    bad = forcing_pass_violations(_stem_19f93c01296(), {"P": _fcard("")},
+                                  _DEALER_I, _HERO_I)
+    assert len(bad) == 1 and "partner's 3C" in bad[0]
+
+
+def test_a_board_that_never_offers_pass_is_clean():
+    assert forcing_pass_violations(_stem_19f93c01296(),
+                                   {"3NT": _fcard(""), "4C": _fcard("")},
+                                   _DEALER_I, _HERO_I) == []
+
+
+def test_an_intervening_opponent_bid_discharges_the_force():
+    # 1C-P-1H-P-2D-2S-P: GIB drops the clause once the overcall discharges
+    # the force, and pass is a real choice again
+    stem = _stem_19f93c01296()[:5] + [
+        {"idx": 5, "seat": "W", "call": "2S",
+         "card": _fcard("One-level overcall -- 5+ !S; 8-11 HCP")},
+        {"idx": 6, "seat": "N", "call": "P",
+         "card": _fcard("No suitable call -- 20- total points")},
+    ]
+    assert forcing_pass_violations(
+        stem, {"P": _fcard("No suitable call -- 20- total points")},
+        _DEALER_I, _HERO_I) == []
+
+
+def test_a_forcing_call_by_an_opponent_does_not_force_the_hero():
+    # the last non-pass call is forcing but it is RHO's, not partner's, and
+    # the pass card carries no commitment -> not our force
+    stem = _stem_19f93c01296()[:5] + [
+        {"idx": 5, "seat": "W", "call": "2S",
+         "card": _fcard("Michaels -- 5+ !H; 5+ !S; 9+ total points; forcing")},
+    ]
+    assert forcing_pass_violations(
+        stem, {"P": _fcard("No suitable call -- 20- total points")},
+        _DEALER_I, _HERO_I) == []
+
+
+def test_record_violations_flags_the_stored_forcing_pass_board():
+    rec = {
+        "kind": "bidding", "dealer": "S", "seat": "S",
+        "full_deal": {"S": "A75.Q.KQ84.AQ983", "E": "QJ92.9732.AJ972.",
+                      "W": "K643.K864.T6.JT7", "N": "T8.AJT5.53.K6542"},
+        "explanations": {
+            "stem": _stem_19f93c01296(),
+            "options": [{"bid": "P", "card": _PASS_UNDER_FORCE},
+                        {"bid": "3NT", "card": _fcard("5+ !C; 17-21 HCP")}],
+        },
+    }
+    fatal, soft = record_violations(rec)
+    assert any("option P" in v and "may not pass" in v for v in fatal)
+
+
+def test_offenders_and_cli_wiring(monkeypatch):
+    from bridge_trainer.app import cli
+    from bridge_trainer.pool.firestore_store import forcing_pass_offenders
+
+    rec = {"id": "ben1-19f93c01296", "kind": "bidding", "dealer": "S",
+           "seat": "S",
+           "explanations": {"stem": _stem_19f93c01296(),
+                            "options": [{"bid": "P",
+                                         "card": _PASS_UNDER_FORCE},
+                                        {"bid": "3NT", "card": _fcard("")}]}}
+    clean = {"id": "ben1-clean", "kind": "bidding", "dealer": "S", "seat": "S",
+             "explanations": {"stem": _stem_19f93c01296(),
+                              "options": [{"bid": "3NT", "card": _fcard("")}]}}
+    lead = {"id": "lead1-x", "kind": "lead"}
+    offenders = forcing_pass_offenders([rec, clean, lead])
+    assert list(offenders) == ["ben1-19f93c01296"]
+
+    seen = {}
+    monkeypatch.setattr(cli, "cmd_pool_purge_forcing_pass",
+                        lambda a: seen.update(hit=True, dry=a.dry_run) or 0)
+    assert cli.main(["pool", "purge-forcing-pass", "--dry-run"]) == 0
+    assert seen == {"hit": True, "dry": True}
