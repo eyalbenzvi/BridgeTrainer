@@ -71,3 +71,32 @@ def test_tied_winner_is_not_dead():
     # and the EV ordering the user sees stays coherent with deadness:
     # T is closer to best than D, and neither is pinned
     assert rows["T"]["ev_imp_vs_top"] > rows["D"]["ev_imp_vs_top"]
+
+
+def test_forge_and_migration_agree_on_deadness():
+    """A call that ties the ACCEPTED call's result — on layouts where some
+    THIRD call is better, so it never ties the per-sample best — used to be
+    pinned dead by the forge and un-pinned by `trainer pool backfill-dead` on
+    the very next migration run. The forge now uses the migration's test
+    (p_gain + p_push, the row's own evidence), so stored deadness is stable."""
+    from bridge_trainer.pool.firestore_store import vet_dead_options
+
+    cols, contracts = _board()
+    n = len(cols["W"])
+    # C matches W exactly on the 36 layouts where W's game goes down (both
+    # -100) and is worse everywhere else; it is never the per-sample best,
+    # since T or D reach 0/30 on those same layouts.
+    cols = dict(cols, C=np.full(n, -100.0))
+    contracts = dict(contracts, C=["2SS"] * n)
+    v = judge(_ev(cols, contracts), policy_top="T", hero_i=0,
+              policy_map={**POLICY, "C": 0.01})
+    assert v.accepted and v.best == "W"
+    rows = {r["bid"]: r for r in v.table}
+    assert rows["C"]["best_share"] == 0.0          # never the per-sample best
+    assert rows["C"]["p_gain"] + rows["C"]["p_push"] > 0.2   # ... but matches W
+    dead = {d["bid"] for d in v.dead}
+    assert "C" not in dead and dead == {"Z"}
+    # and the migration confirms every flag the forge emits
+    kept, stale = vet_dead_options({"accepted": v.best, "table": v.table,
+                                    "dead_options": v.dead})
+    assert stale == [] and len(kept) == len(v.dead)

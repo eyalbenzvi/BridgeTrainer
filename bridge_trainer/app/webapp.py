@@ -4566,59 +4566,6 @@ function howHtml(first) {
     `<div class="rmore">ממוצע כל הזמנים <b>${lifetime}</b> · ` +
     `${nProblems(first.length)} (${glossHtml("firstonly", "ניסיון ראשון")} בלבד)</div>`;
 }
-/* Re-grade the low rows against the CURRENT problem docs (user report: the
-   dashboard showed 0 for a 3S that scores 83 today).
-
-   An attempt stores a grading SNAPSHOT. `trainer pool regrade-attempts` fixes
-   the stored copy whenever a verdict changes, and bumps `ts` so other devices
-   re-sync — but two cases slip through it and land here:
-     * an attempt that never reached Firestore (its write is still queued in
-       the client's PENDING list) is invisible to the server-side tool, so it
-       keeps its original grade for ever;
-     * `problemVersion` is the problem's created_at, which a verdict migration
-       does NOT change, so a stale grade cannot be spotted by comparing
-       versions — only by re-grading.
-   So the dashboard re-grades the rows where a stale grade actually shows and
-   hurts: the ones BELOW the review line, worst first, at most HEAL_MAX of them
-   (that many single-doc reads, once per load).
-
-   ONLY the score is refreshed, and only through btScoreBidding/btScoreLead —
-   the two scorers documented to accept a RAW Firestore record (verdict.table,
-   accepted as a bare string) as well as a page-normalized one. BT.gradeBidding
-   is NOT usable here: it reads verdict.corrected and copies verdict.accepted
-   into acceptedSet verbatim, so on a raw doc it yields a string where the
-   renderer expects an array (it threw "m.acceptedSet.join is not a function"
-   and took the whole dashboard down). Everything else on the attempt — the
-   guess, outcome class, cost, acceptedSet, timestamps — is left exactly as
-   stored, and nothing is written back: repairing the stored copy stays
-   `trainer pool regrade-attempts`' job. */
-const HEAL_MAX = 10;
-async function healLowGrades(attempts) {
-  if (!window.BT.getProblem || !window.btScoreBidding || !window.btScoreLead)
-    return 0;
-  const low = attempts
-    .filter(a => !btOrphan(a) && btScoreOfAttempt(a) < REVIEW_MIN)
-    .sort((a, b) => btScoreOfAttempt(a) - btScoreOfAttempt(b))
-    .slice(0, HEAL_MAX);
-  let changed = 0;
-  for (const a of low) {
-    const action = a.chosenCall || a.answer;
-    if (!action) continue;
-    let P = null;
-    try { P = await window.BT.getProblem(a.problemId); } catch (e) { continue; }
-    if (!P) continue;                       // deleted between index and read
-    let sp = null;
-    try {
-      sp = (a.kind || "bidding") === "lead"
-        ? window.btScoreLead(P, action, a.trainingMode)
-        : window.btScoreBidding(P, action);
-    } catch (e) { continue; }               // never let one row break the page
-    if (!sp || typeof sp.score !== "number" || sp.score === a.score) continue;
-    a.score = sp.score;                     // the score, and nothing else
-    changed++;
-  }
-  return changed;
-}
 async function init() {
   try {
     // Learn which problems still exist so deleted ones can be flagged in the
@@ -4638,9 +4585,11 @@ async function init() {
         POOL_BY_TYPE.get(p.type).ids.add(p.id);
       }
     } catch (e) { LIVE_IDS = null; POOL_BY_TYPE = null; }
-    const attempts = await window.BT.allAttempts();
-    render(attempts);                       // paint from cache first
-    if (await healLowGrades(attempts)) render(attempts);
+    // Render exactly what is stored. A grade is never recomputed at display
+    // time: an attempt's score is data, and stale data is repaired where it
+    // lives (`trainer pool regrade-attempts` against Firestore), never papered
+    // over by the page that shows it.
+    render(await window.BT.allAttempts());
   } catch (e) {
     const el = document.getElementById("dash");
     el.innerHTML = 'לא ניתן לטעון את הנתונים שלך: <span class="en"></span>';
@@ -4650,11 +4599,7 @@ async function init() {
 // refresh the dashboard once the background sync (T4) lands. render() reads
 // the persisted open-set, so a sync can't collapse a section the user opened.
 window.addEventListener("bt-attempts-synced", async () => {
-  try {
-    const attempts = await window.BT.allAttempts();
-    render(attempts);
-    if (await healLowGrades(attempts)) render(attempts);
-  } catch (e) { /* keep prior */ }
+  try { render(await window.BT.allAttempts()); } catch (e) { /* keep prior */ }
 });
 if (window.BT) window.BT.start(init);
 else addEventListener("bt-ready", () => window.BT.start(init), {once: true});

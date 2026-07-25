@@ -201,7 +201,17 @@ def judge(ev, policy_top: str | None = None,
             "top_contracts": Counter(ev.contracts[b]).most_common(3),
         }
         table.append(row)
-        if tied_share < DEAD_SHARE:
+        # Dead = this call never even MATCHES the accepted call's result. The
+        # test is the row's own evidence (p_gain + p_push), which is exactly
+        # what `trainer pool backfill-dead` uses to vet a stored flag
+        # (pool/firestore_store.vet_dead_options). It used to be tied_share
+        # — ties for the per-sample BEST — which is a strictly harsher bar:
+        # a call can tie the accepted call on layouts where some THIRD call
+        # is better, and the forge would pin it dead (score 0) while the
+        # migration immediately un-pinned it. The two now agree by
+        # construction, so stored deadness stops oscillating between a forge
+        # run and a migration run.
+        if row["p_gain"] + row["p_push"] < DEAD_SHARE:
             dead.append({"bid": b, "best_share": round(tied_share, 4)})
 
     measured = {
