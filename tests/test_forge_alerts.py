@@ -5,13 +5,17 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 _ROOT = Path(__file__).resolve().parent.parent
-_WF = _ROOT / ".github" / "workflows" / "forge-leads.yml"
+_WFS = [_ROOT / ".github" / "workflows" / f"forge-leads-{m}.yml"
+        for m in ("mp", "imp")]
 _DOC = _ROOT / "docs" / "firebase_setup.md"
 
 
-def test_forge_workflow_notifies_on_failure():
-    wf = _WF.read_text(encoding="utf-8")
+@pytest.mark.parametrize("path", _WFS, ids=lambda p: p.name)
+def test_forge_workflow_notifies_on_failure(path):
+    wf = path.read_text(encoding="utf-8")
     assert "issues: write" in wf                 # permission to open an issue
     assert "Notify on failure" in wf
     assert "if: failure()" in wf

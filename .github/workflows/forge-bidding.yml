@@ -5,17 +5,20 @@ name: Forge bidding problems
 # pushes them to Firestore — no local machine, no Claude Code session, and no
 # paid LLM tokens.
 #
-# This is the sibling of forge-leads.yml. The extra step is classification:
-# bidding categories are an LLM judgment (leads are a mechanical fact of the
-# contract). scripts/classify_pool.py does it via GitHub Models, authenticated
-# with GITHUB_TOKEN — which is why this job grants `permissions: models: read`.
+# This is the sibling of forge-leads-mp.yml / forge-leads-imp.yml. The extra
+# step is classification: bidding categories are an LLM judgment (leads are a
+# mechanical fact of the contract). scripts/classify_pool.py does it via GitHub
+# Models, authenticated with GITHUB_TOKEN — which is why this job grants
+# `permissions: models: read`.
 #
 # Two ways to run:
-#   * SCHEDULE — every 2 hours one batch (FORGE_COUNT problems, default 30)
-#     forges, classifies, and pushes. Tune via repository variables (Settings →
-#     Secrets and variables → Actions → Variables): FORGE_BIDDING_COUNT and
-#     FORGE_BIDDING_MAX_SECONDS. At 30 problems / 2 hours that is 360 problems a
-#     day and ~72 GitHub Models requests (5 problems per request), well inside
+#   * SCHEDULE — every 2 hours on the hour one batch (FORGE_BIDDING_COUNT
+#     problems, default 15) forges, classifies, and pushes. The three forge
+#     workflows are staggered 40 minutes apart: bidding at :00, leads-MP at :40,
+#     leads-IMP at +1:20. Tune via repository variables (Settings → Secrets and
+#     variables → Actions → Variables): FORGE_BIDDING_COUNT and
+#     FORGE_BIDDING_MAX_SECONDS. At 15 problems / 2 hours that is 180 problems a
+#     day and ~36 GitHub Models requests (5 problems per request), well inside
 #     the free tier's ~150 requests/day for a low-tier model.
 #   * MANUAL — Actions tab → "Run workflow": pick count, seed, time budget.
 #
@@ -34,16 +37,17 @@ name: Forge bidding problems
 
 on:
   schedule:
-    # every 2 hours, at :17 past the hour (off the hour so it doesn't contend
-    # with the hourly lead forge at :00). A blank-seed run uses the script's
-    # time-based default, so each firing scans fresh boards.
-    - cron: "17 */2 * * *"
+    # every 2 hours on the hour — the first of the three staggered forge slots
+    # (bidding :00, leads-MP :40, leads-IMP +1:20), so no two forges contend.
+    # A blank-seed run uses the script's time-based default, so each firing
+    # scans fresh boards.
+    - cron: "0 */2 * * *"
   workflow_dispatch:
     inputs:
       count:
         description: "Number of problems to generate"
         type: string
-        default: "30"
+        default: "15"
         required: true
       seed:
         description: "RNG seed (blank = unique per run, so re-runs add new boards)"
@@ -122,8 +126,8 @@ jobs:
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
             # every 2 hours: one batch. Time-based seed default => fresh boards.
-            N="${FORGE_COUNT:-30}"
-            BUDGET="${FORGE_MAX_SECONDS:-6000}"
+            N="${FORGE_COUNT:-15}"
+            BUDGET="${FORGE_MAX_SECONDS:-4500}"
             echo ">> scheduled batch: $N problems, ${BUDGET}s"
             MAX_SECONDS="$BUDGET" \
               scripts/generate_and_push_bidding.sh "$N" 2>&1 | tee forge.log
@@ -142,7 +146,7 @@ jobs:
           FORGE_COUNT: ${{ vars.FORGE_BIDDING_COUNT }}
         run: |
           if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            HEAD="every 2h, ${FORGE_COUNT:-30} problems"
+            HEAD="every 2h, ${FORGE_COUNT:-15} problems"
           else
             HEAD="requested $COUNT"
           fi

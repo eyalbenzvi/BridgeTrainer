@@ -126,8 +126,9 @@ python3 scripts/classify_pool.py data              # difficulty + type (GitHub M
 python3 scripts/classify_pool.py data --difficulty-only
 python3 scripts/classify_pool.py data --backend claude   # in a Claude Code session
 
-# full unattended pipeline (forge + classify + push), also the daily workflow:
-scripts/generate_and_push_bidding.sh 24 --key sa-key.json
+# full unattended pipeline (forge + classify + push), also the scheduled
+# workflow (forge-bidding.yml, every 2 hours at :00, 15 problems a firing):
+scripts/generate_and_push_bidding.sh 15 --key sa-key.json
 
 # backfill lead categories directly onto the live Firestore pool:
 trainer pool backfill-leads --key sa-key.json      # --dry-run to preview

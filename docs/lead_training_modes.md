@@ -83,17 +83,31 @@ acceptance gates run in (`engine/lead_verdict.py: MP_SCALE / IMP_SCALE`):
 Problem creation runs on GitHub Actions — no local machine or Claude session
 needed.
 
-**Hourly schedule** — every hour the workflow forges one MP batch and one
-IMP batch (10 problems each by default) and pushes them to Firestore. Seeds
-are hour-based, so every firing works fresh boards. Tune it with repository
-variables (Settings → Secrets and variables → Actions → Variables), no YAML
-edit needed: `FORGE_COUNT` (problems per mode per hour) and
-`FORGE_MAX_SECONDS` (per-mode time budget, default 1500 s).
+**One workflow per mode** — `forge-leads-mp.yml` and `forge-leads-imp.yml`.
+They used to be a single workflow that ran both modes back-to-back in one job;
+each mode now has its own schedule slot, its own log and its own failure signal.
 
-**Manual runs** — open **Actions → "Forge lead problems" → Run workflow**
-and choose:
+**Schedule** — each mode forges 15 problems every 2 hours and pushes them to
+Firestore. The three forge workflows are staggered 40 minutes apart inside the
+2-hour cycle, so only one is ever generating:
 
-* **mode** — `MP` or `IMP` (which generator's gates select the boards);
+| time (UTC) | workflow | problems |
+| --- | --- | --- |
+| `:00` (even hours) | bidding (`forge-bidding.yml`) | 15 |
+| `:40` (even hours) | leads MP (`forge-leads-mp.yml`) | 15 |
+| `:20` (odd hours) | leads IMP (`forge-leads-imp.yml`) | 15 |
+
+Each firing uses the script's per-run time-based seed default, so it works
+fresh boards. Tune it with repository variables (Settings → Secrets and
+variables → Actions → Variables), no YAML edit needed:
+`FORGE_LEADS_MP_COUNT` / `FORGE_LEADS_IMP_COUNT` (problems per firing) and
+`FORGE_LEADS_MP_MAX_SECONDS` / `FORGE_LEADS_IMP_MAX_SECONDS` (time budget,
+default 4500 s).
+
+**Manual runs** — open **Actions → "Forge lead problems (MP)"** or
+**"Forge lead problems (IMP)" → Run workflow**. The mode is fixed by which
+workflow you pick; the inputs are:
+
 * **count** — how many problems to generate;
 * optionally a seed and a time budget.
 
