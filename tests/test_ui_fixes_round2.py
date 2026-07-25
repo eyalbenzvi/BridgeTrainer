@@ -12,15 +12,23 @@ from __future__ import annotations
 
 import json
 
-from bridge_trainer.app.webapp import (_CSS, _dashboard_html, _lead_html,
+from bridge_trainer.app.webapp import (_CSS, _DASHBOARD_CSS,
+                                       _dashboard_html, _lead_html,
                                        _taxonomy_he_json)
 from bridge_trainer.engine.lead_classify import LEAD_TAXONOMY
 
 
 def test_ui1_dashboard_footnote_uses_on_felt_tone():
-    dash = _dashboard_html()
-    assert "#dash { color: var(--on-felt); }" in dash
-    assert "#dash .dtab > .footnote { color: var(--on-felt-muted); }" in dash
+    # #dash content rides directly on the green felt: its cards reset to their
+    # own --fg, but the loading placeholder, the load-error line and any loose
+    # note do not. They must take the on-felt tones or they render as dark
+    # green on green -- unreadable in light mode. (The dashboard's CSS is now
+    # an external asset, and the redesign replaced the .dtab tab panels with
+    # <details> sections, so the tones are asserted on the new selectors.)
+    assert "color: var(--on-felt);" in _DASHBOARD_CSS
+    assert "#dash > .footnote, #dash > .dnote { color: var(--on-felt-muted); }" \
+        in _DASHBOARD_CSS
+    assert 'href="dashboard.css?v=' in _dashboard_html()
 
 
 def test_ui2_modegoal_reserves_constant_height():

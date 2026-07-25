@@ -84,7 +84,7 @@ def make_attempts(n: int = 180, seed: int = 7) -> list[dict]:
             a["trainingMode"] = "IMP" if rng.random() < 0.4 else "MP"
         out.append(a)
     # a handful of retries (not first attempts) so "total attempts" > "answered"
-    for a in rng.sample(out, 22):
+    for a in rng.sample(out, min(22, len(out) // 4)):
         r = dict(a)
         r["isFirstAttempt"] = False
         r["score"] = min(100, a["score"] + rng.randint(5, 30))
@@ -96,21 +96,36 @@ STUB = """<script>
 window.BT = {
   start(cb) { cb(); },
   allAttempts() { return Promise.resolve(window.__MOCK_ATTEMPTS__); },
-  fetchIndex() {
-    return Promise.resolve({problems: window.__MOCK_ATTEMPTS__
-      .map(a => ({id: a.problemId}))});
-  },
+  fetchIndex() { return Promise.resolve({problems: window.__MOCK_POOL__}); },
   user() { return {uid: "preview"}; },
 };
 </script>"""
+
+
+def make_pool(attempts: list[dict], seed: int = 11) -> list[dict]:
+    """A fake pool index: every answered problem plus unanswered headroom in
+    each type, so the coverage section and the recommendation's pool guard
+    (which needs SESSION_SIZE unanswered problems in a type) have something to
+    work with."""
+    rng = random.Random(seed)
+    rows = [{"id": a["problemId"], "kind": a["kind"], "type": a["type"]}
+            for a in attempts if a.get("isFirstAttempt", True)]
+    for typ in BID_TYPES + LEAD_TYPES:
+        kind = "lead" if typ in LEAD_TYPES else "bidding"
+        for i in range(rng.randint(14, 40)):
+            rows.append({"id": f"pool-{typ}-{i}", "kind": kind, "type": typ})
+    return rows
 
 
 def build(out_dir: Path, attempts: list[dict], empty: bool = False) -> Path:
     write_app(out_dir)
     page = out_dir / "dashboard.html"
     html = page.read_text(encoding="utf-8")
-    data = "<script>window.__MOCK_ATTEMPTS__ = " + json.dumps(
-        [] if empty else attempts).replace("</", "<\\/") + ";</script>"
+    data = ("<script>window.__MOCK_ATTEMPTS__ = " + json.dumps(
+        [] if empty else attempts).replace("</", "<\\/") + ";\n"
+        "window.__MOCK_POOL__ = " + json.dumps(
+            [] if empty else make_pool(attempts)).replace("</", "<\\/")
+        + ";</script>")
     html = html.replace(
         '<script type="module" src="bt-firebase.js"></script>',
         data + "\n" + STUB)

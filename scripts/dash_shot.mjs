@@ -33,6 +33,20 @@ if (expand) {
   });
   await page.waitForTimeout(300);
 }
-await page.screenshot({path: `${prefix}.png`, fullPage: true});
+// The bottom nav is position:fixed, so in a fullPage capture it paints once
+// over the middle of the tall image. Drop it for the screenshot -- body
+// already reserves its height, so nothing reflows.
+if (flags.includes("--nonav")) {
+  await page.evaluate(() => {
+    const n = document.getElementById("gnav");
+    if (n) n.remove();
+  });
+}
+const sel = (flags.find(f => f.startsWith("--sel=")) || "").slice(6);
+if (sel) {
+  await page.locator(sel).first().screenshot({path: `${prefix}.png`});
+} else {
+  await page.screenshot({path: `${prefix}.png`, fullPage: true});
+}
 console.log(`${prefix}.png`);
 await browser.close();

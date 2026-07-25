@@ -16,7 +16,8 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import (_SHARED_JS, _dashboard_html, _index_html,
+from bridge_trainer.app.webapp import (_DASHBOARD_JS, _SHARED_JS,
+                                       _dashboard_html, _index_html,
                                        _lead_html, _problem_html)
 from test_home_early_click import _extract_function
 
@@ -80,5 +81,5 @@ def test_answered_problem_offers_retry_without_polluting_score_or_session(html_f
 
 def test_dashboard_and_summary_review_links_use_retry():
     # rendered output (the f-string's doubled braces collapse to single)
-    assert "{retry: true}" in _dashboard_html()
+    assert "{retry: true}" in _DASHBOARD_JS
     assert "{retry: true}" in _index_html()

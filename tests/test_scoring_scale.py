@@ -17,6 +17,7 @@ import tempfile
 import pytest
 
 from bridge_trainer.app.webapp import (_CSS, _SCORE_JS, _SHARED_JS,
+                                       _DASHBOARD_JS,
                                        _dashboard_html, _index_html,
                                        _lead_html, _problem_html)
 
@@ -268,8 +269,11 @@ def test_pages_wire_the_score():
     assert 'bumpSession(rec.score, P.id, "bidding")' in p
     assert 'bumpSession(rec.score, P.id, "lead")' in l
     assert "scoreSum += btScoreOfAttempt(rec)" in i
-    # dashboard aggregates: mean-score rows + score-band distribution
-    assert "meanCI" in d and "ציון ממוצע" in d
+    # dashboard aggregates: mean-score rows + score-band distribution.
+    # The dashboard ships its script as an external asset, so the page
+    # links it and the aggregation itself lives in _DASHBOARD_JS.
+    assert 'src="dashboard.js?v=' in d
+    assert "meanCI" in _DASHBOARD_JS and "ציון ממוצע" in _DASHBOARD_JS
 
 
 def test_attempt_records_carry_score():
