@@ -4000,7 +4000,7 @@ function patterns(first) {
   // 1. pass bias -- exact, no height arithmetic and no exclusions
   let passive = 0, pushy = 0;
   for (const a of bid) {
-    const acc = a.acceptedSet || [];
+    const acc = accOf(a);
     if (a.chosenCall === "P" && !acc.includes("P")) passive++;
     else if (a.chosenCall !== "P" && acc.includes("P")) pushy++;
   }
@@ -4016,7 +4016,7 @@ function patterns(first) {
   let wrongSuit = 0, wrongCard = 0;
   for (const a of lead) {
     if (btScoreOfAttempt(a) >= 100) continue;
-    const acc = a.acceptedSet || [];
+    const acc = accOf(a);
     if (!acc.length || !a.chosenCall) continue;
     if (acc.some(c => c[0] === a.chosenCall[0])) wrongCard++; else wrongSuit++;
   }
@@ -4031,7 +4031,7 @@ function patterns(first) {
   let high = 0, low = 0;
   for (const a of bid) {
     if (btScoreOfAttempt(a) >= 100) continue;
-    const acc = a.acceptedSet || [];
+    const acc = accOf(a);
     if (acc.length !== 1) continue;
     const mine = bidHeight(a.chosenCall), best = bidHeight(acc[0]);
     if (mine === null || best === null) continue;
@@ -4318,6 +4318,14 @@ function badge(m) {
       `${"★".repeat(d)}</span><span class="off">` +
       `${"★".repeat(5 - d)}</span></span>` : "");
 }
+/* acceptedSet as an array, whatever the cache holds. Every stored doc carries
+   an array, but a cached attempt can hold a bare string (a raw
+   verdict.accepted that reached the cache), and `.join`/`.some` on it throws
+   and takes the whole dashboard down with it. Normalize at every read. */
+function accOf(a) {
+  const s = a && a.acceptedSet;
+  return Array.isArray(s) ? s : (s ? [s] : []);
+}
 function missRowHtml(m, compact) {
   // attempt fields are user-owned free text -> esc() before innerHTML
   // (SEC-A-6). A problem deleted from the pool becomes a non-link "removed"
@@ -4328,10 +4336,11 @@ function missRowHtml(m, compact) {
     ? ` · ${glossHtml("cost", "עלות")} ≈ ` +
       `<span class="ltr">${(+m.gradedCost).toFixed(unitOf(m) === "IMP" ? 1 : 2)}</span> ${unitOf(m)}`
     : "";
+  const acc = accOf(m);
   const body = `${btScoreChipHtml(sc, true)}` +
     `<span class="mtxt">${badge(m)} בחרת <b class="ltr">${esc(m.chosenCall)}</b>` +
-    (m.acceptedSet && m.acceptedSet.length
-      ? ` — מיטבי <b class="ltr">${esc(m.acceptedSet.join(", "))}</b>` : "") +
+    (acc.length
+      ? ` — מיטבי <b class="ltr">${esc(acc.join(", "))}</b>` : "") +
     (compact ? "" : ` · ${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}${cost}`) +
     `</span>` +
     (gone ? '<span class="go muted">בעיה שהוסרה</span>'
@@ -4571,13 +4580,22 @@ function howHtml(first) {
        versions — only by re-grading.
    So the dashboard re-grades the rows where a stale grade actually shows and
    hurts: the ones BELOW the review line, worst first, at most HEAL_MAX of them
-   (that many single-doc reads, once per load). Grading uses the same
-   BT.gradeBidding/gradeLead the answer path uses, so the numbers match the
-   problem page exactly; the user's own guess and timestamps are untouched, and
-   nothing is written back — the stored copy stays the CLI's job. */
+   (that many single-doc reads, once per load).
+
+   ONLY the score is refreshed, and only through btScoreBidding/btScoreLead —
+   the two scorers documented to accept a RAW Firestore record (verdict.table,
+   accepted as a bare string) as well as a page-normalized one. BT.gradeBidding
+   is NOT usable here: it reads verdict.corrected and copies verdict.accepted
+   into acceptedSet verbatim, so on a raw doc it yields a string where the
+   renderer expects an array (it threw "m.acceptedSet.join is not a function"
+   and took the whole dashboard down). Everything else on the attempt — the
+   guess, outcome class, cost, acceptedSet, timestamps — is left exactly as
+   stored, and nothing is written back: repairing the stored copy stays
+   `trainer pool regrade-attempts`' job. */
 const HEAL_MAX = 10;
 async function healLowGrades(attempts) {
-  if (!window.BT.getProblem) return 0;
+  if (!window.BT.getProblem || !window.btScoreBidding || !window.btScoreLead)
+    return 0;
   const low = attempts
     .filter(a => !btOrphan(a) && btScoreOfAttempt(a) < REVIEW_MIN)
     .sort((a, b) => btScoreOfAttempt(a) - btScoreOfAttempt(b))
@@ -4589,11 +4607,14 @@ async function healLowGrades(attempts) {
     let P = null;
     try { P = await window.BT.getProblem(a.problemId); } catch (e) { continue; }
     if (!P) continue;                       // deleted between index and read
-    const fresh = (a.kind || "bidding") === "lead"
-      ? window.BT.gradeLead(P, action, a.trainingMode)
-      : window.BT.gradeBidding(P, action);
-    if (typeof fresh.score !== "number" || fresh.score === a.score) continue;
-    Object.assign(a, fresh);                // derived fields only
+    let sp = null;
+    try {
+      sp = (a.kind || "bidding") === "lead"
+        ? window.btScoreLead(P, action, a.trainingMode)
+        : window.btScoreBidding(P, action);
+    } catch (e) { continue; }               // never let one row break the page
+    if (!sp || typeof sp.score !== "number" || sp.score === a.score) continue;
+    a.score = sp.score;                     // the score, and nothing else
     changed++;
   }
   return changed;
