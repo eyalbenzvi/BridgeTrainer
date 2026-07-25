@@ -135,23 +135,27 @@ def test_deleted_problem_count_is_shown_not_hidden():
 # problemVersion (the problem's created_at) does not move when a migration
 # rewrites a verdict in place, so no version comparison can spot the staleness.
 
-def test_dashboard_regrades_the_low_rows_from_current_problems():
-    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("async function healLowGrades"):]
-    # only rows where a stale grade actually shows, worst first, bounded reads
-    assert "btScoreOfAttempt(a) < REVIEW_MIN" in seg
-    assert "slice(0, HEAL_MAX)" in seg
-    assert "const HEAL_MAX = 10;" in _DASHBOARD_JS
-    # graded by the same scorers the answer path uses (see the raw-record
-    # note in test_heal_uses_the_raw_tolerant_scorers_only)
-    assert "window.btScoreBidding(P, action)" in seg
-    # a deleted problem is skipped, not guessed at
-    assert "if (!P) continue;" in seg
-    # the score and nothing else: the guess, outcome, cost and timestamps stay
-    assert "a.score = sp.score;" in seg
-    # painted from cache first, re-rendered only when something changed
-    init = _DASHBOARD_JS[_DASHBOARD_JS.index("async function init()"):]
-    assert "render(attempts);" in init
-    assert "if (await healLowGrades(attempts)) render(attempts);" in init
+def test_dashboard_shows_only_what_is_stored():
+    """Owner direction: the page displays stored data, full stop. No display-time
+    re-grading — a wrong score is data to repair (`trainer pool
+    regrade-attempts`), not something the renderer works around. An earlier cut
+    of this recomputed the low rows from their problem docs on every load, which
+    both hid the real defect and made the hero number visibly jump."""
+    js = _DASHBOARD_JS
+    for banned in ("healLowGrades", "toVerify", "HEAL_MAX", "reScore",
+                   "getProblem", "btScoreBidding", "btScoreLead"):
+        assert banned not in js, banned
+    init = js[js.index("async function init()"):]
+    body = init[:init.index("const el = document.getElementById(\"dash\")")]
+    assert body.count("render(") == 1          # one paint, of stored data
+    assert "await window.BT.allAttempts()" in body
+
+
+def test_the_client_cannot_rewrite_a_stored_grade():
+    # the only writes bt-firebase.js makes to an attempt are the answer itself
+    # and the re-answer counter; nothing rewrites a grade behind the user
+    assert "reScore" not in _FB
+    assert _FB.count("setDoc(") == 3          # create, pending flush, re-answer
 
 
 def test_unsynced_answers_are_declared_not_presented_as_settled():
@@ -161,24 +165,6 @@ def test_unsynced_answers_are_declared_not_presented_as_settled():
                          _DASHBOARD_JS.index("function mixHtml(")]
     assert "pendingN" in hero
     assert "לא נשמרו לענן" in hero
-
-
-def test_heal_uses_the_raw_tolerant_scorers_only():
-    """The first cut of healLowGrades called BT.gradeBidding on the RAW doc
-    BT.getProblem returns. gradeBidding copies verdict.accepted verbatim, which
-    is a bare string there, so acceptedSet became a string and missRowHtml's
-    .join threw — the dashboard rendered nothing but the error. Only the two
-    scorers documented to accept a raw record may be used, and only the score
-    may be touched."""
-    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("async function healLowGrades"):
-                        _DASHBOARD_JS.index("async function init()")]
-    assert "window.btScoreBidding(P, action)" in seg
-    assert "window.btScoreLead(P, action, a.trainingMode)" in seg
-    assert "gradeBidding" not in seg and "gradeLead" not in seg
-    assert "a.score = sp.score;" in seg
-    assert "Object.assign" not in seg
-    # a single bad row must never take the page down
-    assert "} catch (e) { continue; }" in seg
 
 
 def test_accepted_set_is_normalized_at_every_read():
