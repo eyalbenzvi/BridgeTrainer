@@ -4307,13 +4307,22 @@ function weakArea(first, scen) {
 /* ---- render ------------------------------------------------------------ */
 const OUTCOME_HE = {winner: "מנצחת", "accepted-alt": "חלופה קבילה",
   dead: "אפשרות ללא סיכוי", suboptimal: "נחותה מהמיטבית"};
+/* one definition of "which scenario is this attempt", since a missing `kind`
+   means the record predates the lead trainer and is therefore a bidding one */
+function attKind(a) { return (a && a.kind) === "lead" ? "lead" : "bidding"; }
+function scenHe(a) { return attKind(a) === "lead" ? "הובלה" : "הכרזה"; }
 function unitOf(a) {
-  if ((a.kind || "bidding") !== "lead") return "IMP";
+  if (attKind(a) !== "lead") return "IMP";
   return a.trainingMode === "IMP" ? "IMP" : "לקיחה";
 }
 function badge(m) {
   const t = TYPE_NAMES[m.type], d = m.difficultyLevel;
-  return (t ? `<span class="typebadge" style="margin:0">${t[0]}</span> ` : "") +
+  // The scenario is NAMED on every row, not just implied by the type: the two
+  // taxonomies overlap in Hebrew (a lead problem's type reads "סלם" and
+  // "חוזה חלקי" just like a bidding one), so in a list that mixes both a bare
+  // type label leaves the reader unable to tell an auction from a lead.
+  const lbl = scenHe(m) + (t ? " · " + t[0] : "");
+  return `<span class="typebadge" style="margin:0">${lbl}</span> ` +
     (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
       `${"★".repeat(d)}</span><span class="off">` +
       `${"★".repeat(5 - d)}</span></span>` : "");
@@ -4348,6 +4357,45 @@ function missRowHtml(m, compact) {
   return gone
     ? `<div class="mrow">${body}</div>`
     : `<a class="mrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">${body}</a>`;
+}
+/* ---- which misses get a row --------------------------------------------
+   Both miss lists cover BOTH scenarios, with their slots DEALT OUT between
+   them. Pooling the two into one ordered list and cutting it at a cap does
+   not work, because the two score scales are not built to the same shape:
+   a bidding call that is a dead option is pinned to 0 and any other is charged
+   on tau = 2.0 IMP, while a lead has no dead concept, is charged on
+   tau = 0.6 tricks blended 35% with its matchpoint rank, and therefore bottoms
+   out far higher. Sorted together, the bidding tail filled every slot from the
+   bottom and the lead misses fell off the end -- both lists showed a user who
+   had apparently never mis-led a hand. So each scenario is ordered WITHIN its
+   own scale and the two queues take turns.
+   Score still orders each queue (never gradedCost: the units differ). */
+const MISS_CAP = 30;      // rows in the full list
+function missesOf(list) {
+  return list.filter(a => btScoreOfAttempt(a) < REVIEW_MIN)
+    .sort((a, b) => btScoreOfAttempt(a) - btScoreOfAttempt(b) ||
+                    firstMs(b) - firstMs(a));
+}
+/* Round-robin over the per-scenario queues, worst first within each. Queue
+   order is the page's section order (bidding, then lead) rather than "whichever
+   scenario's worst row scores lower" -- that would be the cross-scale
+   comparison this function exists to avoid, and a fixed order keeps the list
+   from reshuffling between visits. A scenario with nothing left simply yields
+   its turns, so a user who has only ever bid still fills the cap. */
+function pickMisses(list, cap) {
+  const qs = [missesOf(list.filter(a => attKind(a) === "bidding")),
+              missesOf(list.filter(a => attKind(a) === "lead"))]
+    .filter(q => q.length);
+  const out = [];
+  while (out.length < cap && qs.some(q => q.length))
+    for (const q of qs)
+      if (q.length && out.length < cap) out.push(q.shift());
+  return out;
+}
+/* number agreement, as for nProblems/nDecisions: the card genuinely holds one
+   row on a new account, where "1 החלטות לחזור אליהן" is broken Hebrew. */
+function nToCheck(n) {
+  return n === 1 ? "החלטה אחת לחזור אליה" : n + " החלטות לחזור אליהן";
 }
 /* A section always occupies its slot, in a fixed order. An empty one renders
    disabled rather than vanishing: a page whose STRUCTURE moves between visits
@@ -4458,7 +4506,7 @@ function render(attempts) {
   const pendingN = (window.BT.pendingCount && window.BT.pendingCount()) || 0;
   const heroSet = scored.length ? scored : first;
   const scen = {bidding: [], lead: []};
-  for (const a of first) scen[a.kind === "lead" ? "lead" : "bidding"].push(a);
+  for (const a of first) scen[attKind(a)].push(a);
   const recent = [...first].sort((a, b) => firstMs(b) - firstMs(a));
   const heroChrono = [...heroSet].sort((a, b) => firstMs(a) - firstMs(b));
   const winIds = new Set(heroChrono.slice(-HERO_WIN).map(a => a.problemId));
@@ -4480,22 +4528,35 @@ function render(attempts) {
   // the 3 worst decisions IN THE HERO WINDOW: "worst recently" is a review
   // target, the all-time worst from six months ago is not. Ordered by score,
   // not gradedCost -- cost units differ by scenario (IMP vs tricks), so a
-  // mixed cost sort would rank 2.4 IMP against 0.7 tricks.
-  const winMisses = heroChrono.filter(a => winIds.has(a.problemId))
-    .filter(a => btScoreOfAttempt(a) < REVIEW_MIN)
-    .sort((a, b) => btScoreOfAttempt(a) - btScoreOfAttempt(b) ||
-                    firstMs(b) - firstMs(a));
-  const tocheck = winMisses.length
-    ? '<div class="card"><b>3 החלטות לחזור אליהן</b>' +
+  // mixed cost sort would rank 2.4 IMP against 0.7 tricks. The three slots are
+  // shared between the scenarios rather than pooled; see pickMisses.
+  const inWin = heroChrono.filter(a => winIds.has(a.problemId));
+  const winRows = pickMisses(inWin, 3);
+  const tocheck = winRows.length
+    ? `<div class="card"><b>${nToCheck(winRows.length)}</b>` +
       '<span class="dsum" style="margin-inline-start:8px">מתוך הבעיות האחרונות</span>' +
-      winMisses.slice(0, 3).map(m => missRowHtml(m, true)).join("") + '</div>'
+      winRows.map(m => missRowHtml(m, true)).join("") + '</div>'
     : "";
 
-  const allMiss = [...first].filter(a => btScoreOfAttempt(a) < REVIEW_MIN)
-    .sort((a, b) => btScoreOfAttempt(a) - btScoreOfAttempt(b) ||
-                    firstMs(b) - firstMs(a));
-  const missList = allMiss.length
-    ? allMiss.slice(0, 30).map(m => missRowHtml(m, false)).join("")
+  const allMiss = missesOf(first);
+  const missRows = pickMisses(first, MISS_CAP);
+  // The cap is disclosed, and so is the per-scenario split: a list that is
+  // silently truncated reads as "this is everything", and one that names only
+  // its total hides which scenario the misses are in.
+  const nLead = allMiss.filter(a => attKind(a) === "lead").length;
+  const nBid = allMiss.length - nLead;
+  const both = nBid > 0 && nLead > 0;
+  const parts = [
+    both ? `הכרזה <b class="ltr">${nBid}</b> · ` +
+           `הובלה <b class="ltr">${nLead}</b>` : "",
+    allMiss.length > missRows.length
+      ? `מוצגות ${missRows.length} הגרועות` +
+        (both ? ", בחלוקה שווה בין השניים" : "") : "",
+  ].filter(Boolean);
+  const missNote = parts.length
+    ? `<div class="rmore" style="margin-top:0">${parts.join(" · ")}</div>` : "";
+  const missList = missRows.length
+    ? missNote + missRows.map(m => missRowHtml(m, false)).join("")
     : "";
 
   const patBody = pats.length

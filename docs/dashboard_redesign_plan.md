@@ -371,7 +371,26 @@ honesty — but do not imply vulnerability awareness anywhere.
    action is the hierarchy failure being removed, so the pattern gets no
    button of its own.
 3. **`.card.tocheck`** — `3 החלטות לחזור אליהן`, one line each: score chip,
-   type badge, `בחרת 3♠ — מיטבי 4♥`, `←`.
+   scenario+type badge, `בחרת 3♠ — מיטבי 4♥`, `←`. The heading counts the rows
+   it actually holds (`nToCheck`), which is 1 or 2 on a new account.
+
+**Both miss lists deal their slots out between the scenarios** (`pickMisses`),
+rather than pooling every miss into one score-ordered list and cutting it at
+the cap. The two score scales are not built to the same shape: a bidding call
+that is a dead option is **pinned to 0** and any other is charged on
+`tau = 2.0` IMP, while a lead has no dead option, is charged on `tau = 0.6`
+tricks blended 35% with its matchpoint rank, and therefore bottoms out far
+higher (~60 for a real MP lead error). Pooled and cut at 30, the bidding tail
+filled every row and the leads fell off the end — both lists showed a user who
+had apparently never mis-led a hand. Each scenario is ordered **within its own
+scale** (by score, never by `gradedCost`, whose units differ) and the queues
+take turns in section order, bidding first; a scenario with nothing left yields
+its turns, so a bidding-only player still fills the cap. Because the list now
+mixes scenarios, every row **names its scenario**: the two taxonomies collide
+in Hebrew (both have a `סלם` and a `חוזה חלקי`), so a bare type label cannot
+say whether a row was an auction or a lead. The truncation and the
+per-scenario split are printed above the rows — a silently cut list reads as
+"this is everything".
 
 **Tier 2 — five collapsed `<details class="dsec">`, all closed on first
 visit.** The reviews proposed 4 and 5; taking 5. The disputed section was
