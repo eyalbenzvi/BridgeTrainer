@@ -214,35 +214,228 @@ one that would have killed this board.
 The 4NT row would still have passed even with the floor lifted (`pts` is not
 checked, and `4+ !S` is true), so §1 needs its own rule.
 
+## The rules to add
+
+No board is removed except by a rule that fires mechanically, states which
+predicate fired, and has a measured cost on the published pool. Three rules
+are proposed, one per defect; all three fire on `ben1-19f975cad49`. Each is
+calibrated below over the 477 published bidding boards (1 374 option rows,
+892 of them non-pass).
+
+### R1 — *the candidate asked a question and ignored the answer*
+
+The defect it names: a candidate's contract distribution reports argmax
+determinism as bridge certainty (§2). The naive form of the rule — "the
+projection is a single contract at 100 %" — is **not** the rule to adopt: it
+was measured and it is wrong about nearly half the boards it flags. What
+survives measurement is the answer-insensitivity test.
+
+```
+answer_insensitive_violations(ev, spot)      # forge-time; uses ev.auctions,
+                                            # which rollout_eval already builds
+  k = len(spot.stem)
+  for call in ev.bids:                       # skip P / X / XX
+      replies = Counter(auction[k+2] for auction in ev.auctions[call])
+      # partner's own first call after the candidate; k+1 is LHO, k+3 RHO
+      asked = #{r for r in replies if r not in (PASS, absent)
+                and replies[r] / n >= 0.05} >= 2
+      settled = max(Counter(ev.contracts[call]).values()) / n >= 0.99
+      if asked and settled:
+          FIRE "option {call}: partner answered {replies} yet the contract is
+                {contract} on {share:.0%} of layouts — the rollout discards the
+                information the call asks for"
+```
+
+Both halves are needed and each is doing work:
+
+* `asked` — partner's action varied with partner's hand, so the call
+  functioned as an ask or a force, and the samples genuinely differed in what
+  came back;
+* `settled` — the final contract nevertheless never moved.
+
+The 5 % floor on a reply and the 99 % on the contract are the loosest values
+that keep single-sample noise out; the observed cases are not near either
+boundary (this board: four replies at 73/20/5/2 %, contract 100 %).
+
+**Why not the naive point-mass rule.** All 11 rows the record-only screen
+flags at 100 % were re-rolled with Ben at n=128 and their rollout auctions
+inspected:
+
+| board | call | partner's replies | hero's next call | verdict |
+|---|---|---|---|---|
+| `ben1-19f975cad49` | 4NT | 5♥×93, 5♣×26, 5♦×6, 5♠×3 | 6♣×128 | **answer-insensitive** |
+| `ben1-19f9609a54c` | 4NT | 5♣×105, 5♥×13, 5♦×10 | 6♣×128 | **answer-insensitive** |
+| `ben1-19f966c0800` | 4NT | 5♣×118, 5♦×10 | 6♦×128 | **answer-insensitive** |
+| `ben1-19f9910d96d` | 4NT | 5♣×103, 5♥×13, 5♠×12 | 6♣×128 | **answer-insensitive** |
+| `ben1-19f95ad1501` | 4♣ | 4♦×121, 4♥×7 | 4♥×112, P×16 | **answer-insensitive** |
+| `ben1-19f98ba4d93` | 3NT | 4♠×118, 4♣×10 | P×118, 4♦×10 | **answer-insensitive** |
+| `ben1-19f95ad153a` | 3♣ | 3NT×128 | P×128 | forced — partner had one action |
+| `ben1-19f95ad1594` | 4♥ | 4♠×128 | P×128 | forced |
+| `ben1-19f9609a4d9` | 2NT | 3♠×128 | P×128 | forced |
+| `ben1-19f97f88f2a` | 2♠ | 3NT×128 | P×128 | forced |
+| `ben1-19f93985a7f` | 3NT | 4♣×128 | 4♠×128 | forced |
+
+**5 of the 11 are legitimate**: partner made the same call on all 128 layouts,
+so the point mass is a fact about the auction, not about argmax, and deleting
+those boards would be exactly the "just drop the board" move this rule exists
+to avoid. R1 clears them. It also fires on three rows the 100 % screen misses
+(`ben1-19f98ba4e75` 4NT, `ben1-19f95ad156c` 4NT, `ben1-19f975cae49` 4♣ — all
+asks whose projection sits at 99.2-100 %), so it is both narrower and broader
+than the naive rule, in the right directions.
+
+**Measured false-positive rate.** 22 boards drawn at random from the pool
+(seeded shuffle, the suspect boards excluded), re-rolled at n=128: **56 option
+rows, 0 hits.** R1 does not quietly delete ordinary boards — on every random
+row either partner passed (`distinct_replies = 0`, no question asked) or the
+contract distribution moved with the answer.
+
+The record-only 100 % test still has a use — it is the **cheap pre-filter for
+auditing the already-published pool**, where `ev.auctions` is gone: 11 rows on
+11 boards (2.3 %) to re-roll and confirm, of which 6 die and 5 are cleared.
+
+| screen | rows | boards (of 477) | accepted answer | confirmed by R1 |
+|---|---|---|---|---|
+| point mass = 100 % (record only) | 11 | 11 (2.3 %) | 3 | 6 of 11 |
+| ≥ 99 % | 17 | 16 (3.4 %) | 3 | not measured |
+| ≥ 95 % | 30 | 27 (5.7 %) | 5 | not measured |
+| **R1 itself, on 22 random boards** | **56 measured** | **0** | 0 | — |
+
+Confirmed R1 set on the published pool: 9 boards — the 6 above plus
+`ben1-19f98ba4e75`, `ben1-19f95ad156c`, `ben1-19f975cae49`, which the 100 %
+screen missed and R1 catches.
+
+### R2 — *the displayed meaning of a conventional call says nothing*
+
+The defect it names: `4NT — 4+♠, 6+ pts` (§1). Not "GIB gave no convention
+name" — GIB routinely describes cue-bids by constraints alone and those
+glosses are informative (that predicate flags 24 boards, mostly wrongly). The
+defect is that the card states **nothing the seat had not already shown**.
+
+```
+meaningless_gloss_violations(stem_entries, option_cards, auction, dealer, hero)
+  prior = cumulative constraints from the HERO's own earlier stem cards
+          (minlen/maxlen/hcp/pts/forcing — the same accumulation
+           band_violations already does for known_minlen)
+  for call, card in option_cards:
+      if call is natural: continue        # a natural call is explained by its
+                                         # own denomination; only the level is
+                                         # in question
+      if card is empty:                    FIRE "no meaning stated"
+      if card names no convention
+         and asserts no holding (!CQ)
+         and states no force prior lacked
+         and every stated length  <= prior length
+         and its hcp/pts band is no narrower than prior:
+                                           FIRE "gloss restates what {earlier
+                                                 call} already showed"
+```
+
+"Cannot be natural" = NT at level 4 or 5, or a bid in a strain only the
+opponents have bid (a cue-bid). Calibration:
+
+| variant | rows | boards (of 477) | accepted answer | fires on this board |
+|---|---|---|---|---|
+| **only calls that cannot be natural** | **2** | **2 (0.4 %)** | **1** | **yes** (4NT, the accepted answer) |
+| every candidate | 38 | 33 (6.9 %) | 18 | yes |
+
+Restricting to non-natural calls is what makes the rule surgical: the
+all-candidates variant flags rows like `3♠ — 5+♠` where the hero had already
+shown five spades — true, uninformative, and harmless, because a natural raise
+explains itself. The two boards it does flag are this one (4NT glossed with
+North's own 1♠ constraints, `4+ !S; 6+ total points`) and `ben1-013527a9`
+(a 3♣ cue-bid with an empty gloss).
+
+### R3 — *a forcing call is left in as the final contract*
+
+The defect it names: `4♦N 9 %` (§3). The companion to
+`forcing_pass_violations`, which covers pass-as-an-option and never looks
+inside the rollout.
+
+```
+forcing_contract_violations(verdict, option_cards, auction, dealer, hero)
+  for row in verdict.table:
+      call = row.bid;  skip P / X / XX
+      if not (option_cards[call].forcing or call is a cue-bid): continue
+      for contract, cnt in row.top_contracts:
+          if level+strain(contract) == call
+             and declarer is on the hero's side
+             and cnt / n >= 0.05:
+              FIRE "option {call} is {forcing clause} yet the rollout leaves
+                    it as the contract on {cnt}/{n} layouts"
+```
+
+| share floor | rows | boards (of 477) | accepted answer | fires on this board |
+|---|---|---|---|---|
+| ≥ 2 % | 16 | 15 (3.1 %) | 6 | yes |
+| **≥ 5 %** | **16** | **15 (3.1 %)** | **6** | **yes** (4♦ at 8.5 %) |
+| ≥ 10 % | 14 | 13 (2.7 %) | 6 | no |
+| ≥ 25 % | 11 | 11 (2.3 %) | 5 | no |
+| ≥ 50 % | 7 | 7 (1.5 %) | 4 | no |
+
+5 % is not fitted: the observed shares jump from 8.5 % straight down to 1.2 %
+and 0.6 %, so any floor in (2 %, 8 %] selects the same 16 rows. Below 2 % the
+two remaining rows are single-sample noise.
+
+### R0 — the one-line fix that closes the hole, inventing no rule at all
+
+`band_violations` already owns the right check; it just declines to run it.
+Replace the blanket `feats.n < BAND_N_MIN → skip` with: skip only the
+HCP-percentile clause (which genuinely needs n), and run the suit-length
+clauses whenever the sample exists. When the low `n` is Ben's rescue floor the
+returned layouts are the 15 *best-fitting* ones, so a length violation
+measured on them is conservative, not noisy. Measured over 14 boards
+(38 option rows): 15 rows sit on the floor, 1 of them carries a violation —
+the 4♦ on this board, which alone rejects it as `expl_vs_band`.
+
+### R4 — GIB's total-points band (separate defect, does not remove this board)
+
+`card_vs_hand` and `band_vs_card` read `hcp` only. Adding `pts` — HCP plus
+length points or shortness points, whichever is kinder to the bidder, with the
+existing `SLACK_HCP = 2` — flags 9 boards of 477 (1.9 %). It does **not**
+remove this board: East's ♠8754 ♥743 ♦T963 ♣J3 is 1 HCP + 1 shortness point
+= 2 against a promised `4-8`, exactly at the slack boundary. The false
+`3♦ (E): 4+♦, 4-8 pts` line therefore survives R4 and is reported by R2's
+sibling reasoning only if the slack is tightened to 1 — which is an owner-level
+call, not something to slip in with this change.
+
+## What removes `ben1-19f975cad49`
+
+All of R1, R2 and R3 fire on it, independently:
+
+| rule | what fires | on the accepted answer? |
+|---|---|---|
+| R1 | 4NT projects 6♣S on 423/423 layouts, four calls past the candidate | yes |
+| R2 | 4NT's gloss `4+ !S; 6+ total points` is North's own 1♠ card | yes |
+| R3 | 4♦ (`forcing to 5C`) is the contract on 36/423 layouts | no (a foil) |
+| R0 | 4♦'s gloss promises 5+♣, Ben's 4♦ shows avg 3.6 (P5+ = 0.07) | no (a foil) |
+
+R2 is the one to adopt first: it is record-only, needs no engine, has the
+smallest measured cost (2 boards), and fires on the very option the board is
+graded against. R1 is the rule for complaint 2 — it needs the forge's
+`ev.auctions`, and it is the one that survived measurement where the naive
+point-mass rule did not. R3 is the rule for complaint 3.
+
+Adopting R1 + R2 + R3 (at 5 %) removes **23 of 477 boards (4.8 %)**:
+9 (R1) + 2 (R2) + 15 (R3), with three boards caught by more than one rule.
+Full list:
+
+| board | rules |
+|---|---|
+| `ben1-19f975cad49` | R1+R2+R3 |
+| `ben1-013527a9` | R2+R3 |
+| `ben1-19f95ad1501`, `ben1-19f95ad156c`, `ben1-19f9609a54c`, `ben1-19f966c0800`, `ben1-19f975cae49`, `ben1-19f98ba4d93`, `ben1-19f98ba4e75`, `ben1-19f9910d96d` | R1 |
+| `ben1-013572e7`, `ben1-01357319`, `ben1-013574c2`, `ben1-0135750a`, `ben1-19f93985aed`, `ben1-19f93fc826f`, `ben1-19f947b97cb`, `ben1-19f947b9854`, `ben1-19f9609a411`, `ben1-19f975cae9e`, `ben1-19f97f89099`, `ben1-19f9910d9de`, `ben1-19f9910da11` | R3 |
+
 ## Conclusions
 
-1. **A sampler that lands on the rescue floor is evidence, not a missing
-   measurement.** `n == min_sample_hands_auction` (or `quality <
-   bidding_threshold_sampling`) on a candidate prefix means Ben cannot place
-   the call in any system. Reject the board on it instead of skipping the band
-   check — the current behaviour disables the check exactly where the engine
-   is most confused. This alone would have stopped this board.
-2. **Reject degenerate projections.** A non-signoff candidate whose rollout
-   projects one contract at 100 % while the auction ran two or more calls past
-   the candidate is reporting argmax determinism as bridge certainty. Either
-   drop such boards or roll the hero's own later turns out by sampling the
-   policy rather than taking the argmax; at minimum stop printing `100 %` for
-   a contract the hero had to bid twice more to reach.
-3. **Never display a gloss that does not describe the call.** For calls that
-   cannot be natural (NT at level ≥ 4, a cue-bid in a suit only the opponents
-   bid, a jump to slam), require a convention name from GIB and drop the
-   option/board when there is none — and never render a "meaning" whose whole
-   content is constraints the seat's earlier calls already established.
-4. **Check GIB's total-points band.** `card_vs_hand` and `band_vs_card` read
-   `hcp` only; adding `pts` (HCP plus length or shortness points, whichever is
-   kinder, with the existing ±2 slack) catches this board's false `3♦ (E):
-   4-8 pts` and 9 boards' worth of the same class.
-5. **Extend the forcing check into the rollout.** If a candidate GIB marks
-   forcing (or a cue-bid in the opponents' suit) survives as the final
-   contract in more than a few percent of rollouts, that option's EV is built
-   on a partner nobody plays with — flag it, and refuse to crown it best.
-6. **Clean-up list for the published pool**: `ben1-19f975cad49` (this board),
-   the three other 4NT point-mass boards (`ben1-19f9609a54c`,
-   `ben1-19f966c0800`, `ben1-19f9910d96d`), the 6 boards whose accepted answer
-   is a forcing call the rollout passes out, and the 23 candidate rows with an
-   empty gloss.
+1. This board is not a one-off: each of its three faults is a class with 2-15
+   boards behind it, and each class has a mechanical predicate that costs
+   under 3.5 % of the pool.
+2. The reason it survived generation is `R0` — the band check skips exactly
+   the calls Ben cannot place, because Ben signals "cannot place" by returning
+   too few samples for the check's own floor. Fix that first; it is a
+   two-line change to an existing rule and it would have stopped this board
+   before any of the new rules existed.
+3. Nothing here needs an LLM or a human judgement call at generation time,
+   which is the standing requirement for this gate (`engine/explain_check.py`
+   preamble).
