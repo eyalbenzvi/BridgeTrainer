@@ -87,10 +87,20 @@ def live_source(token: str, project: str) -> tuple[str, str]:
     return name, rs["source"]["files"][0]["content"]
 
 
+def _same(a: str, b: str) -> bool:
+    """Rules equality for the idempotency check, ignoring trailing newlines.
+
+    Observed in production: the same file deployed from two places came back
+    once with and once without its final newline, so a byte comparison called
+    every run a change and published a fresh (identical) ruleset each time.
+    Trailing whitespace cannot alter what the rules DO."""
+    return a.rstrip() == b.rstrip()
+
+
 def deploy(local: str, token: str, project: str, dry_run: bool = False) -> dict:
     """Publish *local* unless it is already live. Returns a summary dict."""
     prev_name, prev_src = live_source(token, project)
-    if prev_src == local:
+    if _same(prev_src, local):
         return {"changed": False, "ruleset": prev_name, "previous": prev_name}
     if dry_run:
         return {"changed": True, "ruleset": None, "previous": prev_name}
@@ -100,7 +110,7 @@ def deploy(local: str, token: str, project: str, dry_run: bool = False) -> dict:
           {"release": {"name": f"projects/{project}/releases/{RELEASE}",
                        "rulesetName": rs["name"]}})
     now_name, now_src = live_source(token, project)
-    if now_src != local:
+    if not _same(now_src, local):
         raise SystemExit("release did not take effect — rules NOT deployed")
     return {"changed": True, "ruleset": now_name, "previous": prev_name}
 

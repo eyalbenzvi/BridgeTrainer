@@ -195,3 +195,20 @@ def test_stored_history_is_repaired_on_a_schedule():
     audit = wf[wf.index("- name: Audit published problems"):
                wf.index("- name: Job summary")]
     assert "--remove" not in audit
+
+
+def test_deploy_ignores_a_trailing_newline_difference(monkeypatch):
+    """Observed in production: the same file deployed from two places came back
+    once with and once without its final newline, so a byte comparison called
+    every run a change and published a fresh identical ruleset each time."""
+    import sys
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent
+                           / "scripts"))
+    import deploy_rules
+
+    monkeypatch.setattr(deploy_rules, "live_source",
+                        lambda t, p: ("projects/x/rulesets/live", "RULES}"))
+    monkeypatch.setattr(deploy_rules, "_call",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            AssertionError("must not publish")))
+    assert deploy_rules.deploy("RULES}\n", "tok", "x")["changed"] is False
