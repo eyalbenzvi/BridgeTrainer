@@ -1,0 +1,75 @@
+name: Forge cycle
+
+# The production problem factory: runs the three forges back-to-back, forever.
+#
+# Each stage is one batch of 15 problems, and each starts the moment the
+# previous one finishes (`needs:`), not on a clock — so no stage idles waiting
+# for its slot, and a fast or slow stage simply shifts the rest of the cycle.
+#
+#   bidding    (forge-bidding.yml)    ~11 min
+#   leads MP   (forge-leads-mp.yml)   ~50 min
+#   leads IMP  (forge-leads-imp.yml)  ~32 min
+#   ------------------------------------------
+#   cycle                             ~93 min
+#
+# ZERO IDLE BY DESIGN. The schedule fires every 90 minutes — deliberately
+# *shorter* than the ~93-minute cycle — so by the time a cycle ends the next
+# one is already queued and starts immediately. The `forge-cycle` concurrency
+# group keeps exactly one run in flight and at most one pending, so the extra
+# firings cannot pile into a backlog: a firing that arrives while one is
+# already pending replaces it, and you will see the occasional **cancelled**
+# run in the Actions list. That is the mechanism working, not a failure.
+#
+# Throughput: ~15.5 cycles a day => ~675 problems a day (225 per type), and
+# ~46 GitHub Models requests a day for bidding classification (5 problems per
+# request), well inside the free tier's ~150/day.
+#
+# This is the ONLY scheduled forge workflow. The three stage workflows have no
+# `schedule:` of their own — they are `workflow_call` reusable workflows here,
+# and still independently runnable from the Actions tab for a one-off batch.
+#
+# Retiming the cycle: change the two cron lines below. Keep the cadence at or
+# below the real cycle length to stay at zero idle. Resizing the batches is a
+# repository variable, no YAML edit — see the stage workflows.
+
+on:
+  schedule:
+    # every 90 minutes: 00:00, 01:30, 03:00, ... 22:30 (16 firings a day).
+    # Two expressions because cron cannot say "every 90 minutes" directly —
+    # together they are exactly 90 minutes apart, midnight to midnight.
+    - cron: "0 */3 * * *"        # 00:00, 03:00, 06:00, ... 21:00
+    - cron: "30 1-22/3 * * *"    # 01:30, 04:30, 07:30, ... 22:30
+  workflow_dispatch:
+
+# One cycle at a time. Queued, never cancelled in flight: a cycle that overruns
+# its 90-minute slot runs to completion and the pending one starts right after,
+# which is what keeps the factory continuous instead of overlapping.
+concurrency:
+  group: forge-cycle
+  cancel-in-progress: false
+
+# The ceiling for the stage workflows' tokens; each stage narrows it to what it
+# needs (leads: issues, bidding: models).
+permissions:
+  contents: read
+  issues: write
+  models: read
+
+jobs:
+  bidding:
+    uses: ./.github/workflows/forge-bidding.yml
+    secrets: inherit
+
+  leads-mp:
+    needs: bidding
+    # a failed stage must not stop the factory — the next stage still runs, and
+    # the failure surfaces via that stage's own "Notify on failure" issue.
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/forge-leads-mp.yml
+    secrets: inherit
+
+  leads-imp:
+    needs: leads-mp
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/forge-leads-imp.yml
+    secrets: inherit

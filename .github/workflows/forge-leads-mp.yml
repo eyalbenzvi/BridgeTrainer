@@ -4,18 +4,20 @@ name: Forge lead problems (MP)
 # pushes them straight to Firestore — no local machine needed.
 #
 # This is the MP half of the lead forge; forge-leads-imp.yml is the IMP half.
-# They were one workflow that ran both modes back-to-back; splitting them gives
-# each mode its own schedule slot, its own log, and its own failure signal.
+# They were one workflow that ran both modes inside a single job; splitting them
+# gives each mode its own cycle stage, its own log and its own failure signal.
 #
 # Two ways to run:
-#   * SCHEDULE — every 2 hours at :40 one MP batch (FORGE_LEADS_MP_COUNT
-#     problems, default 15) forges and pushes. The three forge workflows are
-#     staggered 40 minutes apart: bidding at :00, leads-MP at :40, leads-IMP at
-#     +1:20. Tune without editing this file via repository variables (Settings →
-#     Secrets and variables → Actions → Variables): FORGE_LEADS_MP_COUNT and
-#     FORGE_LEADS_MP_MAX_SECONDS (per-run time budget, default 4500).
+#   * AS A CYCLE STAGE — forge-cycle.yml calls this workflow as the second of
+#     its three back-to-back stages, passing no count, which selects the batch
+#     size below (FORGE_LEADS_MP_COUNT problems, default 15). That is the
+#     production path; this file has no schedule of its own. Tune it without
+#     editing YAML via repository variables (Settings → Secrets and variables →
+#     Actions → Variables): FORGE_LEADS_MP_COUNT and FORGE_LEADS_MP_MAX_SECONDS
+#     (generation time budget, default 4500 — ~1.5x the observed ~50 min run, so
+#     it truncates a pathological batch instead of stalling the cycle).
 #   * MANUAL — Actions tab → "Run workflow": how many problems, and optionally
-#     a seed / time budget.
+#     a seed / time budget. Use this for a one-off batch outside the cycle.
 #
 # What a run needs (all available on ubuntu-latest):
 #   * the Ben engine — cloned + built by scripts/setup_ben.sh (pinned commit,
@@ -27,11 +29,26 @@ name: Forge lead problems (MP)
 #     Actions). The push step fails with a clear error if it is missing.
 
 on:
-  schedule:
-    # every 2 hours at :40 — 40 minutes after the bidding forge (:00), and 40
-    # minutes before the IMP lead forge (+1:20). A blank seed uses the script's
-    # per-run time-based default, so each firing scans fresh boards.
-    - cron: "40 */2 * * *"
+  # called by forge-cycle.yml, which owns the schedule. A blank count means
+  # "the cycle batch size"; a blank seed means the script's per-run time-based
+  # default, so every stage run scans fresh boards.
+  workflow_call:
+    inputs:
+      count:
+        description: "Problems to generate (blank = the cycle batch size)"
+        type: string
+        default: ""
+        required: false
+      seed:
+        description: "RNG seed (blank = unique per run)"
+        type: string
+        default: ""
+        required: false
+      max_seconds:
+        description: "Generation time budget in seconds (blank = the stage budget)"
+        type: string
+        default: ""
+        required: false
   workflow_dispatch:
     inputs:
       count:
@@ -50,12 +67,11 @@ on:
         default: "6000"
         required: false
 
-# Serialize runs *of this mode*: a run that overflows its 2-hour slot must not
-# have the next firing pile on top of it. Queued, never cancelled; GitHub keeps
-# at most one pending run per group, so scheduled firings can't build a backlog.
-# The IMP workflow has its own group — a slow MP run must not starve it, and
-# concurrent pool pushes are safe (the Firestore index update is an
-# optimistic-locked read-union-write that retries on conflict).
+# Serialize runs *of this mode*, so a manual batch and the cycle's stage never
+# forge MP at the same time. Queued, never cancelled. The IMP workflow has its
+# own group — the two modes may overlap freely, since concurrent pool pushes are
+# safe (the Firestore index update is an optimistic-locked read-union-write that
+# retries on conflict).
 concurrency:
   group: forge-leads-mp
   cancel-in-progress: false
@@ -73,8 +89,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # only a caller-supplied count needs checking; a blank one means "use the
+      # cycle batch size" and never reaches the script
       - name: Validate inputs
-        if: github.event_name == 'workflow_dispatch'
+        if: inputs.count != ''
         env:
           COUNT: ${{ inputs.count }}
         run: |
@@ -114,12 +132,12 @@ jobs:
           # only appears in large late chunks
           PYTHONUNBUFFERED: "1"
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            # every 2 hours: one MP batch. The script's time-based seed default
-            # gives each firing fresh boards.
+          if [ -z "$COUNT" ]; then
+            # cycle stage: batch size and budget from the repo variables. The
+            # script's time-based seed default gives each run fresh boards.
             N="${FORGE_COUNT:-15}"
             BUDGET="${FORGE_MAX_SECONDS:-4500}"
-            echo ">> scheduled $MODE batch: $N problems, ${BUDGET}s"
+            echo ">> cycle $MODE batch: $N problems, ${BUDGET}s"
             MAX_SECONDS="$BUDGET" \
               scripts/generate_and_push_leads.sh "$N" 2>&1 | tee forge.log
           else
@@ -136,8 +154,8 @@ jobs:
           COUNT: ${{ inputs.count }}
           FORGE_COUNT: ${{ vars.FORGE_LEADS_MP_COUNT }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            HEAD="every 2h, ${FORGE_COUNT:-15} problems"
+          if [ -z "$COUNT" ]; then
+            HEAD="cycle stage, ${FORGE_COUNT:-15} problems"
           else
             HEAD="requested $COUNT"
           fi

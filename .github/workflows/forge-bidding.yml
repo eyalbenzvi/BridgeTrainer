@@ -12,15 +12,19 @@ name: Forge bidding problems
 # `permissions: models: read`.
 #
 # Two ways to run:
-#   * SCHEDULE — every 2 hours on the hour one batch (FORGE_BIDDING_COUNT
-#     problems, default 15) forges, classifies, and pushes. The three forge
-#     workflows are staggered 40 minutes apart: bidding at :00, leads-MP at :40,
-#     leads-IMP at +1:20. Tune via repository variables (Settings → Secrets and
-#     variables → Actions → Variables): FORGE_BIDDING_COUNT and
-#     FORGE_BIDDING_MAX_SECONDS. At 15 problems / 2 hours that is 180 problems a
-#     day and ~36 GitHub Models requests (5 problems per request), well inside
-#     the free tier's ~150 requests/day for a low-tier model.
-#   * MANUAL — Actions tab → "Run workflow": pick count, seed, time budget.
+#   * AS A CYCLE STAGE — forge-cycle.yml calls this workflow as the first of its
+#     three back-to-back stages, passing no count, which selects the batch size
+#     below (FORGE_BIDDING_COUNT problems, default 15). That is the production
+#     path; this file has no schedule of its own. Tune via repository variables
+#     (Settings → Secrets and variables → Actions → Variables):
+#     FORGE_BIDDING_COUNT and FORGE_BIDDING_MAX_SECONDS (generation time budget,
+#     default 1800 — ~1.5x the observed ~11 min run, so it truncates a
+#     pathological batch instead of stalling the cycle). At 15 problems per
+#     cycle and ~15.5 cycles a day that is ~46 GitHub Models requests a day
+#     (5 problems per request), well inside the free tier's ~150 requests/day
+#     for a low-tier model.
+#   * MANUAL — Actions tab → "Run workflow": pick count, seed, time budget. Use
+#     this for a one-off batch outside the cycle.
 #
 # What a run needs (all available on ubuntu-latest):
 #   * the Ben engine — cloned + built by scripts/setup_ben.sh (pinned commit,
@@ -36,12 +40,26 @@ name: Forge bidding problems
 #     is missing.
 
 on:
-  schedule:
-    # every 2 hours on the hour — the first of the three staggered forge slots
-    # (bidding :00, leads-MP :40, leads-IMP +1:20), so no two forges contend.
-    # A blank-seed run uses the script's time-based default, so each firing
-    # scans fresh boards.
-    - cron: "0 */2 * * *"
+  # called by forge-cycle.yml, which owns the schedule. A blank count means
+  # "the cycle batch size"; a blank seed means the script's per-run time-based
+  # default, so every stage run scans fresh boards.
+  workflow_call:
+    inputs:
+      count:
+        description: "Problems to generate (blank = the cycle batch size)"
+        type: string
+        default: ""
+        required: false
+      seed:
+        description: "RNG seed (blank = unique per run)"
+        type: string
+        default: ""
+        required: false
+      max_seconds:
+        description: "Generation time budget in seconds (blank = the stage budget)"
+        type: string
+        default: ""
+        required: false
   workflow_dispatch:
     inputs:
       count:
@@ -60,9 +78,9 @@ on:
         default: "6000"
         required: false
 
-# Serialize runs: two concurrent pushes would race the Firestore index update
-# (read-union-write). Queued, never cancelled; GitHub keeps at most one pending
-# run per group, so scheduled firings can't pile into a backlog.
+# Serialize runs, so a manual batch and the cycle's stage never forge bidding at
+# the same time. Queued, never cancelled; GitHub keeps at most one pending run
+# per group, so firings can't pile into a backlog.
 concurrency:
   group: forge-bidding
   cancel-in-progress: false
@@ -70,6 +88,7 @@ concurrency:
 permissions:
   contents: read
   models: read      # lets the job's GITHUB_TOKEN call the GitHub Models API
+  issues: write     # DB-O-7: open/append a failure-notification issue
 
 jobs:
   forge:
@@ -78,8 +97,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # only a caller-supplied count needs checking; a blank one means "use the
+      # cycle batch size" and never reaches the script
       - name: Validate inputs
-        if: github.event_name == 'workflow_dispatch'
+        if: inputs.count != ''
         env:
           COUNT: ${{ inputs.count }}
         run: |
@@ -124,11 +145,12 @@ jobs:
           # stream forge output line-by-line into the live Actions log
           PYTHONUNBUFFERED: "1"
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            # every 2 hours: one batch. Time-based seed default => fresh boards.
+          if [ -z "$COUNT" ]; then
+            # cycle stage: batch size and budget from the repo variables.
+            # Time-based seed default => fresh boards.
             N="${FORGE_COUNT:-15}"
-            BUDGET="${FORGE_MAX_SECONDS:-4500}"
-            echo ">> scheduled batch: $N problems, ${BUDGET}s"
+            BUDGET="${FORGE_MAX_SECONDS:-1800}"
+            echo ">> cycle bidding batch: $N problems, ${BUDGET}s"
             MAX_SECONDS="$BUDGET" \
               scripts/generate_and_push_bidding.sh "$N" 2>&1 | tee forge.log
           else
@@ -145,8 +167,8 @@ jobs:
           COUNT: ${{ inputs.count }}
           FORGE_COUNT: ${{ vars.FORGE_BIDDING_COUNT }}
         run: |
-          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
-            HEAD="every 2h, ${FORGE_COUNT:-15} problems"
+          if [ -z "$COUNT" ]; then
+            HEAD="cycle stage, ${FORGE_COUNT:-15} problems"
           else
             HEAD="requested $COUNT"
           fi
@@ -173,3 +195,23 @@ jobs:
             forge.log
           if-no-files-found: warn
           retention-days: 30
+
+      # DB-O-7: a failed run must not stay buried in the Actions log — the pool
+      # can stop growing for days unnoticed. On failure, append to (or open) the
+      # same single tracking issue the lead forges use, so the maintainer is
+      # notified. Body carries no secrets — just the run link.
+      - name: Notify on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: "⚠️ Forge workflow is failing"
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          body="Forge run failed (bidding): $RUN_URL (event: $GITHUB_EVENT_NAME)."
+          n=$(gh issue list --state open --search "$TITLE in:title" \
+                --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
