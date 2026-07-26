@@ -85,28 +85,46 @@ needed.
 
 **One workflow per mode** — `forge-leads-mp.yml` and `forge-leads-imp.yml`.
 They used to be a single workflow that ran both modes back-to-back in one job;
-each mode now has its own schedule slot, its own log and its own failure signal.
+each mode now has its own file, log and failure signal.
 
-**Schedule** — each mode forges 15 problems every 2 hours and pushes them to
-Firestore. The three forge workflows are staggered 40 minutes apart inside the
-2-hour cycle, so only one is ever generating:
+**The forge cycle** — `forge-cycle.yml` is the production factory and the only
+scheduled forge workflow. It calls the three forges as reusable workflows, one
+after another, each forging a batch of 15 and pushing it to Firestore:
 
-| time (UTC) | workflow | problems |
-| --- | --- | --- |
-| `:00` (even hours) | bidding (`forge-bidding.yml`) | 15 |
-| `:40` (even hours) | leads MP (`forge-leads-mp.yml`) | 15 |
-| `:20` (odd hours) | leads IMP (`forge-leads-imp.yml`) | 15 |
+| stage | workflow | batch | observed |
+| --- | --- | --- | --- |
+| 1 | bidding (`forge-bidding.yml`) | 15 | ~11 min |
+| 2 | leads MP (`forge-leads-mp.yml`) | 15 | ~50 min |
+| 3 | leads IMP (`forge-leads-imp.yml`) | 15 | ~32 min |
+| | **cycle** | **45** | **~93 min** |
 
-Each firing uses the script's per-run time-based seed default, so it works
-fresh boards. Tune it with repository variables (Settings → Secrets and
+Stages chain on `needs:`, so each starts the moment the previous one finishes —
+no stage waits for a clock slot, and a fast or slow stage just shifts the rest
+of the cycle. A failed stage does not stop the ones behind it (`!cancelled()`);
+it opens the shared failure issue instead.
+
+**Why it never idles** — the cycle schedule fires every 90 minutes, on purpose
+*shorter* than the ~93-minute cycle, so the next run is already queued when the
+current one ends and starts immediately. The `forge-cycle` concurrency group
+holds one run in flight and at most one pending, so the surplus firings cannot
+build a backlog — a firing arriving while one is already pending replaces it.
+Expect the occasional **cancelled** run in the Actions list: that is the
+mechanism working, not a failure. Throughput is ~15.5 cycles a day, i.e. ~675
+problems a day, 225 per type.
+
+Every run uses the script's per-run time-based seed default, so it works fresh
+boards. Tune the batches with repository variables (Settings → Secrets and
 variables → Actions → Variables), no YAML edit needed:
-`FORGE_LEADS_MP_COUNT` / `FORGE_LEADS_IMP_COUNT` (problems per firing) and
-`FORGE_LEADS_MP_MAX_SECONDS` / `FORGE_LEADS_IMP_MAX_SECONDS` (time budget,
-default 4500 s).
+`FORGE_LEADS_MP_COUNT` / `FORGE_LEADS_IMP_COUNT` (problems per batch) and
+`FORGE_LEADS_MP_MAX_SECONDS` / `FORGE_LEADS_IMP_MAX_SECONDS` (generation time
+budget, default 4500 / 3000 s — roughly 1.5× the observed run, so a pathological
+batch gets truncated instead of stalling the cycle). Retiming the cycle means
+editing the two cron lines in `forge-cycle.yml`; keep the cadence at or below
+the real cycle length to stay at zero idle.
 
-**Manual runs** — open **Actions → "Forge lead problems (MP)"** or
-**"Forge lead problems (IMP)" → Run workflow**. The mode is fixed by which
-workflow you pick; the inputs are:
+**Manual runs** — for a one-off batch outside the cycle, open **Actions →
+"Forge lead problems (MP)"** or **"Forge lead problems (IMP)" → Run workflow**.
+The mode is fixed by which workflow you pick; the inputs are:
 
 * **count** — how many problems to generate;
 * optionally a seed and a time budget.

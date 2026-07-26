@@ -83,11 +83,13 @@ console for the Firebase project:
 2. **Budget alert.** Billing → Budgets & alerts → create a budget (even a $0
    budget on Spark) with email alerts at 50/90/100%. If/when you move to Blaze,
    this plus a hard cap keeps a traffic spike from silently running up cost.
-3. **Forge workflow failure.** `.github/workflows/forge-leads-mp.yml` and
-   `forge-leads-imp.yml` already open/update a GitHub issue on any failed run
-   (`Notify on failure` step, `issues: write`), so a stalled pool is surfaced
-   within a cycle instead of going unnoticed for days. Watch the repo (or the
-   `forge` label) to receive those notifications.
+3. **Forge workflow failure.** All three stages of the forge cycle
+   (`forge-bidding.yml`, `forge-leads-mp.yml`, `forge-leads-imp.yml`) open or
+   update one shared GitHub issue on any failed run (`Notify on failure` step,
+   `issues: write`), so a stalled pool is surfaced within a cycle (~93 min)
+   instead of going unnoticed for days. A failed stage does not stop the rest of
+   the cycle, so this issue is the only signal that a third of the pool stopped
+   growing — watch the repo (or the `forge` label) to receive it.
 
 These are configuration, not code: keep them in place after any project or
 billing change.

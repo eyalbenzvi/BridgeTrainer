@@ -8,8 +8,11 @@ from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parent.parent
-_WFS = [_ROOT / ".github" / "workflows" / f"forge-leads-{m}.yml"
-        for m in ("mp", "imp")]
+# every stage of the forge cycle notifies: with the three running back-to-back
+# around the clock, a silent failure in any one of them quietly stops a third of
+# the pool from growing.
+_WFS = [_ROOT / ".github" / "workflows" / f"forge-{n}.yml"
+        for n in ("bidding", "leads-mp", "leads-imp")]
 _DOC = _ROOT / "docs" / "firebase_setup.md"
 
 
