@@ -36,9 +36,10 @@ def _round_trip_ok(spot) -> bool:
         sum(len(p) for p in spot.hands[spot.hero_i].split(".")) == 13
 
 
-def _rollout_violations(ev, verdict, spot, option_cards: dict) -> list[str]:
-    """The two gates that read the ROLLOUT rather than the glosses
-    (docs/4nt_projection_and_gloss_gate.md):
+def _rollout_violations(ev, verdict, spot, option_cards: dict,
+                        stem_expl: list[dict]) -> list[str]:
+    """The three gates that read the ROLLOUT rather than the glosses
+    (docs/4nt_projection_and_gloss_gate.md, docs/game_force_stop_gate.md):
 
     R1 ``answer_insensitive_violations`` — a candidate whose rollout has
        partner answering differently on different layouts while the final
@@ -47,16 +48,25 @@ def _rollout_violations(ev, verdict, spot, option_cards: dict) -> list[str]:
     R3 ``forcing_contract_violations`` — a candidate the board itself calls
        forcing (or a cue-bid in their suit) that the rollout leaves in as the
        final contract, i.e. evidence drawn from a partner who passes forces.
+    R6 ``game_force_stop_violations`` — the same fault where the force is in
+       the two hands' stated values rather than in a "forcing" clause: an
+       uncontested auction with 26+ stated points between the partners whose
+       rollout parks the hero's side in a partscore.
 
-    Both are fatal for the whole board, not for the offending option: the
+    All three are fatal for the whole board, not for the offending option: the
     rollout that ranked every other candidate sampled the same partner (the
     argument ``forcing_pass_violations`` sets out)."""
     from .explain_check import (answer_insensitive_violations,
-                                forcing_contract_violations)
+                                forcing_contract_violations,
+                                game_force_stop_violations)
+    n_samples = verdict.measured.get("n_samples") or ev.n_samples
     out = answer_insensitive_violations(ev, spot.stem)
     out += forcing_contract_violations(
         verdict.table, option_cards, spot.stem, spot.dealer_i, spot.hero_i,
-        verdict.measured.get("n_samples") or ev.n_samples)
+        n_samples)
+    out += game_force_stop_violations(
+        verdict.table, stem_expl, spot.stem, spot.dealer_i, spot.hero_i,
+        n_samples)
     return out
 
 
@@ -314,11 +324,12 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
     v = judge(ev, policy_top=policy_top,
               hero_i=spot.hero_i, policy_map=dict(spot.candidates))
 
-    # ---- rollout-evidence gates (R1/R3, docs/4nt_projection_and_gloss_gate
-    # .md). Pure python over evidence already in hand, so they run here on the
-    # screen — killing the board before the confirm and band passes — and
-    # again on the confirm evidence below, which is what gets published.
-    rollout_bad = _rollout_violations(ev, v, spot, option_cards)
+    # ---- rollout-evidence gates (R1/R3/R6, docs/4nt_projection_and_gloss
+    # _gate.md, docs/game_force_stop_gate.md). Pure python over evidence
+    # already in hand, so they run here on the screen — killing the board
+    # before the confirm and band passes — and again on the confirm evidence
+    # below, which is what gets published.
+    rollout_bad = _rollout_violations(ev, v, spot, option_cards, stem_expl)
     if rollout_bad:
         return BoardOutcome(seed, "rejected", "rollout_evidence", timings=t,
                             detail="rollout_evidence " +
@@ -378,10 +389,10 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
             detail=f"confirm_{v.reason} gap={v.measured.get('gap_imps')} "
                    f"[{t['confirm_s']:.1f}s]")
 
-    # the same two rules on the evidence that will actually be published: the
-    # confirm pool is 4x bigger, so a candidate whose answer-insensitivity or
-    # passed-out force only shows up at 512 layouts still dies here
-    rollout_bad = _rollout_violations(ev, v, spot, option_cards)
+    # the same three rules on the evidence that will actually be published:
+    # the confirm pool is 4x bigger, so a candidate whose answer-insensitivity
+    # or passed-out force only shows up at 512 layouts still dies here
+    rollout_bad = _rollout_violations(ev, v, spot, option_cards, stem_expl)
     if rollout_bad:
         return BoardOutcome(
             seed, "rejected", "confirm_rollout_evidence", timings=t,

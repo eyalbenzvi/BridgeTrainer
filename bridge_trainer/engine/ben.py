@@ -549,5 +549,10 @@ def seat_features(hands_np, seat_i: int, n_cards: int) -> dict:
         "len_avg": {k: float(v.mean()) for k, v in lengths.items()},
         "len4plus": {k: float((v >= 4).mean()) for k, v in lengths.items()},
         "len5plus": {k: float((v >= 5).mean()) for k, v in lengths.items()},
+        # the whole ladder, so a check can read the share at the length a
+        # gloss actually promises (a 6+ weak two, a 7+ preempt) instead of
+        # only at four or five: len_ge[suit][k] = P(length >= k)
+        "len_ge": {k: [float((v >= t).mean()) for t in range(14)]
+                   for k, v in lengths.items()},
         "balanced_share": float(balanced.mean()),
     }

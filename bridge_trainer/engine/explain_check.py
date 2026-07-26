@@ -84,7 +84,11 @@ are documented at their own definitions:
     Michaels glossed as a natural club overcall), when the gloss promises
     a 5+ suit the bid's band refutes (Minor transfer glossed onto a natural
     invitational 2NT), or when the HCP bands are disjoint. Pass and
-    low-n bands are skipped.
+    low-n bands are skipped. On the same sampling pass it also runs R7,
+    ``band_vs_shaded_hand``: the one-card length shade ``SLACK_LEN``
+    forgives, on a call whose band says the shortfall is the system rather
+    than a shade (ben1-19f975caec3: 2♠ glossed "Weak two bid, 6+♠" offered
+    to five spades, and Ben's weak twos measure 5.09 with P(6+)=0.09).
 
 ``forcing_pass_violations`` (cheap, no engine, no hand)
     Pass is offered while the partnership is still under a live force.
@@ -93,6 +97,15 @@ are documented at their own definitions:
     the forcing call discharges it and the clause disappears — so the
     flag ``parse_meaning`` already sets is the whole test. Purely an
     auction fact: no cards, no sampling, same answer for every hand.
+
+``game_force_stop_violations`` (cheap, no engine, no hand — reads the rollout
+    that was already paid for)
+    An option whose rollout parks the hero's side in a partscore although the
+    two hands' own glosses have stated game values in an uncontested auction
+    (ben1-19f9c2b962c: 1NT "15-17" opposite 3♣ "13+ total points" = 28 stated
+    points, and the offered 4♣ shown as "Leads to 4♣N 57%"). Same fault as R3
+    one level up: there the passed-out call carried GIB's "forcing" clause,
+    here the force is in the arithmetic of the two cards.
 
 ``invite_violations`` (cheap, no engine, no hand — reads the rollout that
     was already paid for)
@@ -132,6 +145,19 @@ BAND_LEN_N_MIN = 12    # ... but a suit-length mean/share still does, and the
 BAND_P5_SURE = 0.90    # measured "the bid promises 5+ here"
 BAND_LEN_SLACK = 2.0   # gloss says N+, band average below N-2 refutes it
 BAND_P5_REFUTED = 0.5  # gloss says 5+/6+, most sampled hands lack even 5
+BAND_PLEN_DENIED = 0.15  # R7, the mirror of BAND_P5_SURE at the length a gloss
+                       # actually promises: measured "the call does NOT promise
+                       # N here". Set at the pool's own gap — measured
+                       # 2026-07-26 (docs/system_fit_gate.md) over the 472
+                       # published bidding boards, 71 stem/option rows state a
+                       # minimum of 5+ cards that the bidder's hand is short
+                       # of, and they split: 24 rows at P(N+) <= 0.13 (Ben's
+                       # weak twos are five-card suits, its three-level
+                       # preempts six-card ones — the gloss is describing
+                       # another call) and 47 at P(N+) >= 0.20 rising to 1.00
+                       # (a jump overcall Ben means as six, held with five: the
+                       # shade SLACK_LEN exists for). Any floor in (0.14, 0.20]
+                       # picks the same 24 rows.
 BAND_HCP_GAP = 2       # gloss and band HCP ranges must at least touch ±this.
                        # Confirmed empirically 2026-07-25 (docs/
                        # forcing_pass_gate.md): over 249 stem/option rows on
@@ -435,6 +461,15 @@ ASK_REPLY_SHARE = 0.05          # R1: a reply this common counts as an answer
 ASK_SETTLED_SHARE = 0.99        # R1: ... and the contract this stable counts
                                 # as "the answer changed nothing"
 NT_ASK_LEVELS = (4, 5)          # 4NT/5NT cannot be a natural contract bid
+GAME_PTS = 26                   # R6: the classic "26 points and the
+                                # partnership belongs in game" line, in the
+                                # same total-points currency GIB's cards state.
+                                # Not a fitted knob, and the pool brackets it:
+                                # over the 472 published bidding boards the
+                                # uncontested partscore stops sit at 24 (the
+                                # legitimate 1NT-2♥-2♠-2NT invitations, where
+                                # opener's 3♠ IS a place to play) and then jump
+                                # to 26 and 28 — the two boards this kills.
 
 
 def contract_call(contract: str) -> str | None:
@@ -674,6 +709,107 @@ def forcing_contract_violations(table: list[dict], option_cards: dict,
     return out
 
 
+def stated_min_pts(card: dict) -> int:
+    """The minimum values a gloss states for its bidder: the low end of
+    GIB's "total points" clause or of its HCP band, whichever is higher.
+    0 when the card states neither (Stayman, a transfer — an artificial call
+    whose card carries no values at all)."""
+    lo = 0
+    for key in ("pts", "hcp"):
+        band = (card or {}).get(key)
+        if band:
+            lo = max(lo, int(band[0]))
+    return lo
+
+
+def side_stated_min_pts(stem_entries: list[dict], dealer_i: int,
+                        hero_i: int) -> tuple[int, int]:
+    """(hero, partner) minimum values the hero's SIDE has stated so far —
+    per seat, the highest minimum any of that seat's own glosses states.
+
+    Cumulative by max, not by sum: a seat's later call re-describes the same
+    hand, so 1♥ then 3♥ ("13+ total points") has shown 13, not 13 plus
+    whatever the opening promised."""
+    best = {0: 0, 2: 0}                 # offset from the hero: self, partner
+    for e in stem_entries or []:
+        off = (seat_of(dealer_i, e["idx"]) - hero_i) % 4
+        if off in best:
+            best[off] = max(best[off], stated_min_pts(e.get("card") or {}))
+    return best[0], best[2]
+
+
+def uncontested(auction: list[str], dealer_i: int, hero_i: int) -> bool:
+    """No opponent of the hero has made a call other than Pass."""
+    for idx, call in enumerate(auction or []):
+        if call != "P" and (seat_of(dealer_i, idx) - hero_i) % 2:
+            return False
+    return True
+
+
+def game_force_stop_violations(table: list[dict], stem_entries: list[dict],
+                               auction: list[str], dealer_i: int, hero_i: int,
+                               n_samples: int,
+                               floor: float = FORCING_CONTRACT_SHARE,
+                               game_pts: int = GAME_PTS) -> list[str]:
+    """R6, fatal: the rollout parks the hero's side in a PARTSCORE although
+    the partnership's own displayed glosses state game values
+    (ben1-19f9c2b962c).
+
+    That board's hero opened 1NT ("15-17 HCP") and heard Stayman and then 3♣
+    ("5+ !C; 13+ total points") — 28 stated points between the two hands, so
+    in the system the explanations claim to teach ("standard 2/1 Game Force")
+    the auction cannot stop below game. The offered 4♣ is none the less shown
+    as "Leads to 4♣N 57%": on 290 of 512 layouts partner passed it out at the
+    four level. The 1.9 IMPs the board then charges against 4♣ measure that
+    partner — one who passes with the values his own gloss promised — not the
+    bridge merit of the call, and the trainee is taught that 4♣ is a place to
+    play.
+
+    ``forcing_contract_violations`` (R3) is the adjacent rule and misses this
+    class: it needs GIB to have written "forcing" on the candidate's own card,
+    and GIB's card for 4♣ here is a bare "3-5 !C; 15-17 HCP" — the force lives
+    in the two hands' stated values, not in one clause. So the test is the
+    arithmetic GIB itself supplies:
+
+    * the auction is UNCONTESTED (once an opponent bids, a partscore is a real
+      resting place and a force can have been discharged — the same reasoning
+      ``forcing_pass_violations`` applies to its clause);
+    * hero's stated minimum + partner's stated minimum >= *game_pts*;
+    * the candidate's own call is left in as the final contract, declared by
+      the hero's side, on >= *floor* of the layouts, and that contract is a
+      partscore.
+
+    Fatal for the board, not for the option: the rollout that ranked every
+    other candidate sampled the same partner."""
+    out = []
+    if not n_samples or not uncontested(auction, dealer_i, hero_i):
+        return out
+    hero_pts, partner_pts = side_stated_min_pts(stem_entries, dealer_i, hero_i)
+    if hero_pts + partner_pts < game_pts:
+        return out
+    for row in table or []:
+        call = row.get("bid")
+        if not call or call in ("P", "X", "XX"):
+            continue
+        for contract, cnt in contract_pairs(row.get("top_contracts")):
+            if contract_call(contract) != call:
+                continue
+            if contract_class(str(contract)) != "partscore":
+                continue
+            decl = CONTRACT_RE.match(str(contract))
+            if not decl or SEATS.index(decl.group(3)) % 2 != hero_i % 2:
+                continue
+            share = cnt / n_samples
+            if share >= floor:
+                out.append(
+                    f"option {call}: the hero's side has stated "
+                    f"{hero_pts}+{partner_pts}={hero_pts + partner_pts} points "
+                    f"in an uncontested auction, yet the rollout stops in the "
+                    f"partscore {contract} on {cnt}/{n_samples} "
+                    f"({share:.0%}) layouts")
+    return out
+
+
 def point_mass_suspects(table: list[dict], n_samples: int) -> list[str]:
     """R1's cheap pre-filter, for auditing records whose rollout auctions are
     gone: a candidate whose projection is ONE contract on every layout, and
@@ -780,6 +916,71 @@ def stated_minlen(card: dict) -> dict:
     return out
 
 
+def band_share_at(feats: dict, st: str, length: int) -> float | None:
+    """Share of the sampled hands holding at least *length* cards in *st*.
+
+    Reads the full ladder ``seat_features`` measures (``len_ge``); returns None
+    when the feature dict does not carry the threshold asked for, so a caller
+    that cannot measure its claim says nothing rather than guessing."""
+    tbl = (feats.get("len_ge") or {}).get(st)
+    if tbl is not None and 0 <= length < len(tbl):
+        return float(tbl[length])
+    for key, k in (("len5plus", 5), ("len4plus", 4)):
+        if length == k and feats.get(key) is not None:
+            return float(feats[key].get(st, 0.0))
+    return None
+
+
+def band_vs_shaded_hand(card: dict, feats: dict, call: str,
+                        hand_pbn: str) -> list[str]:
+    """R7, fatal: the one-card length shade ``hand_violations`` forgives, on a
+    call whose OWN measured meaning says the shortfall is the system rather
+    than a shade (ben1-19f975caec3).
+
+    That board offered — and graded best — a third-seat 2♠ to ♠JT875 ♥KJ53
+    ♦Q9 ♣KT, glossed with GIB's card for a weak two: "Weak two bid, 6+♠,
+    0-10". Five spades against a promised six is exactly the shade
+    ``SLACK_LEN`` exists to forgive, so the cheap hand check passed it, and
+    the trainee was taught to open a weak two the displayed system does not
+    contain. Ben's own sampler settles which of the two it is: over the
+    layouts it accepts after that 2♠ the caller holds 5.09 spades on average
+    and six on 9% of them — BEN-21GF's weak twos ARE five-card suits, so the
+    gloss is not describing a stretched version of the call, it is describing
+    a different call.
+
+    The test, per suit the gloss states a minimum of five or more cards in
+    (below five a minimum is a shape statement GIB attaches to raises and
+    notrump bids, where one card either way is ordinary bridge):
+
+    * the bidder is short of the promise (any shortfall — a 2+ card breach is
+      already fatal in ``hand_violations``, so in practice this is the
+      one-card shade), and
+    * fewer than ``BAND_PLEN_DENIED`` of the layouts Ben accepts for the call
+      hold the promised length.
+
+    Then the shade is the system and the gloss misdescribes it. Fatal for the
+    board rather than repaired in place: the length is the very content of the
+    call the trainee is asked to judge, and rewriting the gloss to match Ben
+    would publish a system claim ("weak two, 5+♠") that GIB's card and the
+    board's own "meanings follow standard 2/1 Game Force" label both deny."""
+    out = []
+    if not card or feats.get("n", 0) < BAND_LEN_N_MIN:
+        return out
+    lens = suit_lengths(hand_pbn)
+    for st, mn in sorted(stated_minlen(card).items()):
+        held = lens.get(st)
+        if mn < 5 or held is None or held >= mn:
+            continue
+        share = band_share_at(feats, st, mn)
+        if share is None or share >= BAND_PLEN_DENIED:
+            continue
+        out.append(f"gloss promises {mn}+{st} and the hand holds {held}: the "
+                   f"call's own band is avg {feats['len_avg'][st]:.1f}{st} "
+                   f"with P({mn}+)={share:.2f} — the shortfall is the system, "
+                   f"not a shade")
+    return out
+
+
 def band_vs_card(card: dict, feats: dict, call: str,
                  known_minlen: dict | None = None) -> list[str]:
     """One stem call: Ben's measured meaning band vs GIB's parsed card.
@@ -844,7 +1045,11 @@ def band_violations(engine, spot, stem_entries: list[dict],
     a convention Ben is not bidding (ben1-0135752a's natural 2NT glossed
     as a minor transfer) teaches the trainee a system nobody at the table
     is playing, even when the hero's actual cards happen to fit the gloss
-    (a 5-club hand slips the hand check's slack)."""
+    (a 5-club hand slips the hand check's slack).
+
+    Two rules per call, on the one sampling pass: ``band_vs_card`` (gloss vs
+    the band) and ``band_vs_shaded_hand`` (gloss vs the band AND the bidder's
+    actual cards — the SLACK_LEN arbitration, R7)."""
     from .ben import seat_features
 
     out = []
@@ -865,7 +1070,8 @@ def band_violations(engine, spot, stem_entries: list[dict],
                               engine.models.n_cards_bidding)
         card = e.get("card") or {}
         for v in band_vs_card(card, feats, call,
-                              known_minlen=known.get(bidder_i)):
+                              known_minlen=known.get(bidder_i)) + \
+                band_vs_shaded_hand(card, feats, call, spot.hands[bidder_i]):
             out.append(f"stem {call} ({e.get('seat', '?')}): {v}")
         acc = known.setdefault(bidder_i, {})
         for st, v in stated_minlen(card).items():
@@ -889,7 +1095,9 @@ def band_violations(engine, spot, stem_entries: list[dict],
         feats = seat_features(hands_np, spot.hero_i,
                               engine.models.n_cards_bidding)
         for v in band_vs_card(card, feats, bid,
-                              known_minlen=known.get(spot.hero_i)):
+                              known_minlen=known.get(spot.hero_i)) + \
+                band_vs_shaded_hand(card, feats, bid,
+                                    spot.hands[spot.hero_i]):
             out.append(f"option {bid}: {v}")
     return out
 
@@ -1017,8 +1225,9 @@ def record_violations(rec: dict) -> tuple[list[str], list[str]]:
     """The cheap (no-engine) audit for an already-built problem record: the
     stored stem/option cards vs the stored full deal, the pass-under-a-force
     check, the two record-only ben1-19f975cad49 rules (an unexplained
-    conventional call, a forcing call the rollout leaves in as the contract)
-    and the invitation check against the record's own rollout. Lets the same
+    conventional call, a forcing call the rollout leaves in as the contract),
+    the invitation check and the game-force-stop check against the record's
+    own rollout. Lets the same
     gate vet historical pools and freshly forged batches alike. Returns
     (fatal, soft) as ``hand_violations`` does.
 
@@ -1048,4 +1257,7 @@ def record_violations(rec: dict) -> tuple[list[str], list[str]]:
     fatal += invite_violations(option_cards, verdict.get("table") or [],
                                verdict.get("accepted") or "", hero_i,
                                int(n_samples or 0))
+    fatal += game_force_stop_violations(verdict.get("table") or [],
+                                        stem_entries, auction, dealer_i,
+                                        hero_i, int(n_samples or 0))
     return fatal, soft
