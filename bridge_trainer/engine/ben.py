@@ -80,6 +80,27 @@ class Evaluation:
     sample_deals: list[str] = field(default_factory=list)  # pbn-ish 4-hand rows
 
 
+def merge_evaluations(a: Evaluation, b: Evaluation) -> Evaluation:
+    """Two paired evaluations over the SAME sample rows as one Evaluation.
+
+    The menu-completion path (engine/maker.py) rolls the added candidates
+    out on the screen's already-sampled ``hands_np``/``hands_pbn``, so every
+    per-sample column stays paired with the original candidates' — which is
+    the whole point (INV1). ``b``'s bids that duplicate ``a``'s are ignored;
+    quality and sample_deals are ``a``'s (same sample set by contract)."""
+    if a.n_samples != b.n_samples:
+        raise ValueError(
+            f"cannot merge evaluations over different sample sets "
+            f"({a.n_samples} vs {b.n_samples} rows)")
+    return Evaluation(
+        bids=list(a.bids) + [x for x in b.bids if x not in a.bids],
+        ev={**b.ev, **a.ev},
+        contracts={**b.contracts, **a.contracts},
+        auctions={**b.auctions, **a.auctions},
+        n_samples=a.n_samples, quality=a.quality,
+        sample_deals=a.sample_deals or b.sample_deals)
+
+
 class BenEngine:
     def __init__(self, ben_home: str = None, verbose: bool = False,
                  dds_max_threads: int = 0):

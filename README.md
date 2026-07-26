@@ -27,9 +27,14 @@ policy distribution genuinely splits AND the paired rollout evaluation
 (shared samples, per-candidate expected IMPs, CI floors) confirms the
 choice is close, material and statistically honest. Options are the calls
 carrying real policy mass — every call the bidder's raw softmax rates at
-≥ 3% (2–6 of them), so the natural alternatives a human weighs (a simple
+≥ 2% (2–6 of them), so the natural alternatives a human weighs (a simple
 raise, a jump to game) are offered, not just the one or two above Ben's
-own 0.10 cutoff. The board's "interest" is judged against the
+own 0.10 cutoff; the menu is then COMPLETED from its own rollout — a
+final contract the offered candidates reach on ≥ 25% of layouts, declared
+by the hero's side and directly biddable, is added and evaluated even
+when the softmax missed it — and a board whose highest-policy call its
+own rollout refutes by more than the accept band is rejected as an
+untrusted node. The board's "interest" is judged against the
 highest-policy alternative (the tempting call), so surfacing extra
 low-policy options never changes which board qualifies. Every problem
 ships with computed
