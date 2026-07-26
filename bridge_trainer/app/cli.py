@@ -318,6 +318,18 @@ def cmd_pool_purge_mislabeled_invites(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pool_purge_incomplete_menus(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import purge_incomplete_menus
+    summary = purge_incomplete_menus(key_path=args.key, dry_run=args.dry_run)
+    verb = "would delete" if args.dry_run else "deleted"
+    print(f"{verb} {len(summary['flagged'])} problem(s) with an incomplete "
+          f"candidate menu or a rollout-refuted policy top "
+          f"({summary['total']} docs total)")
+    for pid in summary["flagged"]:
+        print(f"  {pid}: {summary['reasons'][pid]}")
+    return 0
+
+
 def cmd_pool_purge_orphan_attempts(args: argparse.Namespace) -> int:
     from ..pool.firestore_store import purge_orphan_attempts
     summary = purge_orphan_attempts(key_path=args.key, dry_run=args.dry_run)
@@ -614,6 +626,20 @@ def main(argv: list[str] | None = None) -> int:
     pm.add_argument("--dry-run", action="store_true",
                     help="report the offenders without deleting")
     pm.set_defaults(func=cmd_pool_purge_mislabeled_invites)
+
+    pi = pool_sub.add_parser(
+        "purge-incomplete-menus",
+        help="migration: delete bidding problems whose candidate menu is "
+             "missing the call their own rollout says the auction reaches "
+             "(hero-side contract on >= 25%% of layouts, directly biddable, "
+             "never offered), or whose policy-top the rollout refutes by "
+             "more than the accept band (pre-gate boards)")
+    pi.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pi.add_argument("--dry-run", action="store_true",
+                    help="report the offenders without deleting")
+    pi.set_defaults(func=cmd_pool_purge_incomplete_menus)
 
     po = pool_sub.add_parser(
         "purge-orphan-attempts",

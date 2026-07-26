@@ -124,6 +124,7 @@ class BoardOutcome:
 def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
     """The whole per-board pipeline: scan → prescreen (decisive-rejection
     cascade on a 32-row slice, top-2 candidates) → 128-sample screen →
+    menu completion (rollout-implied candidates the softmax missed) →
     512-sample confirm → explanations. Fully self-contained so the
     sequential loop and parallel workers share one implementation.
 
@@ -251,6 +252,64 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
     except Exception as e:
         return BoardOutcome(seed, "error", "evaluate_error", timings=t,
                             detail=f"evaluate error ({type(e).__name__}: {e})")
+
+    # ---- menu completion (ben1-19f95ad149d): a final contract the menu's
+    # own rollout reaches on >= COMPLETE_SHARE of some candidate's layouts,
+    # declared by the hero's side and directly biddable, is a real
+    # alternative the softmax under-rated below P_OPTION — 3NT at 2.35%
+    # while 3♣'s rollout ended in 3NT-by-hero on 92% of layouts. Roll the
+    # missing calls out on the SAME sample rows (pairing preserved, dd_memo
+    # already warm) and judge the completed menu; policies come from the
+    # decision turn's full softmax, so the judge's implausible_winner rule
+    # still rejects a winner Ben would never actually bid. The prescreen
+    # above ran on the un-completed menu: it only ever rejects, so at worst
+    # a board the completed menu would have accepted is lost (recall-only,
+    # the tradeoff the prescreen already makes).
+    from .explain_check import menu_completion_calls
+    extra = menu_completion_calls(
+        {b: Counter(ev.contracts[b]) for b in ev.bids}, ev.n_samples,
+        spot.stem, spot.dealer_i, spot.hero_i, cand_bids)
+    if extra:
+        from .ben import merge_evaluations
+        extra_cards = {b: card_for_auction(spot.stem + [b]) for b in extra}
+        # the same three cheap gloss gates the original options passed:
+        # an added option whose card lies about the hand or explains
+        # nothing makes the board unpublishable, not the option droppable
+        # (without it the menu is incomplete again)
+        fatal2, soft2 = hand_violations(
+            stem_expl, extra_cards, spot.hands, spot.dealer_i, spot.hero_i)
+        if fatal2:
+            return BoardOutcome(
+                seed, "rejected", "expl_vs_hand", timings=t,
+                detail="expl_vs_hand (menu completion) " +
+                       "; ".join(fatal2[:3]))
+        gloss_bad2 = meaningless_gloss_violations(
+            stem_expl, extra_cards, spot.stem, spot.dealer_i, spot.hero_i)
+        if gloss_bad2:
+            return BoardOutcome(
+                seed, "rejected", "expl_meaningless", timings=t,
+                detail="expl_meaningless (menu completion) " +
+                       "; ".join(gloss_bad2))
+        try:
+            ev = merge_evaluations(ev, engine.rollout_eval(
+                hero_bot, padded, extra, hands_np, hands_pbn, quality,
+                dd_memo=dd_memo))
+        except Exception as e:
+            return BoardOutcome(seed, "error", "evaluate_error", timings=t,
+                                detail=f"completion rollout error "
+                                       f"({type(e).__name__}: {e})")
+        turn_policy = {}
+        for turn in spot.turns:
+            if turn.idx == len(spot.stem):
+                turn_policy = dict(turn.policy)
+        spot.candidates = sorted(
+            list(spot.candidates) +
+            [(b, turn_policy.get(b, 0.0)) for b in extra],
+            key=lambda bp: -bp[1])
+        cand_bids = [b for b, _ in spot.candidates]
+        option_cards.update(extra_cards)
+        soft_gloss += soft2
+
     t["verdict_s"] = time.perf_counter() - t_v
     v = judge(ev, policy_top=policy_top,
               hero_i=spot.hero_i, policy_map=dict(spot.candidates))

@@ -31,6 +31,9 @@ DEAD_SHARE = 0.005
 Q_MIN = 0.40            # consequence floor: P(choice changes the result)
 THETA = 80.0            # calibrated 2026-07-17: 12/100 fresh boards
 TRAP_GAP_MIN = 0.8      # policy-argmax loses by at least this => trap
+POLICY_DIVERGENCE_MAX = GAP_MAX  # ... but losing by MORE than the accept
+                        # band is not a trap — it is the softmax refuted by
+                        # its own rollout, i.e. an untrusted node
 UNSTABLE_DELTA = 15.0   # split-half interest drift => DD-noise harvest
 
 # Prescreen cascade (speedup review): decisive-rejection margins on a
@@ -231,6 +234,22 @@ def judge(ev, policy_top: str | None = None,
             return reject("pure_guess")
     if gap > GAP_MAX:
         return reject("one_sided")
+
+    # ---- policy-evidence divergence (ben1-19f95ad149d): the engine's own
+    # favorite call losing its own rollout by more than the accept band is
+    # not a trap — it is proof the softmax at this node is unreliable. The
+    # same softmax chose the stem, the candidate menu and the dilemma
+    # signal, so nothing about the board can be trusted; on the motivating
+    # board the 57%-policy 4♣ lost 2.86 IMPs (partner passed it out on
+    # every layout) while the humanly-normal 3NT sat under the option
+    # floor. Genuine traps (TRAP_GAP_MIN..GAP_MAX) still earn their +20
+    # below. Point estimate, no CI clearance: rejections are cheap (boards
+    # are free), same argument the prescreen makes.
+    if policy_top is not None and policy_top != best and policy_top in ev.ev:
+        div = float(_imp_diff(ev.ev[best], ev.ev[policy_top]).mean())
+        measured["policy_top_gap"] = round(div, 2)
+        if div > POLICY_DIVERGENCE_MAX:
+            return reject("policy_rollout_divergence")
 
     # ---- selectivity layer (stage 1 + 2): consequence + interest -------
     # The interest layer is measured against the REFERENCE call — the

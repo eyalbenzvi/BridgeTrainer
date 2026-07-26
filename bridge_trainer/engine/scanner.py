@@ -20,7 +20,11 @@ P_TOP = 0.70
 P_SECOND = 0.15
 P_TOP_3WAY = 0.60
 P_23_SUM = 0.25
-P_OPTION = 0.03
+P_OPTION = 0.02   # was 0.03; ben1-19f95ad149d's 3NT sat at 2.35% while the
+                  # menu carried an engine artifact at 57% — the floor only
+                  # has to keep out noise, the verdict does the judging (and
+                  # engine/maker's menu completion backstops what the
+                  # softmax misses entirely)
 STEM_MASS_FLOOR = 0.05
 MAX_NONPASS_STEM = 10
 MAX_CANDIDATES = 6
@@ -150,7 +154,7 @@ def scan_board(engine, seed: int, scan_log=None) -> Spot | None:
         if pmap.get(t.chosen, 0.0) < STEM_MASS_FLOOR:
             return None  # engine-weird stem, discard board
 
-    # every call carrying >= P_OPTION (3%) policy mass is offered — a low
+    # every call carrying >= P_OPTION (2%) policy mass is offered — a low
     # enough floor to surface the natural alternatives a human weighs (a
     # simple raise, a jump to game) that Ben's own 0.10 cutoff discarded.
     # The verdict's interest layer is anchored to the highest-policy call,

@@ -66,7 +66,7 @@ The discriminating fact is not how strong Ben thinks partner is, but
 whether Ben will pass at all. GIB carries the commitment on the pass's
 own card for exactly as long as it lives (an opponent's bid over the
 forcing call discharges it and the clause disappears), and the forge
-offers every call Ben's softmax rates ≥ 3% (`P_OPTION`), so "Pass is
+offers every call Ben's softmax rates ≥ 2% (`P_OPTION`), so "Pass is
 among the candidates while the pass gloss says forcing" is a mechanical
 test of the disagreement.
 

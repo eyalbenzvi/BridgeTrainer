@@ -462,6 +462,60 @@ def contract_pairs(top_contracts) -> list[tuple]:
     return out
 
 
+COMPLETE_SHARE = 0.25   # menu completion: a final contract reached on this
+                        # share of an offered candidate's rollout layouts IS
+                        # where the auction is heading, so its direct bid is
+                        # a real alternative the menu must contain
+
+
+def menu_completion_calls(rollout_contracts: dict, n: int, stem: list[str],
+                          dealer_i: int, hero_i: int, offered) -> list[str]:
+    """Direct calls the candidate menu is missing, read off the menu's OWN
+    rollout evidence (ben1-19f95ad149d).
+
+    The menu is Ben's raw softmax over the P_OPTION floor, so a call the
+    network underrates is simply absent — no downstream gate ever asks
+    whether an UNOFFERED call would beat the winner. But the rollout behind
+    the offered candidates knows: on ben1-19f95ad149d the winner 3♣'s own
+    rollout ended in 3NT by the hero on 92% of layouts while the direct 3NT
+    (softmax 2.35%) was never evaluated; adding it shows 3♣/3NT are
+    equivalent and the board has no single winner. Mechanically: any final
+    contract carrying >= COMPLETE_SHARE of some offered candidate's rollout,
+    declared by the hero's side, whose direct bid is legal at the decision
+    point and not already offered, is a missing candidate. Pure and
+    engine-free, so the forge (Counter distributions) and the pool purge
+    (published ``top_contracts`` rows, wrapped or not) share it.
+
+    Doubled contracts and PASS never nominate a call (``contract_call``
+    returns None): a pass-out is not biddable and a doubled contract's
+    direct bid means something else entirely."""
+    from ..validate.auction_state import AuctionStateError, replay
+    try:
+        state = replay(SEATS[dealer_i], list(stem or []))
+    except AuctionStateError:
+        return []
+    have = set(offered or [])
+    out = []
+    for dist in (rollout_contracts or {}).values():
+        pairs = dist.items() if isinstance(dist, dict) else \
+            contract_pairs(dist)
+        for contract, count in pairs:
+            if not n or count / n < COMPLETE_SHARE:
+                continue
+            m = CONTRACT_RE.match(str(contract or ""))
+            if not m:
+                continue
+            call = contract_call(contract)
+            if call is None or call in have or call in out:
+                continue
+            if SEATS.index(m.group(3)) % 2 != hero_i % 2:
+                continue                    # their contract, not our call
+            if not state.is_legal(call):
+                continue                    # can't be bid directly anymore
+            out.append(call)
+    return sorted(out)
+
+
 def conventional_call(call: str, auction: list[str], dealer_i: int,
                       hero_i: int) -> str | None:
     """Why *call* cannot be read off its own denomination — '4NT/5NT ask' or

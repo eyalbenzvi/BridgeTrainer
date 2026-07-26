@@ -707,6 +707,94 @@ def purge_forcing_pass(key_path: str | None = None,
             "removed": removed, "total": len(records)}
 
 
+# Kept in sync with engine/verdict.py GAP_MAX (same lazy-import argument as
+# _DEAD_SHARE above; the value is a published contract).
+_GAP_MAX = 2.5
+
+
+def menu_offenders(records: list[dict]) -> dict:
+    """{problemId: reason} for bidding records whose published evidence
+    convicts the candidate menu itself (ben1-19f95ad149d). Pure — shared by
+    the purge and its tests. Two rules, both read off the stored record:
+
+    * ``menu missing <call>`` — an offered option's rollout reaches a final
+      contract on >= COMPLETE_SHARE of the layouts, declared by the hero's
+      side, whose direct bid was legal at the decision point and never
+      offered (engine/explain_check.menu_completion_calls — the same rule
+      the forge now applies). The real alternative was never evaluated, so
+      the verdict compared the winner against the wrong field.
+    * ``policy top <call> loses N IMPs`` — the engine's highest-policy
+      candidate loses to the accepted call by more than the accept band
+      (engine/verdict.py policy_rollout_divergence): the softmax that chose
+      the menu and the dilemma is refuted by its own rollout.
+
+    Needs ``kind``/``dealer``/``seat``/``auction``/``candidates``/``verdict``
+    /``quality``: the checks read the published evidence, never the hands."""
+    from ..engine.conventions import SEATS as _SEATS
+    from ..engine.explain_check import menu_completion_calls
+
+    out = {}
+    for rec in records:
+        if rec.get("kind") == "lead" or not rec.get("dealer") \
+                or not rec.get("seat"):
+            continue
+        v = rec.get("verdict") or {}
+        table = v.get("table") or []
+        cands = [(c.get("call"), c.get("policy") or 0.0)
+                 for c in rec.get("candidates") or [] if c.get("call")]
+        offered = [b for b, _ in cands]
+        n = int((rec.get("quality") or {}).get("n_samples") or 0)
+        missing = menu_completion_calls(
+            {r["bid"]: r.get("top_contracts") for r in table if r.get("bid")},
+            n, rec.get("auction") or [], _SEATS.index(rec["dealer"]),
+            _SEATS.index(rec["seat"]), offered)
+        if missing:
+            out[rec["id"]] = "menu missing " + "/".join(missing)
+            continue
+        accepted = v.get("accepted") or ""
+        if cands and accepted:
+            top_bid = max(cands, key=lambda bp: bp[1])[0]
+            row = next((r for r in table if r.get("bid") == top_bid), None)
+            ev_top = (row or {}).get("ev_imp_vs_top")
+            if top_bid != accepted and ev_top is not None \
+                    and ev_top < -_GAP_MAX:
+                out[rec["id"]] = (f"policy top {top_bid} loses "
+                                  f"{-ev_top:g} IMPs to {accepted}")
+    return out
+
+
+def purge_incomplete_menus(key_path: str | None = None,
+                           dry_run: bool = False) -> dict:
+    """Migration: DELETE bidding problems published before the menu-completion
+    and policy-divergence gates (see ``menu_offenders``) — the ones whose
+    candidate menu is missing the call their own rollout says the auction is
+    heading to, or whose "dilemma" was an engine artifact the rollout refutes.
+
+    Deletion, not repair, for the reason ``purge_forcing_pass`` gives: the
+    missing candidate cannot simply be added to a stored record (there is no
+    rollout behind it, and every published row is pairwise against a
+    reference), and a refuted-softmax node taints the stem and the dilemma
+    signal, not just one option. The generator replaces the boards on the
+    next run — with the completed menu and the divergence gate in force.
+
+    Stored attempts on a purged problem are left untouched;
+    ``regrade_attempts`` counts them as ``missing_problem``.
+
+    Returns {flagged, reasons, removed, total}. ``dry_run`` reports without
+    deleting."""
+    remote = FirestorePool(key_path)
+    records = remote.stream_records(
+        fields=["kind", "dealer", "seat", "auction", "candidates",
+                "verdict", "quality"])
+    reasons = menu_offenders(records)
+    removed = 0
+    if not dry_run:
+        for pid in reasons:      # remove() retries its own writes
+            removed += bool(remote.remove(pid))
+    return {"flagged": sorted(reasons), "reasons": reasons,
+            "removed": removed, "total": len(records)}
+
+
 def invite_offenders(records: list[dict]) -> dict:
     """{problemId: reason} for bidding records that offer a call their gloss
     calls an invitation while the rollout behind it gives partner no
