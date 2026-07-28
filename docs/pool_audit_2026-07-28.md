@@ -297,6 +297,55 @@ Gates 1-5 are the ones that catch outright wrong content: 66 boards, no
 judgement calls. Gates 6-9 are 124 more that need a threshold decision.
 Gates 10-12 are content quality, not correctness.
 
+## What was actually done (2026-07-28)
+
+Ten of the twelve gates landed in #101. **`G-BLANK` and `G-HOPELESS` were left
+out at the owner's direction** — a blank gloss on a displayed call and a lead
+board whose defence is far from beating the contract both still publish.
+
+`G-DEGEN` landed as a **renderer fix, not a rejection**: `explain._band` and its
+JS twin in `webapp.py` now print a one-point band as the single number it is.
+Those 104 boards were not wrong, only displayed with a precision GIB never had,
+and a display bug is not a reason to destroy content. Records forged before the
+fix keep their stored `text`; new ones render correctly, and
+`scripts/reexplain_pool.py` can backfill the rest from their stored cards
+whenever that is wanted.
+
+Then, against live Firestore (which the forge had grown to 2165 by then):
+
+| step | result |
+|---|---|
+| full pool backup before any deletion | 2165 records dumped to JSONL |
+| boards failing the ten new gates | **134** |
+| pre-existing duplicate boards (R14) | **3** — the `lead1-` (MP) twin dropped, the `lead1i-` kept, since its `by_mode` serves both MP and IMP so no training content is lost |
+| **problems deleted** | **137** of 2165 (6.3%) — 46 bidding, 91 lead |
+| pool after cleanup | **2028** (691 bidding, 1337 lead) |
+| orphaned attempts deleted | **21** across 4 users, all pointing at boards this cleanup removed — no pre-existing orphans |
+| attempts after cleanup | 274, 0 orphaned |
+
+Deletion used index-FIRST ordering for the whole batch (one index write, then
+the documents), so a crash mid-way could only leave unlisted orphan documents —
+never index rows pointing at missing documents, which is what the client would
+surface as "problem not found".
+
+Post-cleanup verification: 2028 documents, 2028 index entries, 0 index rows
+without a document, 0 documents missing from the index, 0 duplicate rows, 0
+orphaned attempts. `scripts/audit_pool.py --firestore` now reports **0 of 2028**.
+
+Backups (session-local, not committed): `pool_fresh.jsonl` (all 2165 records
+including every deleted board), `orphans_backup.json` (all 21 attempt docs
+verbatim).
+
+### Why the orphaned attempts could not stay
+
+An attempt stores a grading SNAPSHOT — answer, correct, score, acceptedSet — as
+of when it was answered, and the daily `regrade-attempts` job repairs a stale
+one from the problem it points at. With the problem gone there is nothing to
+repair it from, so the row is frozen at a grade produced by a board that was
+withdrawn precisely because that grade was wrong. Two of the 21 were answers to
+`ben1-19f9609a4b3` and `lead1i-b8b1fb050`-class boards where the stored
+`correct` flag is the defect itself.
+
 ## Suggested order of repair
 
 1. **`ben1-19f9609a4b3`** and **`lead1i-19fa11e39af`** — wrong grading, two
