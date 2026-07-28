@@ -225,6 +225,78 @@ can be dealt the identical layout twice.
 
 ---
 
+## Suggested new gates
+
+Counts are boards disqualified out of the 2030 live problems, measured with
+`scripts/audit_pool_second.py` (the code in brackets re-lists a group via
+`--code`). "Tighten" means the check already exists but exempts this case.
+
+| # | Gate | Rule | Disqualified | Sample |
+|---|---|---|---|---|
+| 1 | `G-PTS` [D6] | New. Check the `pts` band the page displays against the hand: HCP + distribution (shortness **and** length, the most generous count any system uses), slack ±2. Fires when the stated floor exceeds that maximum or the stated ceiling is below plain HCP. | **36** (of 1772 boards that display a `pts` band at all) | `lead1-b8b469b31` |
+| 2 | `G-PASS-CLAIM` [D3/D4] | Tighten. Stop exempting Pass in `hand_violations`/`auction_violations` — run `card_vs_hand` on pass cards too. Fixes the two parser faults it exposes: `N- !S` (a *maximum*) landing in `minlen`, and "twice rebiddable !H" landing in `minlen 6`. | **5** (3 of them rendered on the page) | `lead1-19f9f6c19be` |
+| 3 | `G-BLANK` [D7] | New. Reject any non-pass call in a displayed auction whose `gib_raw` is empty or whitespace. The gates currently accept `" "` silently. | **23** | `lead1-b8b49a66c` |
+| 4 | `G-EVMAX` [E9] | New. `verdict.accepted` must be the EV argmax: every other `table` row's `ev_imp_vs_top` must be ≤ 0. Catches a menu-completion option evaluated after the winner was picked and never re-argmaxed. | **1** | `ben1-19f9609a4b3` |
+| 5 | `G-MODE` [F12] | New. `verdict.accepted` must equal `verdict.by_mode[training.target_mode].accepted`. | **1** | `lead1i-19fa11e39af` |
+| 6 | `G-SHADE` [E11] | Tighten. Cap the "soft" option-HCP shade. Soft is right at ±2; past ±5 it is a different claim, not a stretch a player weighs. | **11** at ±5 · 25 at ±4 · 50 at ±3 | `ben1-19f94d0042d` |
+| 7 | `G-DEGEN` [D8] | New (cosmetic). Do not render a one-point HCP band (`9-9`, `24-24`, `0-0`) as a range — GIB never had that precision, and the hand often misses even the single point. | **104** (157 calls) | `ben1-19f9353043a` |
+| 8 | `G-SELLOUT` [H1] | New. A seat that never bids in the whole auction, holds ≥ 15 HCP, and let the auction die at the one level. Threshold matters: at 14 it fires 13 times and most are flat 14-counts correctly passing an opponent's 1NT. | **1** at 15 HCP · 13 at 14 | `lead1i-19fa5b321a7` |
+| 9 | `G-OVERBID` [H3] | New. Game or 3NT reached in an **uncontested**, undoubled auction on ≤ 21 combined HCP (3NT) or ≤ 19 (4-level+). Contested and doubled auctions excluded — those are sacrifices. | **8** | `lead1-b8b5bf70a` |
+| 10 | `G-COLD-LEAD` [I1] | New. No offered lead defeats the contract on more than 2% of layouts (or every lead defeats it on ≥ 98%). | **30** | `lead1-19f93557236` |
+| 11 | `G-HOPELESS` [I2] | New. The best lead averages 2.5+ tricks short of what is needed to beat the contract. Defensible for matchpoints (overtrick defence still ranks), so this is the one gate worth landing as a warning rather than a rejection. | **105** (119 with #10) | `lead1-19fa02bce20` |
+| 12 | `G-DUP` | New. Same `full_deal` + same auction published more than once. | **3 pairs** | `lead1-013b345f` / `lead1i-013b345f` |
+
+### The samples in full
+
+1. **`G-PTS` — `lead1-b8b469b31`**: W's 2♠ and closing pass both display
+   *"3+♠, 6-11 pts"*. W holds `T654.932.T95.983` — **0 HCP and no distribution
+   at all**. Runners-up: `lead1i-19f92cab633` (pass shown "6+♣, **0-0 pts**",
+   hand 12 HCP), `ben1-19fa09d3291` (3♠ shown "Invitational to 4S, **9-9 pts**",
+   hand `987642.73.QT983.` = **2 HCP**), `lead1i-19f9e0fd886` (a weak jump
+   overcall shown "Overcall, 6+♠, **19+ pts**", hand 10 HCP).
+2. **`G-PASS-CLAIM` — `lead1-19f9f6c19be`**: N's final pass reads *"No suitable
+   call, **5♠**, 25+"*; N holds `AK8`, three spades. GIB said `5- !S` — five *or
+   fewer* — and the parser stored it as `minlen S=5`, so a maximum is printed as
+   a promise. Same shape in `lead1-19fa45cd957` ("6+♥" over a singleton, from
+   "twice rebiddable !H") and `lead1i-19fa5191916` ("4+♠" over a doubleton).
+3. **`G-BLANK` — `lead1-b8b49a66c`**: the 3NT at index 6 — the contract the
+   trainee is about to lead against — carries `gib_raw == " "`, so the auction
+   line shows a bare "3NT" with no meaning. Ten more boards are blank on exactly
+   that call; `lead1-19f9f6c19be` is blank on the 4♠ a 3-HCP hand bid and
+   declared.
+4. **`G-EVMAX` — `ben1-19f9609a4b3`**: accepted 3♥ (`ev_imp_vs_top` +0.42 vs
+   Pass, `best_share` 0.312), but X is published at **+0.10 IMPs vs 3♥** with
+   `best_share` **0.609**. The page prints both *"3♥ — … Best: +0.4 IMPs vs
+   Pass"* and *"Dbl — … +0.1 IMPs vs the top choice"*. X has the lowest policy
+   of the three (0.078), consistent with a rollout-completed option.
+5. **`G-MODE` — `lead1i-19fa11e39af`**: `accepted = ["CT","C5","C4","C3"]`,
+   `by_mode.IMP.accepted = ["C5","C4","C3"]`, `target_mode = "IMP"`. ♣T is right
+   or wrong depending which field the client reads.
+6. **`G-SHADE` — `ben1-19f94d0042d`**: offers *"2NT — Invitational to 3NT game,
+   **24-24**"* to a hero holding `4.94.AQ874.K9843` — 9 HCP, off by 15. Then
+   `ben1-19fa337da08` "21-21" to 12, `ben1-19fa4e91379` "19-21" to 11,
+   `ben1-19fa14511b8` "10-11" to 3.
+7. **`G-DEGEN` — `ben1-19f9353043a`**: N's 2NT glossed `9-9 HCP` over a 7-HCP
+   hand. Across the pool: 44× `9-9`, 32× `11-11`, 17× `17-17`, 13× `15-15`.
+8. **`G-SELLOUT` — `lead1i-19fa5b321a7`**: P–P–1NT–P–P–P, and the hero N holds
+   `5.AK75.Q6.AQ9432` — 15 HCP, six clubs, a singleton — and passed. The board
+   then asks N for the opening lead against 1NT. Marked `difficulty_level: 5`.
+9. **`G-OVERBID` — `lead1-b8b5bf70a`**: 3NT by E on 21 combined HCP, E having
+   bid 3♣ ("Invite, 6+♣, 9-11") and then 3NT while **void in partner's opened
+   major**. Also `lead1i-b8b1fb050` (4♥ on 16, E raising a preempt to game with
+   7 HCP and three trumps — on a blank gloss) and `lead1i-b8b551891` (3NT on 20,
+   vulnerable, partner having invited on 5 HCP).
+10. **`G-COLD-LEAD` — `lead1-19f93557236`**: 4♠N survives every offered lead on
+    99% of layouts. There is a best card, but no defence to find.
+11. **`G-HOPELESS` — `lead1-19fa02bce20`**: the best lead averages **1.07**
+    defensive tricks against 3NTN, which needs 5 to beat.
+12. **`G-DUP` — `lead1-013b345f` / `lead1i-013b345f`**: identical deal and
+    auction, published once as an MP board and once as its IMP variant.
+
+Gates 1-5 are the ones that catch outright wrong content: 66 boards, no
+judgement calls. Gates 6-9 are 124 more that need a threshold decision.
+Gates 10-12 are content quality, not correctness.
+
 ## Suggested order of repair
 
 1. **`ben1-19f9609a4b3`** and **`lead1i-19fa11e39af`** — wrong grading, two
