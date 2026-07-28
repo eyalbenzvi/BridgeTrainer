@@ -329,6 +329,18 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
     rec = build_lead_record(seed, hands, dealer_i, vul, fc, leader_i,
                             hand, full_auction, le, v, auc, notes, elapsed,
                             target_mode=target_mode)
+    # ---- the remaining record gates, run on the FINISHED record so the forge
+    # and scripts/audit_pool.py apply one definition and cannot drift: an
+    # auction no partnership produces (a 15-count that never bid; a game bid in
+    # an uncontested auction on nothing), a contract no lead can touch — an
+    # answer with no question — and a top-level `accepted` that disagrees with
+    # the mode which grades the board. Only set_prob-bearing candidate rows can
+    # decide the cold check, and those exist only after build_lead_record.
+    from .explain_check import lead_record_violations
+    unsound = [b for b in lead_record_violations(rec) if b not in bad]
+    if unsound:
+        return LeadOutcome(seed, "rejected", "board_unsound", timings=t,
+                           detail="board_unsound " + "; ".join(unsound[:3]))
     detail = (f"ACCEPTED {rec['id']} [{target_mode}] lead {SEATS[leader_i]} "
               f"vs {contract} best={'/'.join(v.best)} "
               f"gap={v.measured.get('gap')} "

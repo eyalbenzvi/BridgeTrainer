@@ -98,6 +98,7 @@ def parse_meaning(m: str) -> dict:
     a suit range is ``6+ !H`` / ``1-3 !S`` / ``2- !S`` and HCP is ``12+ HCP`` /
     ``10- HCP`` / ``11-21 HCP``. Total-points and prose clauses are ignored."""
     card = dict(_EMPTY, minlen={}, maxlen={}, gib_raw=m)
+    numeric = set()          # suits whose length came from an explicit range
     if not m:
         return card
     if "--" in m:
@@ -123,11 +124,21 @@ def parse_meaning(m: str) -> dict:
                 mn, mx = lo, lo
             card["minlen"][st.upper()] = mn
             card["maxlen"][st.upper()] = mx
+            numeric.add(st.upper())
             continue
         rm = _REBID.match(p)
         if rm:
             phrase, st = rm.group(1, 2)
             st = st.upper()
+            # GIB sometimes states both an explicit range and a prose length
+            # for the same suit, and they contradict: lead1-19f9f6c19be's pass
+            # said "5- !S" (five OR FEWER) and then "rebiddable !S", and the
+            # prose won — so a MAXIMUM was published as a promise of five, over
+            # a hand holding AK8. A two-sided numeric range is the specific
+            # claim and the prose may not touch it; over an open-ended one
+            # ("4+ !C" plus "rebiddable !C") the prose still sharpens minlen.
+            if st in numeric and card["maxlen"].get(st, 13) < 13:
+                continue
             card["minlen"][st] = max(card["minlen"].get(st, 0),
                                      _REBID_LEN[phrase.lower()])
             continue

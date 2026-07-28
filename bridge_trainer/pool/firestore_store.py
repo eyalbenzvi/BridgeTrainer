@@ -415,6 +415,13 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
     remote = remote or FirestorePool(key_path)
     idx = remote.read_index() or {"problems": [], "generation": 0}
     have = {e["id"] for e in idx.get("problems", [])}
+    # R14: the pool must not hold the same BOARD twice. The index carries a
+    # deal_key per entry (store.deal_key), so the duplicate check costs nothing
+    # beyond the index read that already happened. Entries written before the
+    # key existed have none and are simply not matched against.
+    have_keys = {e["deal_key"] for e in idx.get("problems", [])
+                 if e.get("deal_key")}
+    duplicates = []
 
     # 1. upload the docs that are new to the current index (idempotent set).
     #    A failing write is not swallowed: on_write_error records the pid (after
@@ -443,13 +450,20 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
                 continue
             rec = local.get(pid)
             _check_schema(rec)      # DB-M-7 defense-in-depth on the write path
+            entry = index_entry(rec)
+            if (entry.get("deal_key") and not overwrite
+                    and entry["deal_key"] in have_keys):
+                duplicates.append(pid)
+                skipped += 1
+                continue
+            have_keys.add(entry.get("deal_key"))
             # PERF-D-6: upload the client-facing slice (drops policy_trail /
             # engine_auction_complete / trims quality). _firestore_safe MUST
             # still wrap the result — it makes nested arrays legal for Firestore
             # and getProblem's unwrapFirestore is its exact inverse.
             writer.set(remote._col.document(pid),
                        _firestore_safe(client_view(rec)))
-            staged[pid] = index_entry(rec)
+            staged[pid] = entry
     finally:
         writer.close()      # flush all buffered writes; on_write_error fires here
 
@@ -481,7 +495,8 @@ def push_local_pool(local_dir: str | Path, key_path: str | None = None,
                         f"push (idempotent) or rebuild_index")
                 time.sleep(0.5 * (attempt + 1))
     return {"uploaded": uploaded, "skipped": skipped,
-            "total": len(local.ids()), "failed": sorted(failed)}
+            "total": len(local.ids()), "failed": sorted(failed),
+            "duplicates": duplicates}
 
 
 def backfill_lead_training(key_path: str | None = None,

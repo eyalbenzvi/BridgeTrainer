@@ -11,6 +11,7 @@ Firestore backend mirrors it without touching the producer.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,27 @@ SCHEMA_VERSION = 1
 SUPPORTED_SCHEMAS = (1, 2)
 
 
+def deal_key(rec: dict) -> str:
+    """A short fingerprint of the BOARD a record poses: its kind, dealer, the
+    four hands and the auction shown. Two records sharing it pose the identical
+    question and only one of them should be in the pool (R14).
+
+    Lives in the index entry so ``push_local_pool`` can reject a duplicate from
+    the small index document it already reads, with no collection scan. Note
+    that entries written before 2026-07-28 carry no key, so the check protects
+    the pool going forward; existing duplicates are found by
+    ``scripts/audit_pool_second.py``.
+
+    Returns "" for a record carrying no deal — there is no board to fingerprint,
+    so such a record is never matched against another."""
+    if not rec.get("full_deal"):
+        return ""
+    payload = json.dumps([rec.get("kind", "bidding"), rec.get("dealer"),
+                          rec.get("full_deal"), rec.get("auction")],
+                         sort_keys=True, separators=(",", ":"))
+    return hashlib.sha1(payload.encode("utf-8")).hexdigest()[:16]
+
+
 def index_entry(rec: dict) -> dict:
     """The lightweight per-problem row the web app reads for its list and
     filters (kind / type / difficulty). Shared by the local and Firestore
@@ -28,6 +50,7 @@ def index_entry(rec: dict) -> dict:
     cls = rec.get("classification", {})
     entry = {
         "id": rec["id"],
+        "deal_key": deal_key(rec),
         # scenario router; legacy records predate it and are bidding
         "kind": rec.get("kind", "bidding"),
         "type": cls.get("type"),
