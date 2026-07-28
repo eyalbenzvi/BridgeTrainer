@@ -253,6 +253,12 @@ def cmd_pool_push(args: argparse.Namespace) -> int:
                               overwrite=args.overwrite)
     print(f"uploaded {summary['uploaded']}, skipped {summary['skipped']} "
           f"(pool has {summary['total']}); meta/index refreshed")
+    dups = summary.get("duplicates") or []
+    if dups:
+        # R14: not an error — the board is already in the pool under another
+        # id — but silent skipping would read as "uploaded" to the caller.
+        print(f"{len(dups)} board(s) skipped as duplicates of a deal already "
+              f"in the pool: {', '.join(dups)}")
     failed = summary.get("failed") or []
     if failed:
         # DB-O-5: real write failures must fail the run (redden CI), not be

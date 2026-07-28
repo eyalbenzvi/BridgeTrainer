@@ -73,7 +73,7 @@ def test_terse_pts_branch_present():
         "terse({pts:[5,10]}, 'P')",
         "terse({pts:[12,40]}, 'P')",   # hi>=25 -> "lo+ pts"
     ])
-    assert limited == "8-8 pts"
+    assert limited == "8 pts"      # a one-point band renders as one number
     assert wide == "5-10 pts"
     assert open_top == "12+ pts"
 

@@ -425,6 +425,20 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
 
     elapsed = time.perf_counter() - t_board
     rec = build_record(spot, v, stem_expl, opt_expl, elapsed)
+    # ---- the record gates that need the finished record, run through the same
+    # entry point scripts/audit_pool.py uses so the forge and the audit cannot
+    # drift: the graded answer must be the EV argmax of the published table
+    # (a menu-completion option evaluated after the winner was picked once beat
+    # it by +0.10 IMPs and the trainee who chose it was marked wrong), and no
+    # seat may have sold out a 15-count at the one level.
+    from .explain_check import record_violations
+    late_bad, _late_soft = record_violations(rec)
+    if late_bad:
+        return BoardOutcome(
+            seed, "rejected", "record_unsound", timings=t,
+            detail="record_unsound " + "; ".join(late_bad[:3]) +
+                   (f" (+{len(late_bad) - 3} more)" if len(late_bad) > 3
+                    else ""))
     if soft_gloss:
         # kept, not fatal: options whose GIB band the hero's hand shades
         # (see explain_check.hand_violations) — available to the UI as

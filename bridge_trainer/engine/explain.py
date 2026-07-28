@@ -129,7 +129,7 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
             if lo > 0:
                 frags.append(f"{lo}+")
         else:
-            frags.append(f"{lo}-{hi}")
+            frags.append(_band(lo, hi))
     elif pts:
         # no HCP band, but GIB stated total points — without this a limited
         # pass ("No suitable call -- 8- total points") rendered with no
@@ -139,8 +139,17 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
             if lo > 0:
                 frags.append(f"{lo}+ pts")
         else:
-            frags.append(f"{lo}-{hi} pts")
+            frags.append(f"{_band(lo, hi)} pts")
     return ", ".join(frags)
+
+
+def _band(lo: int, hi: int) -> str:
+    """A point band as a trainee should read it: "11-14", but a one-point band
+    as the single number it is. GIB emits "9-9"/"24-24"/"0-0" where its rule
+    pinned the count exactly, and rendering that as a RANGE claimed a precision
+    the source never had — 157 published calls said things like "9-9" over a
+    seven-count."""
+    return str(lo) if lo == hi else f"{lo}-{hi}"
 
 
 def stem_explanations(spot) -> list[dict]:

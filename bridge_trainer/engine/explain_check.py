@@ -126,6 +126,26 @@ from .conventions import CLASS_RANK, contract_class, contract_side, seat_of
 SEATS = "NESW"
 SLACK_HCP = 2          # GIB band may be shaded by a couple of points
 SLACK_LEN = 1          # ... and a promised length by one card
+SLACK_PTS = 2          # ... and a total-points band by a couple of points
+SHADE_FATAL = 5        # An OPTION's point band the hero misses by less than
+                       # this is the stretch/underbid dilemma the trainer
+                       # trades in, and stays soft. At this gap and beyond it
+                       # is not a shade a player weighs but a different hand:
+                       # ben1-19f94d0042d offered "Invitational to 3NT game,
+                       # 24-24" to nine HCP.
+SELLOUT_HCP = 15       # A seat that never bids at all, holds this much and let
+                       # the auction die at the one level. Measured on the
+                       # published pool: at 15 exactly one board fires
+                       # (lead1i-19fa5b321a7, 15 HCP with six clubs and a
+                       # singleton, passing 1NT); at 14 thirteen do and most
+                       # are flat 14-counts correctly passing an opponent's
+                       # 1NT, which is why the bar is not there.
+COLD_SET_SHARE = 0.02  # No offered lead beats the contract on more than this
+                       # share of layouts (or every lead beats it on 1 - this)
+OVERBID_NT_HCP = 21    # 3NT+ reached in an uncontested undoubled auction on at
+OVERBID_SUIT_HCP = 19  # most this many combined HCP; likewise a 4-level game.
+                       # Contested and doubled auctions are exempt — a cheap
+                       # game over an opponent's bidding is a sacrifice.
 BAND_N_MIN = 30        # below this many samples an HCP PERCENTILE proves
                        # nothing (p10/p90 of a handful of layouts is noise)
 BAND_LEN_N_MIN = 12    # ... but a suit-length mean/share still does, and the
@@ -217,6 +237,22 @@ def keycards(hand_pbn: str, trump: str | None) -> int:
     return n
 
 
+def max_total_points(hand_pbn: str) -> int:
+    """The most "total points" any counting system can credit this hand.
+
+    GIB states total points, not HCP, on a large share of its cards, and the
+    renderer prints that band whenever no HCP band exists — so the band needs
+    a bound to be checked against. This is deliberately the LOOSEST bound: HCP
+    plus shortness (void 3, singleton 2, doubleton 1) plus length (a point per
+    card over four in each suit), i.e. both distributional methods added
+    together. No system counts more than that, so a band whose floor is above
+    this number is not a shade — it describes a different hand."""
+    lens = suit_lengths(hand_pbn)
+    shortness = sum({0: 3, 1: 2, 2: 1}.get(v, 0) for v in lens.values())
+    length = sum(max(0, v - 4) for v in lens.values())
+    return hand_hcp(hand_pbn) + shortness + length
+
+
 def _stated_counts(text: str) -> list[int]:
     """'One or four key cards' -> [1, 4]; digits accepted too."""
     low = text.lower()
@@ -241,6 +277,25 @@ def _trump_from_context(entries: list[dict], upto: int) -> str | None:
     return None
 
 
+def band_gap(card: dict, hand_pbn: str) -> int:
+    """How far outside the card's POINT bands (HCP and total points) the hand
+    falls, in points, beyond the slack each band already allows. 0 when the
+    hand is inside them. Feeds ``SHADE_FATAL``: the same miss is a style shade
+    at 3 points and a different hand at 8, and only the size tells them
+    apart."""
+    gap = 0
+    hcp = card.get("hcp")
+    if hcp:
+        have, lo, hi = hand_hcp(hand_pbn), int(hcp[0]), int(hcp[1])
+        gap = max(gap, lo - have, have - hi)
+    pts = card.get("pts")
+    if pts:
+        lo, hi = int(pts[0]), int(pts[1])
+        gap = max(gap, lo - max_total_points(hand_pbn),
+                  hand_hcp(hand_pbn) - hi)
+    return max(0, gap)
+
+
 def card_vs_hand(card: dict, hand_pbn: str) -> list[str]:
     """Violations of one parsed GIB card against the actual hand."""
     out = []
@@ -252,6 +307,21 @@ def card_vs_hand(card: dict, hand_pbn: str) -> list[str]:
         lo, hi = int(hcp[0]), int(hcp[1])
         if have < lo - SLACK_HCP or have > hi + SLACK_HCP:
             out.append(f"hcp {have} outside {lo}-{hi}")
+    # R8, the total-points band. The renderer shows it in place of an HCP band
+    # (explain.terse_meaning), so it is a claim a trainee reads and nothing
+    # used to check it. Bounded both ways: the floor against the loosest total
+    # any system can count, the ceiling against plain HCP (no distribution can
+    # take points away). Published example: lead1-b8b469b31 showed "6-11 pts"
+    # over T654.932.T95.983 — 0 HCP and a flat hand.
+    pts = card.get("pts")
+    if pts:
+        lo, hi = int(pts[0]), int(pts[1])
+        ceiling = max_total_points(hand_pbn)
+        floor = hand_hcp(hand_pbn)
+        if lo > ceiling + SLACK_PTS:
+            out.append(f"pts band {lo}-{hi} above the hand's {ceiling} max")
+        elif hi < floor - SLACK_PTS:
+            out.append(f"pts band {lo}-{hi} below the hand's {floor} HCP")
     lens = suit_lengths(hand_pbn)
     for st, mn in (card.get("minlen") or {}).items():
         if st in lens and lens[st] < mn - SLACK_LEN:
@@ -316,21 +386,30 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
         a natural invitational 2NT glossed "Minor transfer -- 6+ !C"
         offered to a hand with four clubs).
 
-    soft — kept, for annotation only: an option whose HCP band the hero
-    shades ("shows 14-17", hero has 11) or whose length CAP the hero
-    exceeds (3NT over a long suit). That is not a defect — the
-    stretch/underbid dilemma is exactly what this trainer trades in.
+    soft — kept, for annotation only: an option whose point band the hero
+    shades by less than ``SHADE_FATAL`` ("shows 14-17", hero has 13) or
+    whose length CAP the hero exceeds (3NT over a long suit). That is not
+    a defect — the stretch/underbid dilemma is exactly what this trainer
+    trades in. A band the hero misses by ``SHADE_FATAL`` or more is fatal:
+    at that distance the gloss is not describing a stretched version of
+    the hand it is offered to (ben1-19f94d0042d offered "Invitational to
+    3NT game, 24-24" to nine HCP).
 
     X/XX go through the same vetting as suit bids — GIB's card for a
     double states real hand requirements, and a breached one is the same
     lie (ben1-19f93c012bc: X glossed "5+!H, 4+!D, 17-21" offered to a
-    hand with a singleton diamond and 14 HCP). Only Pass is exempt: its
-    gloss restates constraints the seat's earlier bids established,
-    which those bids' own entries already vet."""
+    hand with a singleton diamond and 14 HCP).
+
+    Pass is vetted too, since 2026-07-28. The old exemption rested on the
+    claim that a pass's gloss "only restates constraints the seat's earlier
+    bids established, which those bids' own entries already vet" — and that
+    is false. GIB's pass card carries claims the seat's own bids never made,
+    and the renderer prints them like any other: lead1-19f9f6c19be showed
+    North's final pass as "5♠, 25+" over AK8, lead1-19fa45cd957 showed
+    West's as "6+♥" over a singleton, lead1i-19fa5191916 showed North's as
+    "4+♠" over a doubleton."""
     fatal, soft = [], []
     for j, e in enumerate(stem_entries):
-        if e.get("call") == "P":
-            continue
         bidder = hands[seat_of(dealer_i, e["idx"])]
         for v in card_vs_hand(e.get("card") or {}, bidder):
             fatal.append(f"stem {e['call']} ({e.get('seat', '?')}): {v}")
@@ -341,9 +420,14 @@ def hand_violations(stem_entries: list[dict], option_cards: dict,
     entries = list(stem_entries)
     for bid, card in option_cards.items():
         if bid == "P":
+            # An option's Pass card restates what the hero's OWN earlier calls
+            # established, and those entries are vetted above — unlike a stem
+            # pass, which speaks for a seat whose cards nothing else describes.
             continue
+        gap = band_gap(card or {}, hero)
         for v in card_vs_hand(card or {}, hero):
             (fatal if "asserts" in v or "< promised" in v
+             or (gap >= SHADE_FATAL and ("hcp " in v or "pts band" in v))
              else soft).append(f"option {bid}: {v}")
         e = {"call": bid, "card": card}
         v = _ask_answer_violation(e, entries + [e], len(entries), hero)
@@ -367,12 +451,13 @@ def auction_violations(auction_entries: list[dict], hands: list[str],
     4NT and 6♠ that followed. The lead forge never ran this check, which is
     why the rate was the same on boards forged that morning.
 
-    Pass is exempt, as in ``hand_violations``: its "No suitable call" gloss
-    only restates what the seat's own bids established."""
+    Pass is vetted here too, as in ``hand_violations``, and this is where it
+    matters most: a lead board's auction is over, so most of what it shows a
+    trainee IS passes, and the final pass carries the fullest card GIB ever
+    emits. Three of the five boards the change caught were lead boards printing
+    a suit-length promise the passer contradicts."""
     out = []
     for j, e in enumerate(auction_entries):
-        if e.get("call") == "P":
-            continue
         idx = e.get("idx", j)
         bidder = hands[seat_of(dealer_i, idx)]
         for v in card_vs_hand(e.get("card") or {}, bidder):
@@ -383,12 +468,153 @@ def auction_violations(auction_entries: list[dict], hands: list[str],
     return out
 
 
+def sellout_violations(auction: list[str], hands: list[str],
+                       dealer_i: int) -> list[str]:
+    """A seat that never bids at all, holds ``SELLOUT_HCP`` or more, and let the
+    auction die at the ONE level (R9).
+
+    Not a gloss check and not a style call: a hand this strong that never opens
+    its mouth while the auction stays at the cheapest level is a bid no
+    partnership misses, and a board built on it teaches an auction that could
+    not happen. lead1i-19fa5b321a7 ran P-P-1NT-P-P-P and then asked the hero —
+    15 HCP, six clubs, a singleton — for the opening lead against 1NT.
+
+    Only the seat's OWN silence counts, so a hand that passed once and came in
+    later (a trap pass behind an opener, then an overcall) never fires. The
+    one-level condition is what keeps ordinary discipline out: passing a
+    preempt or a game bid with a good hand is normal bridge."""
+    from .conventions import final_contract as _fc
+    fc = _fc(auction, dealer_i)
+    if fc is None or fc["level"] != 1:
+        return []
+    out = []
+    for si in range(4):
+        idxs = [j for j in range(len(auction)) if seat_of(dealer_i, j) == si]
+        if not idxs or any(auction[j] != "P" for j in idxs):
+            continue
+        have = hand_hcp(hands[si])
+        if have >= SELLOUT_HCP:
+            out.append(f"{SEATS[si]} never bid, holds {have} HCP "
+                       f"({hands[si]}), and the auction died at the one level")
+    return out
+
+
+def overbid_contract_violations(auction: list[str], hands: list[str],
+                                dealer_i: int) -> list[str]:
+    """A game reached in an UNCONTESTED, undoubled auction on too few combined
+    HCP (R10) — the declaring side's own free-standing overbid, not a save.
+
+    lead1-b8b5bf70a bid 3NT on 21 combined, the responder having jumped to 3♣
+    and then 3NT while void in the major partner opened. A trainee asked to
+    defend that is being asked to believe an auction no partnership produces.
+
+    Both exemptions matter. A doubled contract is a sacrifice by definition,
+    and so in practice is a cheap game the opponents bid over: 4♥ on 17 with a
+    nine-card fit over an opposing 1♣ is a real action, and flagging it would
+    reject good boards."""
+    from .conventions import final_contract as _fc
+    fc = _fc(auction, dealer_i)
+    if fc is None or fc["doubled"]:
+        return []
+    level, denom, decl = fc["level"], fc["denom"], fc["declarer_i"]
+    if not ((denom == "NT" and level >= 3) or level >= 4):
+        return []
+    side = {decl, (decl + 2) % 4}
+    if any(auction[j] not in ("P", "X", "XX")
+           and seat_of(dealer_i, j) not in side
+           for j in range(len(auction))):
+        return []                       # contested: a cheap game is a save
+    combined = sum(hand_hcp(hands[i]) for i in sorted(side))
+    cap = OVERBID_NT_HCP if denom == "NT" else OVERBID_SUIT_HCP
+    if combined <= cap:
+        return [f"{level}{denom} by {SEATS[decl]} reached in an uncontested "
+                f"auction on {combined} combined HCP"]
+    return []
+
+
+def cold_contract_violations(candidates: list[dict],
+                             contract: str) -> list[str]:
+    """No offered lead changes the result: every one of them beats the contract
+    on at most ``COLD_SET_SHARE`` of layouts, or every one beats it on all but
+    that share (R11).
+
+    A lead board is a question about which card to play. When the contract is
+    cold — or dead — whatever hits the table, the board has an answer but no
+    question, and its published "best lead" is measuring the tail of the trick
+    distribution rather than a defensive decision. Kept as a rejection rather
+    than a warning because the boards this fires on are also the ones with the
+    thinnest margins between the best card and the worst."""
+    sps = [c["set_prob"] for c in candidates if c.get("set_prob") is not None]
+    if not sps:
+        return []
+    if max(sps) <= COLD_SET_SHARE:
+        return [f"no offered lead beats {contract} on more than "
+                f"{max(sps):.0%} of layouts"]
+    if min(sps) >= 1.0 - COLD_SET_SHARE:
+        return [f"every offered lead beats {contract} on at least "
+                f"{min(sps):.0%} of layouts"]
+    return []
+
+
+def ev_argmax_violations(table: list[dict], accepted: str) -> list[str]:
+    """The graded answer must be the one the published evidence favours (R12).
+
+    ``verdict.judge`` picks ``accepted`` as the EV argmax and then states every
+    OTHER row's margin against it, so every other ``ev_imp_vs_top`` must be
+    <= 0 by construction. ben1-19f9609a4b3 published 3♥ as correct while its own
+    table gave X +0.10 IMPs against 3♥ and the best result on 61% of layouts
+    against 3♥'s 31% — a trainee choosing the call the page recommends by the
+    numbers was marked wrong. X carried the lowest policy of the three, which
+    is the signature of a menu-completion option evaluated after the winner was
+    chosen and never re-argmaxed; this catches that ordering bug wherever it
+    happens rather than trusting the pipeline not to reintroduce it."""
+    out = []
+    for row in table:
+        if row.get("bid") == accepted:
+            continue
+        ev = row.get("ev_imp_vs_top")
+        if ev is not None and ev > 0:
+            out.append(f"option {row['bid']} measures {ev:+.2f} IMPs against "
+                       f"the accepted {accepted} (best on "
+                       f"{row.get('best_share')} of layouts)")
+    return out
+
+
+def mode_accept_violations(rec: dict) -> list[str]:
+    """A lead board's top-level ``accepted`` must match the accepted set of the
+    mode that actually grades it (R13).
+
+    lead1i-19fa11e39af carries accepted ["CT","C5","C4","C3"] with
+    by_mode.IMP.accepted ["C5","C4","C3"] and target_mode IMP, so ♣T is right
+    or wrong depending on which field the client happens to read."""
+    mode = (rec.get("training") or {}).get("target_mode")
+    verdict = rec.get("verdict") or {}
+    by_mode = (verdict.get("by_mode") or {}).get(mode or "") or {}
+    acc, want = verdict.get("accepted"), by_mode.get("accepted")
+    if not mode or want is None or acc is None:
+        return []
+    if sorted(acc if isinstance(acc, list) else [acc]) != sorted(want):
+        return [f"accepted {acc} != by_mode.{mode}.accepted {want}, and "
+                f"{mode} is the board's target mode"]
+    return []
+
+
 def lead_record_violations(rec: dict) -> list[str]:
     """``auction_violations`` for an already-built lead record (the audit's
-    entry point, mirroring ``record_violations`` for bidding boards)."""
+    entry point, mirroring ``record_violations`` for bidding boards), plus the
+    four lead-only record gates: the sell-out auction, the uncontested overbid,
+    the cold contract and the target-mode grading mismatch."""
     hands = [rec["full_deal"][s] for s in SEATS]
     entries = (rec.get("explanations") or {}).get("auction") or []
-    return auction_violations(entries, hands, SEATS.index(rec["dealer"]))
+    dealer_i = SEATS.index(rec["dealer"])
+    auction = list(rec.get("auction") or [])
+    out = auction_violations(entries, hands, dealer_i)
+    out += sellout_violations(auction, hands, dealer_i)
+    out += overbid_contract_violations(auction, hands, dealer_i)
+    out += cold_contract_violations(rec.get("candidates") or [],
+                                    rec.get("contract") or "the contract")
+    out += mode_accept_violations(rec)
+    return out
 
 
 # GIB's own forcing phrase, for the violation message: the ";"-clause that
@@ -1260,4 +1486,7 @@ def record_violations(rec: dict) -> tuple[list[str], list[str]]:
     fatal += game_force_stop_violations(verdict.get("table") or [],
                                         stem_entries, auction, dealer_i,
                                         hero_i, int(n_samples or 0))
+    fatal += ev_argmax_violations(verdict.get("table") or [],
+                                  verdict.get("accepted") or "")
+    fatal += sellout_violations(auction, hands, dealer_i)
     return fatal, soft
