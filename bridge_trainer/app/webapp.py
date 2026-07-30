@@ -1058,6 +1058,148 @@ function normAccepted(v) {
   }
   return acc;
 }
+/* ===== stored-attempt vocabulary =====
+   Everything below reads a RECORDED attempt (users/{uid}/attempts/{problemId})
+   rather than a problem doc. It lived in the dashboard's own script until the
+   practice log (history.html) needed the same rows; it sits here, in the
+   DOM-free shared block, so there is exactly one definition of "what a row
+   says" and one escaping path for both pages -- and so bt-shared.js ships it
+   once for the whole app instead of each page carrying a copy.
+   Two call-time dependencies are declared LATER in bt-shared.js (TYPE_NAMES,
+   glossHtml/routeFor). That is fine at runtime -- the whole file has executed
+   before any page calls these -- and the node harness stubs them. */
+const MIN_N = 5;               // a mean may be shown at all (see MIN_CI = 12)
+function mean(xs) { return xs.reduce((s, x) => s + x, 0) / xs.length; }
+function median(xs) {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+}
+/* Hebrew number agreement: a bare "1 בעיות" reads as broken Hebrew, and these
+   counts legitimately reach 1 on a new account and in sparse categories. */
+function nProblems(n) { return n === 1 ? "בעיה אחת" : n + " בעיות"; }
+function nDecisions(n) { return n === 1 ? "החלטה אחת" : n + " החלטות"; }
+function tsMillis(a) {
+  if (!a || !a.ts) return 0;
+  if (typeof a.ts.toMillis === "function") return a.ts.toMillis();
+  if (a.ts.seconds) return a.ts.seconds * 1000;
+  return 0;
+}
+/* Order first-attempts by their FIRST-attempt time. A re-answer bumps `ts`
+   (so incremental cross-device sync notices attemptCount updates -- DB-M-9),
+   but `firstTs` is written once and never moves. Fall back to `ts` for legacy
+   docs that predate firstTs -- there `ts` IS the first attempt's time. */
+function firstMs(a) { return tsMillis(a && a.firstTs ? {ts: a.firstTs} : a); }
+/* LAST activity on a problem: the first answer, or the latest re-answer. `ts`
+   is bumped by a re-answer and `lastTs` is written alongside it (DB-M-9), so
+   the max of the three is the honest "when did I last work on this".
+   The practice log orders by THIS, not by firstMs: a session spent
+   re-answering old problems bumps no firstTs at all, so a firstMs order would
+   render that whole session invisible. */
+function actMs(a) {
+  return Math.max(firstMs(a), tsMillis(a),
+                  tsMillis(a && a.lastTs ? {ts: a.lastTs} : null));
+}
+/* one definition of "which scenario is this attempt", since a missing `kind`
+   means the record predates the lead trainer and is therefore a bidding one */
+function attKind(a) { return (a && a.kind) === "lead" ? "lead" : "bidding"; }
+function scenHe(a) { return attKind(a) === "lead" ? "הובלה" : "הכרזה"; }
+function unitOf(a) {
+  if (attKind(a) !== "lead") return "IMP";
+  return a.trainingMode === "IMP" ? "IMP" : "לקיחה";
+}
+/* acceptedSet as an array, whatever the cache holds. Every stored doc carries
+   an array, but a cached attempt can hold a bare string (a raw
+   verdict.accepted that reached the cache), and `.join`/`.some` on it throws
+   and takes the whole page down with it. Normalize at every read. */
+function accOf(a) {
+  const s = a && a.acceptedSet;
+  return Array.isArray(s) ? s : (s ? [s] : []);
+}
+function typeLabel(t) {
+  return (typeof TYPE_NAMES !== "undefined" && TYPE_NAMES[t]
+          && TYPE_NAMES[t][0]) || t;
+}
+const OUTCOME_HE = {winner: "מנצחת", "accepted-alt": "חלופה קבילה",
+  dead: "אפשרות ללא סיכוי", suboptimal: "נחותה מהמיטבית"};
+/* Ids still present in the pool index; attempts whose problem was deleted are
+   marked "removed" instead of linking to a dead page (DB-M-9). null = unknown
+   (index not loaded / unavailable) -> treat every attempt as live, as before.
+   An attempt whose problem is gone can never be re-graded (the verdict it was
+   scored against is gone), so it is also kept out of every aggregate. */
+let LIVE_IDS = null;
+function btOrphan(a) { return !!LIVE_IDS && !LIVE_IDS.has(a.problemId); }
+/* A legacy attempt whose score is not a measurement at all: the old graders
+   left gradedCost 0 when the chosen option had no table row, so
+   btScoreOfAttempt hands back exactly ERROR_MIN for it. Inside an aggregate
+   that is invisible; in a per-row LOG a column of 40s reads as a measured
+   result and is not one, so the log prints "no score" for these instead. */
+function btScoreIsFallback(a) {
+  return !btHasStoredScore(a) && !a.correct && a.outcomeClass !== "dead"
+         && !(+a.gradedCost > 0);
+}
+/* ---- one attempt row, for both the miss list and the practice log --------
+   The dashboard's miss list and the log's chronological rows differ in which
+   fields they print and in their CSS box (flex vs grid), NOT in what a row
+   means -- so they share this builder. That keeps ONE esc() path over
+   user-owned fields (SEC-A-6), ONE removed-problem branch, and one unit
+   decision for cost.
+   opts: cls (row class), time (formatted, or ""), cost/outcome (booleans),
+   replays (attemptCount), mark (extra muted suffix), label (aria-label).
+   Attempt fields are user-owned free text -> esc() before innerHTML. */
+function attemptRowHtml(m, opts) {
+  const o = opts || {};
+  const gone = btOrphan(m);
+  const chip = o.chip === undefined ? btScoreChipHtml(btScoreOfAttempt(m), true)
+                                    : o.chip;
+  const cost = (o.cost && m.gradedCost)
+    ? ` · ${glossHtml("cost", "עלות")} ≈ ` +
+      `<span class="ltr">${(+m.gradedCost).toFixed(unitOf(m) === "IMP" ? 1 : 2)}</span> ${unitOf(m)}`
+    : "";
+  const acc = accOf(m);
+  // "best: X" is dropped when the chosen call IS accepted -- otherwise ~45% of
+  // rows print the same call twice.
+  const bestTxt = (acc.length && !acc.includes(m.chosenCall))
+    ? ` · מיטבי <b class="ltr">${esc(acc.join(", "))}</b>` : "";
+  // the multiplier travels INSIDE the isolate, or RTL reordering prints "2×"
+  const reps = +m.attemptCount > 1
+    ? ` · חזרה <span class="ltr">&times;${+m.attemptCount}</span>` : "";
+  const body = chip +
+    (o.time ? `<span class="rtime ltr">${esc(o.time)}</span>` : "") +
+    `<span class="mtxt">${badge(m)}` +
+    (o.chose === false ? "" : "בחרת ") +
+    `<b class="ltr">${esc(m.chosenCall)}</b>${bestTxt}` +
+    (o.outcome ? ` · ${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}${cost}` : "") +
+    (o.replays ? reps : "") + (o.mark || "") + '</span>' +
+    (gone ? '<span class="go muted">בעיה שהוסרה</span>'
+          : '<span class="go" aria-hidden="true">&larr;</span>');
+  const cls = o.cls || "mrow";
+  const lbl = o.label ? ` aria-label="${esc(o.label)}"` : "";
+  return gone
+    ? `<div class="${cls}" data-pid="${esc(m.problemId)}">${body}</div>`
+    : `<a class="${cls}" data-pid="${esc(m.problemId)}"` +
+      ` href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}"${lbl}>` +
+      `${body}</a>`;
+}
+/* Scenario + type + difficulty, as one badge. The scenario is NAMED on every
+   row, not just implied by the type: the two taxonomies overlap in Hebrew (a
+   lead problem's type reads "סלם" and "חוזה חלקי" just like a bidding one), so
+   in a list that mixes both a bare type label leaves the reader unable to tell
+   an auction from a lead. A lead also names its TRAINING MODE -- MP and IMP
+   leads are graded on different scales, and in a list with an aligned score
+   column two such rows would otherwise look comparable.
+   difficultyLevel is clamped before "★".repeat(): firestore.rules bounds the
+   field count and key names but does not type-check this value. */
+function badge(m) {
+  const t = TYPE_NAMES[m.type];
+  const d = Math.min(5, Math.max(0, (+m.difficultyLevel || 0) | 0));
+  const mode = attKind(m) === "lead" && (m.trainingMode === "IMP" ? "IMP" : "MP");
+  const lbl = scenHe(m) + (mode ? " · " + mode : "") + (t ? " · " + t[0] : "");
+  return `<span class="typebadge" style="margin:0">${lbl}</span> ` +
+    (d ? `<span class="stars" style="font-size:12px" aria-hidden="true">` +
+      `<span class="on">${"★".repeat(d)}</span><span class="off">` +
+      `${"★".repeat(5 - d)}</span></span>` : "");
+}
 """
 
 _SHARED_JS = _SCORE_JS + """
@@ -3798,7 +3940,9 @@ _DASHBOARD_JS = r"""
    One hero number; everything else behind a labelled, collapsed heading whose
    summary already carries the payoff value. Design notes and the reasoning
    behind the statistics live in docs/dashboard_redesign_plan.md. */
-const MIN_N = 5;         // a mean appears
+/* MIN_N, the attempt vocabulary (firstMs/attKind/accOf/badge/...) and the
+   shared attempt-row builder live in _SCORE_JS (bt-shared.js), because the
+   practice log (history.js) renders the same rows. */
 const MIN_CI = 12;       // an interval appears, and the cell may drive advice
 const MIN_LABEL = 20;    // a cell may be NAMED the weakest
 const MIN_TREND = 20;    // the trend slope appears
@@ -3809,16 +3953,6 @@ const H_FLOOR = 2;       // DISPLAY guard only: never print "76-76"
 const OPEN_KEY = "bt_dash_open", AGG_KEY = "bt_dash_agg";
 const SUIT_NAME = {S: "עלה", H: "לב", D: "יהלום", C: "תלתן"};
 function num(x) { return typeof x === "number" ? x : (parseFloat(x) || 0); }
-/* Hebrew number agreement: a bare "1 בעיות" reads as broken Hebrew, and these
-   counts legitimately reach 1 on a new account and in sparse categories. */
-function nProblems(n) { return n === 1 ? "בעיה אחת" : n + " בעיות"; }
-function nDecisions(n) { return n === 1 ? "החלטה אחת" : n + " החלטות"; }
-function mean(xs) { return xs.reduce((s, x) => s + x, 0) / xs.length; }
-function median(xs) {
-  if (!xs.length) return 0;
-  const s = [...xs].sort((a, b) => a - b), m = s.length >> 1;
-  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-}
 /* Mean panel score with a 95% interval on the mean. Uses the t multiplier,
    not 1.96: sd is ESTIMATED from the sample, and at small n the normal
    multiplier makes the interval far too narrow (it covered ~87% while
@@ -3834,26 +3968,8 @@ function meanCI(xs) {
           lo: h === null ? m : Math.max(0, m - h),
           hi: h === null ? m : Math.min(100, m + h)};
 }
-function tsMillis(a) {
-  if (!a || !a.ts) return 0;
-  if (typeof a.ts.toMillis === "function") return a.ts.toMillis();
-  if (a.ts.seconds) return a.ts.seconds * 1000;
-  return 0;
-}
-/* Order first-attempts by their FIRST-attempt time. A re-answer bumps `ts`
-   (so incremental cross-device sync notices attemptCount updates -- DB-M-9),
-   but `firstTs` is written once and never moves. Fall back to `ts` for legacy
-   docs that predate firstTs -- there `ts` IS the first attempt's time. */
-function firstMs(a) { return tsMillis(a && a.firstTs ? {ts: a.firstTs} : a); }
-/* Ids still present in the pool index; attempts whose problem was deleted are
-   marked "removed" instead of linking to a dead page (DB-M-9). null = unknown
-   (index unavailable) -> treat every attempt as live, as before. */
-let LIVE_IDS = null;
+/* tsMillis / firstMs / LIVE_IDS / btOrphan: see _SCORE_JS (bt-shared.js). */
 let POOL_BY_TYPE = null;   // pool counts per problem type, for coverage
-/* An attempt whose problem is gone: its grade cannot be recomputed (the
-   verdict it was scored against no longer exists), so it is kept off every
-   aggregate. Unknown LIVE_IDS -> nothing is known to be orphaned. */
-function btOrphan(a) { return !!LIVE_IDS && !LIVE_IDS.has(a.problemId); }
 
 /* ---- fixed-slot open/closed state -------------------------------------- */
 function loadOpen() {
@@ -3867,14 +3983,18 @@ function saveOpen(set) {
 
 /* ---- the score bar chart: dot + interval on a clipped domain ------------
    The track is an AXIS (a 1px rule of uniform width on every row), not a
-   bar, so nothing invites a length comparison across rows. */
-function pct(score) {
+   bar, so nothing invites a length comparison across rows.
+   Named domPct, not pct: bt-shared.js already declares a pct() percent
+   formatter, and a second top-level `function pct` here silently shadowed it
+   app-wide on this page. Two page scripts sharing a global scope must not
+   collide -- see test_no_shared_function_name_is_shadowed. */
+function domPct(score) {
   return btClamp((score - DOM_LO) / (100 - DOM_LO) * 100, 0, 100);
 }
 function axisCapHtml(cols) {
   return '<div class="rcap"><span>' + cols + '</span><span class="ax">' +
     [DOM_LO, REVIEW_MIN, 100].map(v =>
-      `<span style="inset-inline-start:${pct(v)}%">${v}</span>`).join("") +
+      `<span style="inset-inline-start:${domPct(v)}%">${v}</span>`).join("") +
     '</span><span></span><span></span></div>';
 }
 function rowHtml(label, scores, opts) {
@@ -3883,17 +4003,17 @@ function rowHtml(label, scores, opts) {
   const c = meanCI(scores), m = Math.round(c.m);
   const showCI = n >= MIN_CI;
   let marks = [DOM_LO, 100].map(v =>
-    `<i class="rtick" style="inset-inline-start:${pct(v)}%"></i>`).join("") +
-    `<i class="rthr" style="inset-inline-start:${pct(REVIEW_MIN)}%"></i>`;
+    `<i class="rtick" style="inset-inline-start:${domPct(v)}%"></i>`).join("") +
+    `<i class="rthr" style="inset-inline-start:${domPct(REVIEW_MIN)}%"></i>`;
   if (showCI) {
-    const lo = pct(c.lo), hi = pct(c.hi);
+    const lo = domPct(c.lo), hi = domPct(c.hi);
     marks += `<i class="rci" style="inset-inline-start:${lo}%;` +
              `width:${Math.max(0, hi - lo)}%"></i>`;
   }
   marks += c.m < DOM_LO
     ? '<i class="runder">◂</i>'
     : `<i class="rdot${showCI ? "" : " thin"}" ` +
-      `style="inset-inline-start:${pct(c.m)}%"></i>`;
+      `style="inset-inline-start:${domPct(c.m)}%"></i>`;
   return `<div class="rrow${c.m < NEAR_MIN ? " low" : ""}">` +
     `<span class="rlbl">${label}</span>` +
     `<span class="rtrack" role="img" aria-label="ציון ${m}` +
@@ -3947,7 +4067,6 @@ function byType(list) {
     .sort((x, y) => y[1].length - x[1].length)
     .map(([t, scores]) => ({key: t, label: typeLabel(t), scores}));
 }
-function typeLabel(t) { return (TYPE_NAMES[t] && TYPE_NAMES[t][0]) || t; }
 function byDiff(list) {
   const by = {};
   for (const a of list) {
@@ -4309,58 +4428,15 @@ function weakArea(first, scen) {
 }
 
 /* ---- render ------------------------------------------------------------ */
-const OUTCOME_HE = {winner: "מנצחת", "accepted-alt": "חלופה קבילה",
-  dead: "אפשרות ללא סיכוי", suboptimal: "נחותה מהמיטבית"};
-/* one definition of "which scenario is this attempt", since a missing `kind`
-   means the record predates the lead trainer and is therefore a bidding one */
-function attKind(a) { return (a && a.kind) === "lead" ? "lead" : "bidding"; }
-function scenHe(a) { return attKind(a) === "lead" ? "הובלה" : "הכרזה"; }
-function unitOf(a) {
-  if (attKind(a) !== "lead") return "IMP";
-  return a.trainingMode === "IMP" ? "IMP" : "לקיחה";
-}
-function badge(m) {
-  const t = TYPE_NAMES[m.type], d = m.difficultyLevel;
-  // The scenario is NAMED on every row, not just implied by the type: the two
-  // taxonomies overlap in Hebrew (a lead problem's type reads "סלם" and
-  // "חוזה חלקי" just like a bidding one), so in a list that mixes both a bare
-  // type label leaves the reader unable to tell an auction from a lead.
-  const lbl = scenHe(m) + (t ? " · " + t[0] : "");
-  return `<span class="typebadge" style="margin:0">${lbl}</span> ` +
-    (d ? `<span class="stars" style="font-size:12px"><span class="on">` +
-      `${"★".repeat(d)}</span><span class="off">` +
-      `${"★".repeat(5 - d)}</span></span>` : "");
-}
-/* acceptedSet as an array, whatever the cache holds. Every stored doc carries
-   an array, but a cached attempt can hold a bare string (a raw
-   verdict.accepted that reached the cache), and `.join`/`.some` on it throws
-   and takes the whole dashboard down with it. Normalize at every read. */
-function accOf(a) {
-  const s = a && a.acceptedSet;
-  return Array.isArray(s) ? s : (s ? [s] : []);
-}
+/* OUTCOME_HE, attKind/scenHe/unitOf/accOf/badge and the attempt-row builder
+   itself now live in _SCORE_JS (bt-shared.js): the practice log renders the
+   same rows, and one builder means one esc() path over user-owned fields
+   (SEC-A-6) and one removed-problem branch (DB-M-9) for both pages.
+   A miss row IS that builder with severity turned on -- the outcome label and
+   the cost of the error are the subject of this list, which is exactly what
+   the chronological log leaves off. */
 function missRowHtml(m, compact) {
-  // attempt fields are user-owned free text -> esc() before innerHTML
-  // (SEC-A-6). A problem deleted from the pool becomes a non-link "removed"
-  // row instead of a dead retry link (DB-M-9).
-  const gone = LIVE_IDS && !LIVE_IDS.has(m.problemId);
-  const sc = btScoreOfAttempt(m);
-  const cost = m.gradedCost
-    ? ` · ${glossHtml("cost", "עלות")} ≈ ` +
-      `<span class="ltr">${(+m.gradedCost).toFixed(unitOf(m) === "IMP" ? 1 : 2)}</span> ${unitOf(m)}`
-    : "";
-  const acc = accOf(m);
-  const body = `${btScoreChipHtml(sc, true)}` +
-    `<span class="mtxt">${badge(m)} בחרת <b class="ltr">${esc(m.chosenCall)}</b>` +
-    (acc.length
-      ? ` — מיטבי <b class="ltr">${esc(acc.join(", "))}</b>` : "") +
-    (compact ? "" : ` · ${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}${cost}`) +
-    `</span>` +
-    (gone ? '<span class="go muted">בעיה שהוסרה</span>'
-          : '<span class="go">←</span>');
-  return gone
-    ? `<div class="mrow">${body}</div>`
-    : `<a class="mrow" href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}">${body}</a>`;
+  return attemptRowHtml(m, {cost: !compact, outcome: !compact});
 }
 /* ---- which misses get a row --------------------------------------------
    Both miss lists cover BOTH scenarios, with their slots DEALT OUT between
@@ -4539,7 +4615,11 @@ function render(attempts) {
   const tocheck = winRows.length
     ? `<div class="card"><b>${nToCheck(winRows.length)}</b>` +
       '<span class="dsum" style="margin-inline-start:8px">מתוך הבעיות האחרונות</span>' +
-      winRows.map(m => missRowHtml(m, true)).join("") + '</div>'
+      winRows.map(m => missRowHtml(m, true)).join("") +
+      // the card already admits it shows a subset; this is where the reader
+      // asks "and the rest?", so it is where the log is offered
+      '<div class="rmore"><a href="history.html">כל התרגולים לפי תאריך &larr;</a>' +
+      '</div></div>'
     : "";
 
   const allMiss = missesOf(first);
@@ -4559,8 +4639,14 @@ function render(attempts) {
   ].filter(Boolean);
   const missNote = parts.length
     ? `<div class="rmore" style="margin-top:0">${parts.join(" · ")}</div>` : "";
+  // This list and the practice log hold the SAME rows under two different
+  // questions -- "what should I fix" (ordered by severity, capped) vs "what did
+  // I do" (ordered by time, complete). Naming the other one is what stops them
+  // reading as one list shipped twice.
+  const histLink = '<a href="history.html">יומן התרגול — אותן החלטות לפי תאריך &larr;</a>';
   const missList = missRows.length
-    ? missNote + missRows.map(m => missRowHtml(m, false)).join("")
+    ? missNote + missRows.map(m => missRowHtml(m, false)).join("") +
+      `<div class="rmore">${histLink}</div>`
     : "";
 
   const patBody = pats.length
@@ -4671,6 +4757,434 @@ else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 """
 
 
+_HISTORY_CSS = """
+/* ===== practice log (history.html) =====
+   Deliberately NOT appended to dashboard.css: that constant is guarded against
+   --accent fills and `direction: ltr` (they belong to the chart vocabulary
+   there), and the dashboard would download log-only rules it never uses.
+   The filter controls add no CSS at all -- they reuse .segctl from app.css,
+   which is already accent-styled and already in the contrast test's pair list.
+   The felt-tone scoping below mirrors #dash's (UI-1): everything on this page
+   outside a .card rides on the green felt, where the card --muted is
+   unreadable. */
+#hist { color: var(--on-felt); }
+#hist > .footnote, #hist > .dnote { color: var(--on-felt-muted); }
+
+/* ---- summary + filters ---- */
+.hsum { font-size: 13px; color: var(--on-felt); margin: 2px 0 10px;
+        display: flex; flex-wrap: wrap; gap: 3px 10px; align-items: baseline; }
+.hsum b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.hsum .hsnote { color: var(--on-felt-muted); }
+.hfilt { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 4px; }
+/* 44px targets: .segctl's own padding lands at ~37px, under the minimum */
+.hfilt .segctl button { min-height: 44px; }
+
+/* ---- day heading ----
+   A real <h2>, because heading navigation is how a screen-reader user moves
+   through hundreds of rows. Sticky so the day a row belongs to is always on
+   screen; the felt gradient is `fixed`, so a solid --felt-deep panel is the
+   one background that matches under the heading while it is stuck. */
+.dday { position: sticky; top: 0; z-index: 5;
+        margin: 16px 0 6px; padding: 6px 2px;
+        font-size: 14px; font-weight: 700; color: var(--on-felt);
+        background: var(--felt-deep); border-radius: 8px; }
+.dday .ddsub { font-weight: 400; font-size: 12px;
+               color: var(--on-felt-muted); }
+.dday:focus-visible { outline: 2px solid var(--on-felt); outline-offset: 2px; }
+
+/* ---- one log row ----
+   A grid, not .mrow's flex: over hundreds of rows flex leaves nothing aligned,
+   so no column can be scanned. RTL reading order is score, time, what
+   happened, then the affordance. The last column is `auto` so a removed
+   problem's label has room to grow. */
+.hrow { display: grid; grid-template-columns: 2.6em 3.2em 1fr auto; gap: 9px;
+        align-items: center; min-height: 44px; padding: 7px 0;
+        border-top: 1px solid var(--line); color: inherit;
+        text-decoration: none; }
+.hrow:first-child { border-top: 0; }
+.hrow .mtxt { font-size: 13px; min-width: 0; line-height: 1.45; }
+.hrow .rtime { font-size: 12px; color: var(--muted);
+               font-variant-numeric: tabular-nums; }
+.hrow .go { color: var(--accent); font-weight: 700; white-space: nowrap; }
+.hrow .go.muted { color: var(--muted); font-size: 11px; font-weight: 400; }
+.hrow .hmark { color: var(--muted); }
+/* a reconstructed or missing grade must not wear the chrome of a measured one */
+.hrow .scorechip.noscore { background: transparent; color: var(--muted);
+  border: 1px solid var(--line); font-size: 10px; font-weight: 600;
+  min-width: 36px; padding: 0 4px; }
+.hcard { padding: 6px 14px; }
+.hmore { margin: 12px 0 2px; }
+/* the paging control: a card-toned button, so the page's one gold CTA stays
+   "practise new problems" */
+.morebtn { display: block; width: 100%; min-height: 48px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 700; padding: 12px;
+  border-radius: 12px; background: var(--card); color: var(--accent);
+  border: 1px solid var(--line); }
+"""
+
+_HISTORY_JS = r"""
+/* ===== practice log =====
+   The dashboard answers "how am I doing"; this page answers "what did I do".
+   Design decisions and the reviews behind them: docs/history_feature_plan.md.
+   The attempt vocabulary (actMs/attKind/badge/attemptRowHtml/...) comes from
+   bt-shared.js, so a row here and a row in the dashboard's miss list are built
+   by one function. */
+const CHUNK = 100;              // rows per page, extended to a day boundary
+const KIND_KEY = "bt_hist_kind";   // the scenario persists; "misses" never does
+const MONTH_HE = ["בינואר", "בפברואר", "במרץ", "באפריל", "במאי", "ביוני",
+  "ביולי", "באוגוסט", "בספטמבר", "באוקטובר", "בנובמבר", "בדצמבר"];
+const WDAY_HE = ["יום ראשון", "יום שני", "יום שלישי", "יום רביעי",
+  "יום חמישי", "יום שישי", "שבת"];
+/* Module state, NOT re-derived per render: the background sync fires a
+   re-render, and a re-render that recomputed these would throw away the
+   filter the user set and page them back to the first chunk. */
+let FILTER = {kind: "all", miss: false};
+let LIMIT = CHUNK;
+let SYNCED = false;      // has the authoritative sync landed at least once?
+let ATTEMPTS = [];       // last list rendered, for re-render on demand
+let PENDING = null;      // ids whose write has not reached the server
+
+/* ---- local day keys and Hebrew labels ----------------------------------
+   Local, never UTC: toISOString() would bucket everything answered between
+   00:00 and 03:00 Israel time into the previous day. And day arithmetic is
+   done on the KEYS, never on milliseconds -- Israel observes DST, so a day is
+   sometimes 23 or 25 hours long and `- 86400000` lands in the wrong one. */
+function dayKey(ms) {
+  const d = new Date(ms);
+  return d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+}
+function daysAgoKey(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return dayKey(d.getTime());
+}
+/* Hand-formatted, not toLocaleTimeString(): the device locale decides that
+   one, so an en-US phone would print "2:20 PM" -- English in a Hebrew UI, in
+   a string the localisation test cannot see because it scans static markup. */
+function hhmm(ms) {
+  const d = new Date(ms);
+  return String(d.getHours()).padStart(2, "0") + ":" +
+         String(d.getMinutes()).padStart(2, "0");
+}
+function dateHe(ms) {
+  const d = new Date(ms), now = new Date();
+  return d.getDate() + " " + MONTH_HE[d.getMonth()] +
+    (d.getFullYear() === now.getFullYear() ? "" : " " + d.getFullYear());
+}
+function dayLabel(key, ms) {
+  if (!key) return "ללא תאריך";
+  if (key === dayKey(Date.now())) return "היום";
+  if (key === daysAgoKey(1)) return "אתמול";
+  for (let i = 2; i <= 6; i++)
+    if (key === daysAgoKey(i)) return WDAY_HE[new Date(ms).getDay()];
+  return dateHe(ms);
+}
+
+/* ---- ordering and grouping --------------------------------------------- */
+/* Ordered by LAST ACTIVITY, not by first answer: a session spent re-answering
+   old problems bumps no firstTs at all, so a firstMs order would render that
+   whole session invisible -- the log failing its own purpose.
+   The problemId tiebreak is not cosmetic: Object.values(ATTEMPTS) is in map
+   insertion order, which changes across a full reconcile, and a queued row's
+   ts is second-granular, so without it two rows sharing a key can swap places
+   between renders and paging can show one twice or skip it. */
+function sortRows(list) {
+  return [...list].sort((a, b) => actMs(b) - actMs(a) ||
+    (String(a.problemId) < String(b.problemId) ? 1 : -1));
+}
+function filterRows(list) {
+  return list.filter(a =>
+    (FILTER.kind === "all" || attKind(a) === FILTER.kind) &&
+    (!FILTER.miss || btScoreOfAttempt(a) < REVIEW_MIN));
+}
+/* Undated rows (docs old enough to predate `ts`) carry key 0, so they sort
+   last and land in their own trailing group -- never silently dated today. */
+function groupByDay(sorted) {
+  const out = [], by = new Map();
+  for (const a of sorted) {
+    const ms = actMs(a), key = ms ? dayKey(ms) : 0;
+    if (!by.has(key)) { by.set(key, {key, ms, rows: []}); out.push(by.get(key)); }
+    by.get(key).rows.push(a);
+  }
+  return out;
+}
+/* Whole days only: a fixed row cut would leave a day heading claiming 6
+   problems above 2 visible rows. */
+function visibleGroups(groups, limit) {
+  const out = [];
+  let n = 0;
+  for (const g of groups) {
+    if (n >= limit && out.length) break;
+    out.push(g);
+    n += g.rows.length;
+  }
+  return out;
+}
+
+/* ---- one row ----------------------------------------------------------- */
+/* The chip is built here rather than by btScoreChipHtml because (a) a
+   reconstructed or absent grade must not wear the chrome of a measured one,
+   and (b) btScoreChipHtml carries data-gloss, and a tappable gloss target
+   inside a row <a> would fire navigation and the glossary card at once. */
+function chipHtml(a) {
+  if (btScoreIsFallback(a))
+    return '<span class="scorechip sm noscore">ללא ציון</span>';
+  const sc = btScoreOfAttempt(a), approx = !btHasStoredScore(a);
+  return '<span class="scorechip sm tone-' + BAND_TONE[btBandOf(sc)] + '">' +
+    (approx ? "~" : "") + sc + '</span>';
+}
+function rowLabel(a, gone) {
+  const d = Math.min(5, Math.max(0, (+a.difficultyLevel || 0) | 0));
+  const ms = actMs(a);
+  return [ms ? hhmm(ms) : "", scenHe(a), a.type ? typeLabel(a.type) : "",
+          d ? "קושי " + d + " מתוך 5" : "", "בחרת " + a.chosenCall,
+          btScoreIsFallback(a) ? "ללא ציון" : "ציון " + btScoreOfAttempt(a),
+          gone ? "הבעיה הוסרה מהמאגר" : "תרגל שוב"]
+    .filter(Boolean).join(", ");
+}
+function logRowHtml(a, dkey) {
+  const ms = actMs(a), fms = firstMs(a);
+  // A replayed row sits in the day it was LAST answered while its grade is
+  // still the first attempt's, so when those fall on different days the row
+  // says when it was first solved -- otherwise the score reads as today's work.
+  const marks = [];
+  if (+a.attemptCount > 1 && fms && dayKey(fms) !== dkey)
+    marks.push('נפתרה לראשונה ב-<span class="ltr">' + dateHe(fms) + '</span>');
+  if (PENDING && PENDING.has(a.problemId)) marks.push("טרם נשמר בענן");
+  const mark = marks.length
+    ? ' · <span class="hmark">' + marks.join(" · ") + '</span>' : "";
+  return attemptRowHtml(a, {cls: "hrow", chip: chipHtml(a), chose: false,
+    time: ms ? hhmm(ms) : "", replays: true, mark: mark,
+    label: rowLabel(a, btOrphan(a))});
+}
+function dayHtml(g) {
+  const miss = g.rows.filter(a => btScoreOfAttempt(a) < REVIEW_MIN).length;
+  const times = g.rows.map(actMs).filter(Boolean);
+  // No day MEAN, by ruling: a handful of problems mixes three scoring scales
+  // (bidding, lead MP, lead IMP) and possibly two calibrations, and the app
+  // refuses to print even an interval below 12 decisions. The time span is the
+  // honest substitute for the session boundary we decline to guess.
+  const lo = times.length ? hhmm(Math.min(...times)) : "";
+  const hi = times.length ? hhmm(Math.max(...times)) : "";
+  const span = lo ? '<span class="ltr">' + (lo === hi ? lo : lo + "–" + hi) +
+                    '</span>' : "";
+  const bits = [nProblems(g.rows.length), miss ? miss + " לשיפור" : "", span]
+    .filter(Boolean);
+  return '<h2 class="dday" tabindex="-1" data-day="' + g.key + '">' +
+    dayLabel(g.key, g.ms) + ' <span class="ddsub">· ' + bits.join(" · ") +
+    '</span></h2>' +
+    '<div class="card hcard">' +
+    g.rows.map(a => logRowHtml(a, g.key)).join("") + '</div>';
+}
+
+/* ---- page ------------------------------------------------------------- */
+function firstAttempts(list) {
+  // mirrors the dashboard: a second answer to a problem whose verdict you have
+  // already seen is recall, not judgment. In production every doc carries
+  // true, but the preview harness fabricates duplicates.
+  return list.filter(a => a.isFirstAttempt !== false);
+}
+function summaryHtml(all, shown) {
+  const times = all.map(actMs).filter(Boolean);
+  const span = times.length
+    ? "מ-" + dateHe(Math.min(...times)) + " עד " +
+      (dayKey(Math.max(...times)) === dayKey(Date.now())
+        ? "היום" : dateHe(Math.max(...times)))
+    : "";
+  const narrowed = shown.length !== all.length;
+  const what = [FILTER.kind === "bidding" ? "הכרזה בלבד" : "",
+                FILTER.kind === "lead" ? "הובלה בלבד" : "",
+                FILTER.miss ? "רק מתחת ל-" + REVIEW_MIN : ""].filter(Boolean);
+  return '<div class="hsum">' +
+    (narrowed
+      ? '<span><b class="ltr">' + shown.length + '</b> מתוך ' +
+        nProblems(all.length) + '</span>'
+      : '<span>' + nProblems(all.length) + '</span>') +
+    (what.length ? '<span class="hsnote">' + what.join(" · ") + '</span>' +
+      '<button type="button" class="alllink" id="clearf">הצג את הכל</button>' : "") +
+    (span ? '<span class="hsnote">' + span + '</span>' : "") +
+    '</div>';
+}
+function filtersHtml() {
+  const seg = (id, opts) => '<span class="segctl" role="group" aria-label="' +
+    id + '">' + opts.map(([v, lbl, on]) =>
+      '<button type="button" data-' + (id === "תרחיש" ? "kind" : "miss") +
+      '="' + v + '" aria-pressed="' + (on ? "true" : "false") + '">' + lbl +
+      '</button>').join("") + '</span>';
+  return '<div class="hfilt">' +
+    seg("תרחיש", [["all", "הכל", FILTER.kind === "all"],
+                  ["bidding", "הכרזה", FILTER.kind === "bidding"],
+                  ["lead", "הובלה", FILTER.kind === "lead"]]) +
+    seg("סינון", [["1", "רק לשיפור", FILTER.miss]]) +
+    '</div>';
+}
+function noteHtml(all) {
+  const legacyN = all.filter(a => !btHasStoredScore(a)).length;
+  const pendingN = (window.BT.pendingCount && window.BT.pendingCount()) || 0;
+  const goneN = all.filter(a => btOrphan(a)).length;
+  return '<p class="footnote">היומן מציג שורה אחת לכל בעיה שפתרת, לפי הפעם ' +
+    'האחרונה שעסקת בה. חזרה על בעיה מסומנת בשורה שלה ואינה יוצרת שורה חדשה, ' +
+    'והציון נשאר של הפעם הראשונה — תשובה שנייה לבעיה שראית את פתרונה היא ' +
+    'זכירה ולא שיפוט.' +
+    (goneN ? ' ' + nProblems(goneN) + ' הוסרו מהמאגר: הן נשארות ביומן אך לא ' +
+      'ניתן לתרגל אותן שוב.' : "") +
+    (legacyN ? ' ' + nProblems(legacyN) + ' נפתרו לפני עדכון שיטת הציון — ' +
+      'הציון שלהן שוחזר בקירוב, מסומן ב-~ ומחמיר בכמה נקודות. בחלקן נשמרה רק ' +
+      'העובדה שטעית, בלי מידת הטעות, והן מסומנות "ללא ציון".' : "") +
+    (pendingN ? ' <b>' + nDecisions(pendingN) + '</b> טרם נשמרו לענן; הזמן ' +
+      'שלהן נלקח משעון המכשיר.' : "") +
+    ' ציון של בעיה יכול להתעדכן בין ביקורים אם המאגר חושב מחדש את הפתרון ' +
+    'שלה — התאריך והבחירה שלך לא משתנים.</p>';
+}
+function render(list) {
+  ATTEMPTS = list;
+  const all = firstAttempts(list);
+  const el = document.getElementById("hist");
+  if (!all.length) {
+    // NOT "no history": allAttempts() serves a localStorage cache that is
+    // empty on a new device, and telling a user with 400 answers that they
+    // have none is the worst possible first impression on this page.
+    el.innerHTML = SYNCED
+      ? '<div class="card state"><div class="em">עוד לא פתרת בעיות</div>' +
+        '<div class="muted">היומן יתמלא אחרי התרגול הראשון.</div>' +
+        '<a class="big" href="index.html">התחל תרגול &larr;</a></div>'
+      : '<div class="card state"><div class="em">טוען את היומן שלך&hellip;</div>' +
+        '<div class="muted">הנתונים מסתנכרנים מהענן.</div></div>';
+    return;
+  }
+  const rows = sortRows(filterRows(all));
+  const groups = groupByDay(rows);
+  const vis = rows.length ? visibleGroups(groups, LIMIT) : [];
+  const shownN = vis.reduce((s, g) => s + g.rows.length, 0);
+  const rest = rows.length - shownN;
+  el.innerHTML = summaryHtml(all, rows) + filtersHtml() +
+    '<div id="hlist">' +
+    (rows.length
+      ? vis.map(dayHtml).join("")
+      : '<div class="card state"><div class="em">אין תרגולים בבחירה הזו</div>' +
+        '<div class="muted">שנה את הסינון כדי לראות שורות נוספות.</div></div>') +
+    '</div>' +
+    '<div class="hmore" id="hmore">' + moreHtml(rest) + '</div>' +
+    noteHtml(all);
+}
+/* Paging is a secondary control, so it must not wear the gold CTA: on this page
+   the one gold button is "practise new problems", which is what the reader
+   should do when they reach the end of their own history. */
+function moreHtml(rest) {
+  return rest > 0
+    ? '<button type="button" class="morebtn" id="moreb">הצג עוד ' +
+      Math.min(CHUNK, rest) + ' <span class="ltr">(נותרו ' + rest + ')</span>' +
+      '</button>'
+    : '<a class="big" href="index.html">תרגל ' + SESSION_SIZE +
+      ' בעיות חדשות &larr;</a>';
+}
+/* Appends, rather than re-rendering: the reader's scroll position is the one
+   piece of state a "show more" button must not disturb. */
+function showMore() {
+  const all = firstAttempts(ATTEMPTS);
+  const rows = sortRows(filterRows(all));
+  const groups = groupByDay(rows);
+  const before = visibleGroups(groups, LIMIT);
+  LIMIT += CHUNK;
+  const after = visibleGroups(groups, LIMIT);
+  const added = after.slice(before.length);
+  document.getElementById("hlist")
+    .insertAdjacentHTML("beforeend", added.map(dayHtml).join(""));
+  markRemoved();
+  const shownN = after.reduce((s, g) => s + g.rows.length, 0);
+  document.getElementById("hmore").innerHTML = moreHtml(rows.length - shownN);
+  // a keyboard or screen-reader user must land on the new rows, not be left
+  // at the top of a page that silently grew
+  const head = added.length
+    ? document.querySelector('#hlist h2[data-day="' + added[0].key + '"]') : null;
+  if (head) head.focus();
+}
+function setFilter(patch) {
+  Object.assign(FILTER, patch);
+  if ("kind" in patch) {
+    try { localStorage.setItem(KIND_KEY, FILTER.kind); } catch (e) { /* */ }
+  }
+  LIMIT = CHUNK;             // a new selection starts at the first chunk
+  render(ATTEMPTS);
+  markRemoved();
+}
+/* Patch the rows the pool index turned out not to cover, instead of
+   re-rendering: the index arrives after first paint (see init), and a second
+   full render would move rows under the reader's finger. */
+function markRemoved() {
+  if (!LIVE_IDS) return;
+  document.querySelectorAll("#hlist a.hrow[data-pid]").forEach(a => {
+    if (LIVE_IDS.has(a.dataset.pid)) return;
+    const div = document.createElement("div");
+    div.className = a.className;
+    div.dataset.pid = a.dataset.pid;
+    div.innerHTML = a.innerHTML;
+    const go = div.querySelector(".go");
+    if (go) {
+      go.className = "go muted";
+      go.removeAttribute("aria-hidden");
+      go.textContent = "בעיה שהוסרה";
+    }
+    a.replaceWith(div);
+  });
+}
+async function init() {
+  const el = document.getElementById("hist");
+  try { FILTER.kind = localStorage.getItem(KIND_KEY) || "all"; }
+  catch (e) { /* private mode */ }
+  if (["all", "bidding", "lead"].indexOf(FILTER.kind) < 0) FILTER.kind = "all";
+  // Deep links: the scenario is shareable, the miss filter is not persisted but
+  // IS linkable, so the dashboard can point at exactly what it is talking about.
+  const q = new URLSearchParams(location.search);
+  const qk = q.get("kind");
+  if (qk === "bidding" || qk === "lead" || qk === "all") FILTER.kind = qk;
+  if (q.get("f") === "miss") FILTER.miss = true;
+  try { PENDING = new Set((window.BT.pendingIds && window.BT.pendingIds()) || []); }
+  catch (e) { PENDING = null; }
+  // ONE delegated handler, bound once, on the container render() replaces the
+  // contents of. Binding inside render() would add a listener per render and
+  // paging would advance twice per tap.
+  el.addEventListener("click", ev => {
+    const b = ev.target.closest("button");
+    if (!b || !el.contains(b)) return;
+    if (b.dataset.kind) setFilter({kind: b.dataset.kind});
+    else if (b.dataset.miss) setFilter({miss: !FILTER.miss});
+    else if (b.id === "clearf") setFilter({kind: "all", miss: false});
+    else if (b.id === "moreb") showMore();
+  });
+  render(await window.BT.allAttempts());
+  // Belt and braces for the empty state: bt-attempts-synced comes from a
+  // .finally, so it fires even on a failed sync -- but if it somehow never
+  // arrives, a user with no rows would sit on "loading your log" forever. This
+  // only ever flips the ZERO-row case (any cached row renders immediately), and
+  // a later sync still corrects it.
+  setTimeout(() => { if (!SYNCED) { SYNCED = true; render(ATTEMPTS); } }, 8000);
+  // The pool index costs a server-first read and a network round trip, so it
+  // is NOT on the path to first paint: every row is tappable until we learn
+  // otherwise, and the few removed ones are then patched in place. A failure
+  // leaves LIVE_IDS null, i.e. every attempt treated as live, as before.
+  const ric = window.requestIdleCallback || ((f) => setTimeout(f, 1));
+  ric(() => window.BT.fetchIndex()
+    .then(idx => { LIVE_IDS = new Set((idx.problems || []).map(p => p.id));
+                   markRemoved(); })
+    .catch(() => { LIVE_IDS = null; }));
+}
+// The authoritative sync lands after first paint (T4). Re-render from module
+// state so it can neither reset the filter nor page the reader back to the top
+// of a list they had already extended.
+window.addEventListener("bt-attempts-synced", async () => {
+  SYNCED = true;
+  try {
+    PENDING = new Set((window.BT.pendingIds && window.BT.pendingIds()) || []);
+    render(await window.BT.allAttempts());
+    markRemoved();
+  } catch (e) { /* keep what is on screen */ }
+});
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
+"""
+
+
 # The dashboard's own CSS/JS ship as external files too, for the same reason
 # the shared pair does (T2/PERF-F-4): the redesign grew this page's inline
 # blobs past 50 KB, which the browser had to re-download on every visit. Same
@@ -4678,6 +5192,8 @@ else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
 # a stale-cached script.
 _DASH_CSS_HREF = f"dashboard.css?v={_asset_ver(_DASHBOARD_CSS)}"
 _DASH_SRC = f"dashboard.js?v={_asset_ver(_DASHBOARD_JS)}"
+_HIST_CSS_HREF = f"history.css?v={_asset_ver(_HISTORY_CSS)}"
+_HIST_SRC = f"history.js?v={_asset_ver(_HISTORY_JS)}"
 
 
 def _dashboard_html() -> str:
@@ -4691,12 +5207,41 @@ def _dashboard_html() -> str:
         + _head_preloads() +
         '\n<script type="module" src="bt-firebase.js"></script></head>'
         '<body data-nav="progress">\n<main id="main" tabindex="-1">\n'
+        # the topbar slot used to repeat the page title, which the <h1> directly
+        # below already carries; it holds the practice-log link instead, so the
+        # log is one tap from the top of the personal area with no new chrome
         '<div class="topbar"><a href="index.html">&rarr; דף הבית</a>'
-        '<span class="muted">ההתקדמות שלי</span></div>\n'
+        '<a href="history.html">יומן התרגול &larr;</a></div>\n'
         '<h1>ההתקדמות שלי</h1>\n<div id="dash" class="muted">טוען&hellip;</div>\n'
         + _taxonomy_script() + '\n<script src="'
         + _SHARED_SRC + '"></script>\n<script src="'
         + _DASH_SRC + '"></script>\n</body></html>'
+    )
+
+
+def _history_html() -> str:
+    """The practice log: every problem answered, newest activity first.
+
+    No `data-nav`: the bottom nav holds practice + progress, and stamping
+    `progress` here would put aria-current="page" on a link to another URL.
+    """
+    return (
+        '<!DOCTYPE html>\n<html lang="he" dir="rtl"><head><meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        + _theme_head_script() + '\n'
+        '<title>יומן התרגול</title>\n'
+        '<link rel="stylesheet" href="' + _CSS_HREF + '">\n'
+        '<link rel="stylesheet" href="' + _HIST_CSS_HREF + '">\n'
+        + _head_preloads() +
+        '\n<script type="module" src="bt-firebase.js"></script></head>'
+        '<body>\n<main id="main" tabindex="-1">\n'
+        '<div class="topbar"><a href="dashboard.html">&rarr; ההתקדמות שלי</a>'
+        '<a href="index.html">תרגול &larr;</a></div>\n'
+        '<h1>יומן התרגול</h1>\n'
+        '<div id="hist" class="muted">טוען&hellip;</div>\n'
+        + _taxonomy_script() + '\n<script src="'
+        + _SHARED_SRC + '"></script>\n<script src="'
+        + _HIST_SRC + '"></script>\n</body></html>'
     )
 
 
@@ -4712,6 +5257,7 @@ def write_app(out_dir: str | Path) -> None:
     (out / "p.html").write_text(_problem_html(), encoding="utf-8")
     (out / "lead.html").write_text(_lead_html(), encoding="utf-8")
     (out / "dashboard.html").write_text(_dashboard_html(), encoding="utf-8")
+    (out / "history.html").write_text(_history_html(), encoding="utf-8")
     # Emit the shared CSS/JS as external files (T2/PERF-F-4): every page links
     # them instead of inlining ~73 KB, so the browser caches them once and each
     # page's HTML shrinks to a few KB. The Python constants stay the source of
@@ -4728,6 +5274,8 @@ def write_app(out_dir: str | Path) -> None:
     (out / "bt-shared.js").write_text(_SHARED_JS, encoding="utf-8")
     (out / "dashboard.css").write_text(_DASHBOARD_CSS, encoding="utf-8")
     (out / "dashboard.js").write_text(_DASHBOARD_JS, encoding="utf-8")
+    (out / "history.css").write_text(_HISTORY_CSS, encoding="utf-8")
+    (out / "history.js").write_text(_HISTORY_JS, encoding="utf-8")
     web = resources.files("bridge_trainer") / "web"
     for name in _ASSET_FILES:
         (out / name).write_text((web / name).read_text(encoding="utf-8"),

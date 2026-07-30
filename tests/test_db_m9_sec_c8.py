@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from bridge_trainer.app.webapp import _DASHBOARD_JS, _SHARED_JS
+from bridge_trainer.app.webapp import (_DASHBOARD_JS, _HISTORY_JS, _SCORE_JS,
+                                       _SHARED_JS)
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
                                 reason="node not available")
@@ -44,30 +45,46 @@ def test_reanswer_bumps_ts_not_just_lastTs():
 
 def test_dashboard_orders_by_firstTs_not_bumped_ts():
     # ordering uses firstMs (firstTs || ts), so a re-answer's bumped ts can't
-    # reshuffle the streak/trend/recent lists
-    assert "function firstMs(a)" in _DASHBOARD_JS
-    assert "a.firstTs" in _DASHBOARD_JS
+    # reshuffle the trend/recent lists. firstMs itself now lives in the shared
+    # block (the practice log needs the same reading of the timestamps).
+    assert "function firstMs(a)" in _SCORE_JS
+    assert "a.firstTs" in _SCORE_JS
     assert "sort((a, b) => firstMs(b) - firstMs(a))" in _DASHBOARD_JS
     assert "sort((a, b) => firstMs(a) - firstMs(b))" in _DASHBOARD_JS
+    # ...and the log, which is ordered by LAST activity, still reads firstTs for
+    # the first-solved date rather than conflating the two
+    assert "actMs(b) - actMs(a)" in _HISTORY_JS
+    assert "function actMs(a)" in _SCORE_JS
 
 
 def test_dashboard_marks_orphan_attempts():
-    # deleted-problem attempts render a non-link "removed" row using LIVE_IDS
-    assert "let LIVE_IDS = null;" in _DASHBOARD_JS
+    # deleted-problem attempts render a non-link "removed" row using LIVE_IDS.
+    # The state and the row branch are shared with the practice log; each page
+    # fills LIVE_IDS from the pool index itself.
+    assert "let LIVE_IDS = null;" in _SCORE_JS
+    assert "בעיה שהוסרה" in _SCORE_JS
     assert "LIVE_IDS = new Set(" in _DASHBOARD_JS
-    assert "בעיה שהוסרה" in _DASHBOARD_JS
     assert "await window.BT.fetchIndex()" in _DASHBOARD_JS
+    assert "LIVE_IDS = new Set(" in _HISTORY_JS
+    assert "window.BT.fetchIndex()" in _HISTORY_JS
 
 
 # ---- SEC-A-6: esc() on user-owned attempt fields in the dashboard -----------
 def test_dashboard_escapes_attempt_fields():
-    # every miss row on the page is built by this one function, so escaping it
-    # here covers both the tier-1 "3 to revisit" card and the full list
-    seg = _DASHBOARD_JS[_DASHBOARD_JS.index("function missRowHtml"):
-                        _DASHBOARD_JS.index("function section(")]
+    # EVERY attempt row in the app -- the dashboard's "3 to revisit" card, its
+    # full miss list and the practice log's chronological rows -- is built by
+    # this one function, so escaping it here covers all of them. Sliced tightly
+    # so the assertions cannot be satisfied by unrelated code drifting into the
+    # range.
+    seg = _SCORE_JS[_SCORE_JS.index("function attemptRowHtml"):
+                    _SCORE_JS.index("function badge(")]
     assert "esc(m.chosenCall)" in seg
     assert "esc(acc.join" in seg          # accOf()-normalized
     assert "esc(OUTCOME_HE[m.outcomeClass]" in seg
+    assert "esc(m.problemId)" in seg
+    # and both pages go through it rather than hand-building a row
+    assert "attemptRowHtml(m, {cost: !compact" in _DASHBOARD_JS
+    assert "attemptRowHtml(a, {cls: \"hrow\"" in _HISTORY_JS
 
 
 # ---- SEC-C-8: sign-out clears the per-user localStorage caches --------------
@@ -114,7 +131,7 @@ def test_hero_excludes_attempts_on_deleted_problems():
 
 
 def test_orphan_predicate_is_null_safe():
-    assert "function btOrphan(a) { return !!LIVE_IDS" in _DASHBOARD_JS
+    assert "function btOrphan(a) { return !!LIVE_IDS" in _SCORE_JS
 
 
 def test_deleted_problem_count_is_shown_not_hidden():
@@ -122,8 +139,8 @@ def test_deleted_problem_count_is_shown_not_hidden():
                          _DASHBOARD_JS.index("function mixHtml(")]
     assert "goneN" in hero
     assert "שהוסרו מהמאגר" in hero
-    # ... and their rows are still on the page, marked
-    assert "בעיה שהוסרה" in _DASHBOARD_JS
+    # ... and their rows are still on the page, marked (shared row builder)
+    assert "בעיה שהוסרה" in _SCORE_JS
 
 
 # ---- stale grades on the dashboard (user report) -----------------------------
@@ -168,9 +185,9 @@ def test_unsynced_answers_are_declared_not_presented_as_settled():
 
 
 def test_accepted_set_is_normalized_at_every_read():
-    js = _DASHBOARD_JS
-    assert "function accOf(a) {" in js
-    assert "Array.isArray(s) ? s : (s ? [s] : [])" in js
-    # no consumer reads the field raw any more
-    assert "a.acceptedSet || []" not in js
-    assert "esc(m.acceptedSet" not in js
+    assert "function accOf(a) {" in _SCORE_JS
+    assert "Array.isArray(s) ? s : (s ? [s] : [])" in _SCORE_JS
+    # no consumer reads the field raw any more, on either page
+    for js in (_SCORE_JS, _DASHBOARD_JS, _HISTORY_JS):
+        assert "a.acceptedSet || []" not in js
+        assert "esc(m.acceptedSet" not in js

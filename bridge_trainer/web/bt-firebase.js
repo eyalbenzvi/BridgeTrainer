@@ -441,6 +441,9 @@ const BT = {
   // cannot repair their grades and no sync can refresh them — the dashboard
   // says so instead of presenting their snapshot as settled.
   pendingCount: () => Object.keys(PENDING).length,
+  // The same set, by id, so a per-row view (the practice log) can mark the
+  // exact rows the server has never seen instead of only counting them.
+  pendingIds: () => Object.keys(PENDING),
   gradeBidding, gradeLead,
   signIn: () => doSignIn(),
   signOut: () => signOut(auth).catch((e) => console.error(e)),

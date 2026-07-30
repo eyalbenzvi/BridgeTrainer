@@ -17,8 +17,9 @@ import tempfile
 import pytest
 
 from bridge_trainer.app.webapp import (_CSS, _SCORE_JS, _SHARED_JS,
-                                       _DASHBOARD_JS,
-                                       _dashboard_html, _index_html,
+                                       _DASHBOARD_JS, _HISTORY_JS,
+                                       _dashboard_html, _history_html,
+                                       _index_html,
                                        _lead_html, _problem_html)
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
@@ -255,9 +256,10 @@ def test_band_boundaries():
 
 def test_pages_wire_the_score():
     p, l, d, i = _problem_html(), _lead_html(), _dashboard_html(), _index_html()
+    h = _history_html()
     assert "btScoreBidding(P, chosen)" in p and "scoreline" in p
     assert "btScoreLead(P, chosen, MODE)" in l and "scoreline" in l
-    for page in (p, l, d, i):
+    for page in (p, l, d, i, h):
         # the shared score module + chip styling now ship as external assets
         # (T2); every page must link them.
         assert 'src="bt-shared.js?v=' in page
@@ -274,6 +276,10 @@ def test_pages_wire_the_score():
     # links it and the aggregation itself lives in _DASHBOARD_JS.
     assert 'src="dashboard.js?v=' in d
     assert "meanCI" in _DASHBOARD_JS and "ציון ממוצע" in _DASHBOARD_JS
+    # the practice log shows the same stored score per row, from the same
+    # module, and ships its script the same way
+    assert 'src="history.js?v=' in h
+    assert "btScoreOfAttempt" in _HISTORY_JS
 
 
 def test_attempt_records_carry_score():

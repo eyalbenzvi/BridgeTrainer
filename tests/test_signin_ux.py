@@ -12,7 +12,8 @@ from importlib import resources
 import pytest
 
 from bridge_trainer.app.webapp import (_SHARED_JS, _dashboard_html,
-                                       _index_html, _lead_html, _problem_html)
+                                       _history_html, _index_html,
+                                       _lead_html, _problem_html)
 
 
 def _fb() -> str:
@@ -50,7 +51,7 @@ def test_settings_signin_onclick_swallows_rejection():
 
 
 @pytest.mark.parametrize("html_fn", [_index_html, _problem_html, _lead_html,
-                                     _dashboard_html])
+                                     _dashboard_html, _history_html])
 def test_save_failed_toast_wired_on_every_page(html_fn):
     # every page links the shared bundle that carries the toast + listener
     # (content-versioned URL; see PERF-F-5 cache-busting)

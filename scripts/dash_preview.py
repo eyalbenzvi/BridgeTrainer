@@ -1,11 +1,12 @@
-"""Dev-only preview harness for dashboard.html.
+"""Dev-only preview harness for dashboard.html and history.html.
 
-Generates the web app into a scratch directory and rewrites dashboard.html so
+Generates the web app into a scratch directory and rewrites the chosen page so
 `window.BT` is a stub backed by a deterministic set of fake attempt documents.
-That lets the dashboard be opened (and screenshotted) without Firebase, an
-account, or a real answering history.
+That lets the page be opened (and screenshotted) without Firebase, an account,
+or a real answering history.
 
     python3 scripts/dash_preview.py --out /tmp/dashprev
+    python3 scripts/dash_preview.py --out /tmp/histprev --page history
 
 Not shipped to users — nothing in bridge_trainer imports it.
 """
@@ -92,12 +93,22 @@ def make_attempts(n: int = 180, seed: int = 7) -> list[dict]:
     return out
 
 
+# pendingCount/pendingIds are part of the real API and the pages call them
+# through a guard, but the log marks individual rows from pendingIds -- so the
+# stub answers both rather than relying on the guard.
 STUB = """<script>
 window.BT = {
-  start(cb) { cb(); },
+  start(cb) {
+    cb();
+    // the real layer dispatches this from a .finally once the authoritative
+    // sync lands; the log distinguishes "still loading" from "no history" on it
+    setTimeout(() => window.dispatchEvent(new Event("bt-attempts-synced")), 50);
+  },
   allAttempts() { return Promise.resolve(window.__MOCK_ATTEMPTS__); },
   fetchIndex() { return Promise.resolve({problems: window.__MOCK_POOL__}); },
   user() { return {uid: "preview"}; },
+  pendingCount() { return 0; },
+  pendingIds() { return []; },
 };
 </script>"""
 
@@ -117,9 +128,10 @@ def make_pool(attempts: list[dict], seed: int = 11) -> list[dict]:
     return rows
 
 
-def build(out_dir: Path, attempts: list[dict], empty: bool = False) -> Path:
+def build(out_dir: Path, attempts: list[dict], empty: bool = False,
+          which: str = "dashboard") -> Path:
     write_app(out_dir)
-    page = out_dir / "dashboard.html"
+    page = out_dir / (which + ".html")
     html = page.read_text(encoding="utf-8")
     data = ("<script>window.__MOCK_ATTEMPTS__ = " + json.dumps(
         [] if empty else attempts).replace("</", "<\\/") + ";\n"
@@ -139,9 +151,12 @@ def main() -> None:
     ap.add_argument("--n", type=int, default=180)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--empty", action="store_true")
+    ap.add_argument("--page", choices=("dashboard", "history"),
+                    default="dashboard")
     args = ap.parse_args()
     out = Path(args.out)
-    page = build(out, make_attempts(args.n, args.seed), empty=args.empty)
+    page = build(out, make_attempts(args.n, args.seed), empty=args.empty,
+                 which=args.page)
     print(page)
 
 

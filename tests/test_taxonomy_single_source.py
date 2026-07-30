@@ -12,12 +12,14 @@ from __future__ import annotations
 import json
 
 from bridge_trainer.app.webapp import (_SHARED_JS, _dashboard_html,
-                                        _index_html, _lead_html, _problem_html,
+                                        _history_html, _index_html,
+                                        _lead_html, _problem_html,
                                         _taxonomy_he_json)
 from bridge_trainer.engine.classify import LABELS_HE, TOOLTIPS_HE
 from bridge_trainer.engine.lead_classify import LEAD_LABELS_HE, LEAD_TOOLTIPS_HE
 
-PAGES = (_index_html, _problem_html, _lead_html, _dashboard_html)
+PAGES = (_index_html, _problem_html, _lead_html, _dashboard_html,
+         _history_html)
 
 
 def test_json_keys_cover_both_taxonomies_exactly():

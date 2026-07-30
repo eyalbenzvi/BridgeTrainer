@@ -17,7 +17,8 @@ import pytest
 
 from bridge_trainer.app.webapp import _CSS, _SHARED_JS, write_app
 
-PAGES = ("index.html", "p.html", "lead.html", "dashboard.html")
+PAGES = ("index.html", "p.html", "lead.html", "dashboard.html",
+         "history.html")
 
 
 @pytest.fixture(scope="module")

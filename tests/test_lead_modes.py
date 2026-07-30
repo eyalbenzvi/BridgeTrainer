@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 
 from bridge_trainer.app.webapp import (_SHARED_JS,
-    _dashboard_html, _index_html,
+    _dashboard_html, _history_html, _index_html,
                                        _lead_html, _problem_html)
 from bridge_trainer.engine.lead_maker import LEAD_SCHEMA, build_lead_record
 from bridge_trainer.engine.lead_verdict import LeadEvaluation, judge_lead
@@ -286,6 +286,7 @@ def test_no_forbidden_wording_anywhere():
     pages = {
         "index": _index_html(), "problem": _problem_html(),
         "lead": _lead_html(), "dashboard": _dashboard_html(),
+        "history": _history_html(),
         "bt-firebase": (__import__("pathlib")
                         .Path("bridge_trainer/web/bt-firebase.js")
                         .read_text(encoding="utf-8")),
