@@ -75,15 +75,28 @@ E 6, W 7 — every displayed claim true.
 
 ## Measured on the live pool
 
-Random sample of 150 published boards (seed 7) out of 3613, read by id from
-`meta/index`; 1352 displayed auction calls and 133 offered options.
+Full census, 2026-07-30: every published board read by id from `meta/index`
+(3628 document reads). 3605 of the 3613 problems carry an explained auction;
+32501 displayed calls in all.
+
+| quantity | boards | calls |
+|---|---|---|
+| **the reported defect** — a displayed floor of zero that the seat's OWN earlier bidding had already refuted | **1105 (31%)** | 1852 |
+| … lead problems (the whole auction is displayed, so a seat's later calls recur) | 793 | |
+| … bidding problems | 312 | |
+| any displayed band with no floor (mostly honest limited passes by a seat that never bid — now "16-" rather than "0-16") | 3434 (95%) | 16552 (51%) |
+| text changed by the accumulation itself (a floor inherited, or a ceiling: "11+" → "11-21") | | 2851 |
+
+Three shapes account for the gap between 31% and 95%: an opening followed by a
+second call GIB glosses with a ceiling only (North's 2♦ here), a rebid after a
+total-points promise (South's 4♥), and a final pass by a seat that has already
+bid, which repeated the same zero.
+
+Safety, measured over a 150-board random sample (seed 7; 1352 calls, 133
+offered options) before the census:
 
 | quantity | count |
 |---|---|
-| displayed calls with a floor of zero, before | 675 (50%) |
-| calls of the reported class — a zero floor the seat's own earlier bidding had already refuted | 61, on 38 boards (25% of the sample) |
-| displayed calls whose text changes | 745 (55%) |
-| option heads whose text changes | 65 of 133 |
 | NEW contradictions of the actual hand (suit length / HCP / total points, at the audit's slack) | **0** |
 | bands newly pinned to a single number by the intersection | **0** |
 | option claims the hero's hand breaches, before → after | 8 → 8 (all pre-existing raw-GIB shades, within the option gate's tolerance) |
