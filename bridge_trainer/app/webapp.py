@@ -1116,10 +1116,17 @@ function accOf(a) {
   const s = a && a.acceptedSet;
   return Array.isArray(s) ? s : (s ? [s] : []);
 }
-function typeLabel(t) {
-  return (typeof TYPE_NAMES !== "undefined" && TYPE_NAMES[t]
-          && TYPE_NAMES[t][0]) || t;
+/* The Hebrew label for a problem type, or null when the taxonomy has no entry
+   (a renamed/retired type, or a key that only resolves on Object.prototype --
+   "constructor" used to print "· undefined"). Callers that must show SOMETHING
+   fall back to the raw key via typeLabel; callers that would otherwise read a
+   snake_case id aloud in a Hebrew UI skip it instead. */
+function typeName(t) {
+  return (typeof TYPE_NAMES !== "undefined"
+          && Object.prototype.hasOwnProperty.call(TYPE_NAMES, t)
+          && TYPE_NAMES[t]) ? TYPE_NAMES[t][0] : null;
 }
+function typeLabel(t) { return typeName(t) || t; }
 const OUTCOME_HE = {winner: "מנצחת", "accepted-alt": "חלופה קבילה",
   dead: "אפשרות ללא סיכוי", suboptimal: "נחותה מהמיטבית"};
 /* Ids still present in the pool index; attempts whose problem was deleted are
@@ -1138,14 +1145,24 @@ function btScoreIsFallback(a) {
   return !btHasStoredScore(a) && !a.correct && a.outcomeClass !== "dead"
          && !(+a.gradedCost > 0);
 }
+/* A legacy score that was RECONSTRUCTED from the base curve, and therefore
+   reads a few points harsher than the same decision graded today. An accepted
+   call (100) and a dead option (0) are exact by definition even without a
+   stored score, so they are NOT approximations and must not be marked as such.
+*/
+function btScoreIsApprox(a) {
+  return !btHasStoredScore(a) && !a.correct && a.outcomeClass !== "dead"
+         && +a.gradedCost > 0;
+}
 /* ---- one attempt row, for both the miss list and the practice log --------
    The dashboard's miss list and the log's chronological rows differ in which
    fields they print and in their CSS box (flex vs grid), NOT in what a row
    means -- so they share this builder. That keeps ONE esc() path over
    user-owned fields (SEC-A-6), ONE removed-problem branch, and one unit
    decision for cost.
-   opts: cls (row class), time (formatted, or ""), cost/outcome (booleans),
-   replays (attemptCount), mark (extra muted suffix), label (aria-label).
+   opts: cls (row class), time (formatted; "" still emits the CELL -- see
+   below), cost/outcome (booleans), replays (attemptCount), mark (extra muted
+   suffix), label (aria-label).
    Attempt fields are user-owned free text -> esc() before innerHTML. */
 function attemptRowHtml(m, opts) {
   const o = opts || {};
@@ -1164,9 +1181,16 @@ function attemptRowHtml(m, opts) {
   // the multiplier travels INSIDE the isolate, or RTL reordering prints "2×"
   const reps = +m.attemptCount > 1
     ? ` · חזרה <span class="ltr">&times;${+m.attemptCount}</span>` : "";
+  // The time CELL is emitted whenever the caller asked for a time column, even
+  // when this row has no timestamp (`""`). Dropping the empty cell shifts every
+  // later cell one track to the left in a grid row, which crushed an undated
+  // row's whole text into the 3.2em time column.
   const body = chip +
-    (o.time ? `<span class="rtime ltr">${esc(o.time)}</span>` : "") +
-    `<span class="mtxt">${badge(m)}` +
+    (o.time === undefined ? ""
+       : `<span class="rtime ltr">${esc(o.time)}</span>`) +
+    // the space after badge() is explicit: badge ends with </span> whenever it
+    // printed difficulty stars, and .stars carries no trailing margin
+    `<span class="mtxt">${badge(m)} ` +
     (o.chose === false ? "" : "בחרת ") +
     `<b class="ltr">${esc(m.chosenCall)}</b>${bestTxt}` +
     (o.outcome ? ` · ${esc(OUTCOME_HE[m.outcomeClass] || m.outcomeClass)}${cost}` : "") +
@@ -1174,9 +1198,13 @@ function attemptRowHtml(m, opts) {
     (gone ? '<span class="go muted">בעיה שהוסרה</span>'
           : '<span class="go" aria-hidden="true">&larr;</span>');
   const cls = o.cls || "mrow";
+  // aria-label REPLACES the accessible name, so it must carry every marker the
+  // visible row does (replay count, first-solved date, unsynced) -- and a
+  // removed row keeps its label too: it is still a row a screen reader has to
+  // make sense of, it just isn't a link.
   const lbl = o.label ? ` aria-label="${esc(o.label)}"` : "";
   return gone
-    ? `<div class="${cls}" data-pid="${esc(m.problemId)}">${body}</div>`
+    ? `<div class="${cls}" data-pid="${esc(m.problemId)}"${lbl}>${body}</div>`
     : `<a class="${cls}" data-pid="${esc(m.problemId)}"` +
       ` href="${routeFor(m.kind || "bidding", m.problemId, {retry: true})}"${lbl}>` +
       `${body}</a>`;
@@ -1191,10 +1219,10 @@ function attemptRowHtml(m, opts) {
    difficultyLevel is clamped before "★".repeat(): firestore.rules bounds the
    field count and key names but does not type-check this value. */
 function badge(m) {
-  const t = TYPE_NAMES[m.type];
+  const t = typeName(m.type);
   const d = Math.min(5, Math.max(0, (+m.difficultyLevel || 0) | 0));
   const mode = attKind(m) === "lead" && (m.trainingMode === "IMP" ? "IMP" : "MP");
-  const lbl = scenHe(m) + (mode ? " · " + mode : "") + (t ? " · " + t[0] : "");
+  const lbl = scenHe(m) + (mode ? " · " + mode : "") + (t ? " · " + t : "");
   return `<span class="typebadge" style="margin:0">${lbl}</span> ` +
     (d ? `<span class="stars" style="font-size:12px" aria-hidden="true">` +
       `<span class="on">${"★".repeat(d)}</span><span class="off">` +
@@ -4768,13 +4796,20 @@ _HISTORY_CSS = """
    outside a .card rides on the green felt, where the card --muted is
    unreadable. */
 #hist { color: var(--on-felt); }
-#hist > .footnote, #hist > .dnote { color: var(--on-felt-muted); }
+#hist > .footnote { color: var(--on-felt-muted); }
 
 /* ---- summary + filters ---- */
 .hsum { font-size: 13px; color: var(--on-felt); margin: 2px 0 10px;
         display: flex; flex-wrap: wrap; gap: 3px 10px; align-items: baseline; }
 .hsum b { font-weight: 600; font-variant-numeric: tabular-nums; }
 .hsum .hsnote { color: var(--on-felt-muted); }
+/* The only .alllink in the app that sits directly ON the felt: --accent over
+   the green measures 1.16:1 in light mode, i.e. invisible -- and this is the
+   one-tap escape from a filtered view, the control a ?f=miss deep link makes
+   essential. On-felt ink + an underline carries the affordance instead, at the
+   44px target the filter buttons also take. */
+#hist .hsum .alllink { color: var(--on-felt); text-decoration: underline;
+  min-height: 44px; padding: 0 2px; }
 .hfilt { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 4px; }
 /* 44px targets: .segctl's own padding lands at ~37px, under the minimum */
 .hfilt .segctl button { min-height: 44px; }
@@ -4784,10 +4819,14 @@ _HISTORY_CSS = """
    through hundreds of rows. Sticky so the day a row belongs to is always on
    screen; the felt gradient is `fixed`, so a solid --felt-deep panel is the
    one background that matches under the heading while it is stuck. */
+/* --felt-deep, a shade darker than the felt behind it: a stuck heading has to
+   be opaque (scrolled rows must not show through), and the darker band reads as
+   a deliberate divider rather than a mismatched patch. Square corners, so
+   nothing peeks through a rounded edge while it is stuck. */
 .dday { position: sticky; top: 0; z-index: 5;
-        margin: 16px 0 6px; padding: 6px 2px;
+        margin: 16px 0 6px; padding: 8px 4px;
         font-size: 14px; font-weight: 700; color: var(--on-felt);
-        background: var(--felt-deep); border-radius: 8px; }
+        background: var(--felt-deep); }
 .dday .ddsub { font-weight: 400; font-size: 12px;
                color: var(--on-felt-muted); }
 .dday:focus-visible { outline: 2px solid var(--on-felt); outline-offset: 2px; }
@@ -4797,7 +4836,9 @@ _HISTORY_CSS = """
    so no column can be scanned. RTL reading order is score, time, what
    happened, then the affordance. The last column is `auto` so a removed
    problem's label has room to grow. */
-.hrow { display: grid; grid-template-columns: 2.6em 3.2em 1fr auto; gap: 9px;
+/* 3.2em, not 2.6em, on the score track: the widest chip is not a number but
+   the "ללא ציון" label a fallback grade prints instead of a fabricated 40. */
+.hrow { display: grid; grid-template-columns: 3.2em 3.2em 1fr auto; gap: 9px;
         align-items: center; min-height: 44px; padding: 7px 0;
         border-top: 1px solid var(--line); color: inherit;
         text-decoration: none; }
@@ -4811,7 +4852,7 @@ _HISTORY_CSS = """
 /* a reconstructed or missing grade must not wear the chrome of a measured one */
 .hrow .scorechip.noscore { background: transparent; color: var(--muted);
   border: 1px solid var(--line); font-size: 10px; font-weight: 600;
-  min-width: 36px; padding: 0 4px; }
+  min-width: 0; width: 100%; padding: 0 2px; white-space: nowrap; }
 .hcard { padding: 6px 14px; }
 .hmore { margin: 12px 0 2px; }
 /* the paging control: a card-toned button, so the page's one gold CTA stays
@@ -4929,16 +4970,28 @@ function visibleGroups(groups, limit) {
 function chipHtml(a) {
   if (btScoreIsFallback(a))
     return '<span class="scorechip sm noscore">ללא ציון</span>';
-  const sc = btScoreOfAttempt(a), approx = !btHasStoredScore(a);
-  return '<span class="scorechip sm tone-' + BAND_TONE[btBandOf(sc)] + '">' +
-    (approx ? "~" : "") + sc + '</span>';
+  const sc = btScoreOfAttempt(a), approx = btScoreIsApprox(a);
+  // dir="ltr" on the approximate chip: "~" is bidi-neutral, so in the page's
+  // RTL run it lands AFTER the digits and the chip reads "42~"
+  return '<span class="scorechip sm tone-' + BAND_TONE[btBandOf(sc)] + '"' +
+    (approx ? ' dir="ltr"' : '') + '>' + (approx ? "~" : "") + sc + '</span>';
 }
-function rowLabel(a, gone) {
+/* The row's accessible name. It REPLACES the visible text, so it repeats every
+   marker the row shows -- otherwise the replay count, the first-solved date and
+   the unsynced warning would be sighted-only.
+   A type with no taxonomy entry is left out rather than read aloud as
+   "competitive_partscore" in a Hebrew sentence (the badge drops it too). */
+function rowLabel(a, marks, gone) {
   const d = Math.min(5, Math.max(0, (+a.difficultyLevel || 0) | 0));
   const ms = actMs(a);
-  return [ms ? hhmm(ms) : "", scenHe(a), a.type ? typeLabel(a.type) : "",
+  const acc = accOf(a);
+  return [ms ? hhmm(ms) : "ללא תאריך", scenHe(a), typeName(a.type) || "",
           d ? "קושי " + d + " מתוך 5" : "", "בחרת " + a.chosenCall,
+          (acc.length && !acc.includes(a.chosenCall))
+            ? "מיטבי " + acc.join(", ") : "",
           btScoreIsFallback(a) ? "ללא ציון" : "ציון " + btScoreOfAttempt(a),
+          +a.attemptCount > 1 ? "חזרה " + (+a.attemptCount) + " פעמים" : "",
+          ...(marks || []),
           gone ? "הבעיה הוסרה מהמאגר" : "תרגל שוב"]
     .filter(Boolean).join(", ");
 }
@@ -4949,13 +5002,15 @@ function logRowHtml(a, dkey) {
   // says when it was first solved -- otherwise the score reads as today's work.
   const marks = [];
   if (+a.attemptCount > 1 && fms && dayKey(fms) !== dkey)
-    marks.push('נפתרה לראשונה ב-<span class="ltr">' + dateHe(fms) + '</span>');
+    marks.push("נפתרה לראשונה ב-" + dateHe(fms));
   if (PENDING && PENDING.has(a.problemId)) marks.push("טרם נשמר בענן");
+  // plain escaped text: these marks are Hebrew phrases (a date reads "3 ביולי"
+  // correctly in an RTL run), so no .ltr isolate -- that would flip them
   const mark = marks.length
-    ? ' · <span class="hmark">' + marks.join(" · ") + '</span>' : "";
+    ? ' · <span class="hmark">' + marks.map(esc).join(" · ") + '</span>' : "";
   return attemptRowHtml(a, {cls: "hrow", chip: chipHtml(a), chose: false,
     time: ms ? hhmm(ms) : "", replays: true, mark: mark,
-    label: rowLabel(a, btOrphan(a))});
+    label: rowLabel(a, marks, btOrphan(a))});
 }
 function dayHtml(g) {
   const miss = g.rows.filter(a => btScoreOfAttempt(a) < REVIEW_MIN).length;
@@ -5018,19 +5073,27 @@ function filtersHtml() {
     seg("סינון", [["1", "רק לשיפור", FILTER.miss]]) +
     '</div>';
 }
+/* Every limit the log has, stated in the log. goneN is recomputed whenever
+   LIVE_IDS changes (see markRemoved) rather than only at first paint: the pool
+   index lands after the page is already on screen, so a footnote written once
+   would claim nothing was removed while rows above it say otherwise. */
 function noteHtml(all) {
   const legacyN = all.filter(a => !btHasStoredScore(a)).length;
   const pendingN = (window.BT.pendingCount && window.BT.pendingCount()) || 0;
   const goneN = all.filter(a => btOrphan(a)).length;
-  return '<p class="footnote">היומן מציג שורה אחת לכל בעיה שפתרת, לפי הפעם ' +
-    'האחרונה שעסקת בה. חזרה על בעיה מסומנת בשורה שלה ואינה יוצרת שורה חדשה, ' +
-    'והציון נשאר של הפעם הראשונה — תשובה שנייה לבעיה שראית את פתרונה היא ' +
-    'זכירה ולא שיפוט.' +
+  const undatedN = all.filter(a => !actMs(a)).length;
+  return '<p class="footnote" id="hnote">היומן מציג שורה אחת לכל בעיה שפתרת, ' +
+    'לפי הפעם האחרונה שעסקת בה. חזרה על בעיה מסומנת בשורה שלה ואינה יוצרת ' +
+    'שורה חדשה, והציון נשאר של ' + glossHtml("firstonly", "הפעם הראשונה") +
+    ' — תשובה שנייה לבעיה שראית את פתרונה היא זכירה ולא שיפוט.' +
     (goneN ? ' ' + nProblems(goneN) + ' הוסרו מהמאגר: הן נשארות ביומן אך לא ' +
       'ניתן לתרגל אותן שוב.' : "") +
-    (legacyN ? ' ' + nProblems(legacyN) + ' נפתרו לפני עדכון שיטת הציון — ' +
-      'הציון שלהן שוחזר בקירוב, מסומן ב-~ ומחמיר בכמה נקודות. בחלקן נשמרה רק ' +
-      'העובדה שטעית, בלי מידת הטעות, והן מסומנות "ללא ציון".' : "") +
+    (legacyN ? ' ' + nProblems(legacyN) + ' נפתרו לפני ' +
+      glossHtml("legacy", "עדכון שיטת הציון") + ' — הציון שלהן שוחזר בקירוב, ' +
+      'מסומן ב-~ ומחמיר בכמה נקודות. בחלקן נשמרה רק העובדה שטעית, בלי מידת ' +
+      'הטעות, והן מסומנות "ללא ציון".' : "") +
+    (undatedN ? ' ' + nProblems(undatedN) + ' נשמרו לפני שהמערכת רשמה זמנים, ' +
+      'ולכן הן מקובצות תחת "ללא תאריך".' : "") +
     (pendingN ? ' <b>' + nDecisions(pendingN) + '</b> טרם נשמרו לענן; הזמן ' +
       'שלהן נלקח משעון המכשיר.' : "") +
     ' ציון של בעיה יכול להתעדכן בין ביקורים אם המאגר חושב מחדש את הפתרון ' +
@@ -5085,8 +5148,17 @@ function showMore() {
   const rows = sortRows(filterRows(all));
   const groups = groupByDay(rows);
   const before = visibleGroups(groups, LIMIT);
-  LIMIT += CHUNK;
-  const after = visibleGroups(groups, LIMIT);
+  // Days are indivisible, so one huge day can already exceed LIMIT + CHUNK --
+  // a plain `LIMIT += CHUNK` then reveals NOTHING and the tap does nothing
+  // (focus dropped, same button re-rendered). Raise the limit past what is
+  // already shown, and keep raising it until at least one more day appears.
+  const shownBefore = before.reduce((s, g) => s + g.rows.length, 0);
+  LIMIT = Math.max(LIMIT, shownBefore) + CHUNK;
+  let after = visibleGroups(groups, LIMIT);
+  while (after.length === before.length && after.length < groups.length) {
+    LIMIT += CHUNK;
+    after = visibleGroups(groups, LIMIT);
+  }
   const added = after.slice(before.length);
   document.getElementById("hlist")
     .insertAdjacentHTML("beforeend", added.map(dayHtml).join(""));
@@ -5107,18 +5179,31 @@ function setFilter(patch) {
   LIMIT = CHUNK;             // a new selection starts at the first chunk
   render(ATTEMPTS);
   markRemoved();
+  // render() replaced the button that was just tapped, which drops keyboard
+  // focus to <body>. Put it back on the equivalent control.
+  const sel = "kind" in patch
+    ? '#hist [data-kind="' + FILTER.kind + '"]' : '#hist [data-miss]';
+  const btn = document.querySelector(sel);
+  if (btn) btn.focus();
 }
 /* Patch the rows the pool index turned out not to cover, instead of
    re-rendering: the index arrives after first paint (see init), and a second
    full render would move rows under the reader's finger. */
 function markRemoved() {
   if (!LIVE_IDS) return;
+  let n = 0;
   document.querySelectorAll("#hlist a.hrow[data-pid]").forEach(a => {
     if (LIVE_IDS.has(a.dataset.pid)) return;
+    n++;
     const div = document.createElement("div");
     div.className = a.className;
     div.dataset.pid = a.dataset.pid;
     div.innerHTML = a.innerHTML;
+    // the row is still a row a screen reader must make sense of; only its
+    // closing promise changes
+    const lbl = a.getAttribute("aria-label");
+    if (lbl) div.setAttribute("aria-label",
+      lbl.replace("תרגל שוב", "הבעיה הוסרה מהמאגר"));
     const go = div.querySelector(".go");
     if (go) {
       go.className = "go muted";
@@ -5127,6 +5212,10 @@ function markRemoved() {
     }
     a.replaceWith(div);
   });
+  // the footnote was written before the index arrived, so it still says nothing
+  // about removed problems; rewrite just that paragraph
+  const note = document.getElementById("hnote");
+  if (n && note) note.outerHTML = noteHtml(firstAttempts(ATTEMPTS));
 }
 async function init() {
   const el = document.getElementById("hist");
@@ -5158,7 +5247,11 @@ async function init() {
   // arrives, a user with no rows would sit on "loading your log" forever. This
   // only ever flips the ZERO-row case (any cached row renders immediately), and
   // a later sync still corrects it.
-  setTimeout(() => { if (!SYNCED) { SYNCED = true; render(ATTEMPTS); } }, 8000);
+  setTimeout(() => {
+    if (!SYNCED && !firstAttempts(ATTEMPTS).length) {
+      SYNCED = true; render(ATTEMPTS);
+    }
+  }, 8000);
   // The pool index costs a server-first read and a network round trip, so it
   // is NOT on the path to first paint: every row is tappable until we learn
   // otherwise, and the few removed ones are then patched in place. A failure

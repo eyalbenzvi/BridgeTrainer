@@ -524,7 +524,27 @@ const BT = {
       }
     } else {
       // re-answer: keep the first-attempt grading, just count it.
+      // NB: `existing` IS ATTEMPTS[problemId] (same object), so the pre-bump
+      // first-attempt time is read out BEFORE anything below overwrites it —
+      // both the local backfill and the server patch depend on it.
+      const prevMs = tsMillis(existing);
+      const hadFirstTs = !!existing.firstTs;
       ATTEMPTS[problemId].attemptCount = (existing.attemptCount || 1) + 1;
+      // Reflect the activity time LOCALLY too (device clock, the same optimism
+      // the first-attempt path already uses). ts/lastTs are otherwise advanced
+      // only by serverTimestamp(), so until a sync pulled the doc back, a view
+      // ordered by LAST ACTIVITY — the practice log — left the problem sitting
+      // in its original day with no sign it had just been replayed (offline,
+      // that is forever). The server's stamps overwrite these on the next sync,
+      // and LAST_TS only ever advances from server snapshots, so an optimistic
+      // local stamp cannot skew the incremental query.
+      const nowSec = Math.floor(Date.now() / 1000);
+      ATTEMPTS[problemId].ts = { seconds: nowSec };
+      ATTEMPTS[problemId].lastTs = { seconds: nowSec };
+      // a legacy doc has no firstTs, and its ts was the first attempt's — keep
+      // that locally as well, or the bumped ts above would become its firstMs
+      if (!hadFirstTs && prevMs)
+        ATTEMPTS[problemId].firstTs = { seconds: Math.floor(prevMs / 1000) };
       scheduleSaveCache(uid);   // deferred; flushed on pagehide (PERF-F-7)
       if (PENDING[problemId]) {
         // the first attempt hasn't reached the server yet — bump the QUEUED
@@ -544,8 +564,7 @@ const BT = {
         // bumped ts would let firstMs reorder them on the dashboard (DB-M-9).
         const patch = { attemptCount: increment(1),
                         lastTs: serverTimestamp(), ts: serverTimestamp() };
-        if (!existing.firstTs && tsMillis(existing))
-          patch.firstTs = new Date(tsMillis(existing));
+        if (!hadFirstTs && prevMs) patch.firstTs = new Date(prevMs);
         await setDoc(ref, patch, { merge: true });
       } catch (e) {
         console.error("could not update attempt", e);

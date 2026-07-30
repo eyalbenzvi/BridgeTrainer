@@ -26,8 +26,10 @@ import tempfile
 import pytest
 
 from bridge_trainer.app.webapp import (_CSS, _DASHBOARD_JS, _HISTORY_CSS,
-                                       _HISTORY_JS, _SCORE_JS, _SHARED_JS,
-                                       _dashboard_html, _history_html)
+                                       _HISTORY_JS, _LEAD_JS, _SCORE_JS,
+                                       _SHARED_JS, _dashboard_html,
+                                       _history_html, _index_html, _lead_html,
+                                       _problem_html)
 from test_dashboard_redesign import needs_node, run_js as _run_js
 
 CUT = "// The authoritative sync lands after first paint"
@@ -47,7 +49,9 @@ def att(pid: str, *, first_ms: int | None = None, ts_ms: int | None = None,
     rec: dict = {"problemId": pid, "kind": kind, "isFirstAttempt": True,
                  "attemptCount": 1, "chosenCall": "3S", "acceptedSet": ["3S"],
                  "outcomeClass": "winner", "correct": True, "gradedCost": 0,
-                 "type": "competitive_partscore", "difficultyLevel": 3}
+                 # a REAL taxonomy key, or badge()/rowLabel()'s label path is
+                 # never exercised and a raw snake_case id could ship unnoticed
+                 "type": "compete_or_sell", "difficultyLevel": 3}
     if score is not None:
         rec["score"] = score
     if first_ms is not None:
@@ -183,12 +187,22 @@ def test_day_heading_counts_use_hebrew_number_agreement():
 
 
 def test_counts_go_through_the_agreement_helpers():
-    """Same guard the dashboard carries: a bare interpolation prints
-    "1 בעיות" on a one-problem day, which is broken Hebrew."""
-    for m in re.finditer(r"\$\{([^}]+)\} (?:בעיות|החלטות)", _HISTORY_JS):
-        assert m.group(1) == "MIN_N", m.group(0)
+    """Same guard the dashboard carries: any count printed next to בעיות /
+    החלטות must go through nProblems/nDecisions, or a one-problem day reads
+    "1 בעיות" -- broken Hebrew. Forward-looking: the log builds its strings by
+    concatenation today, so both spellings are banned."""
+    # a fixed constant that can never be 1 is the one legitimate exception (the
+    # dashboard's guard allows MIN_N the same way)
+    FIXED = {"MIN_N", "SESSION_SIZE", "CHUNK"}
+    for pat in (r"\$\{([^}]+)\} (?:בעיות|החלטות)",
+                r'\+ ([A-Za-z_$][\w$]*) \+\s*\n?\s*\' (?:בעיות|החלטות)',
+                r'(\d+) (?:בעיות|החלטות)'):
+        for m in re.finditer(pat, _HISTORY_JS):
+            assert m.group(1).strip() in FIXED, m.group(0)
     for m in re.finditer(r'\+ " (?:בעיות|החלטות)"', _HISTORY_JS):
         raise AssertionError(m.group(0))
+    # ...and the helpers really are used
+    assert "nProblems(" in _HISTORY_JS and "nDecisions(" in _HISTORY_JS
 
 
 # ---- filters ---------------------------------------------------------------
@@ -203,7 +217,7 @@ def test_filters_are_the_review_line_and_the_scenario():
         # a record with no `kind` at all predates the lead trainer
         json.dumps({"problemId": "d", "score": 70, "chosenCall": "P",
                     "attemptCount": 1, "isFirstAttempt": True},
-                   ensure_ascii=False),
+                   ensure_ascii=False),   # no `kind` at all
     ])
     got = run_js([
         f"(FILTER.kind = 'all', FILTER.miss = true, filterRows([{rows}]))"
@@ -347,9 +361,20 @@ def test_row_text_from_the_document_is_escaped():
     assert 'onerror="' not in got
     assert "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;" in got
     assert "&lt;b&gt;4H&lt;/b&gt;" in got
-    # ...including inside the href and the row's data attribute
-    assert 'href="p.html?id=x%3Cy&retry=1"' in got
+    # ...including inside the row's data attribute, and in the href -- which is
+    # URL-encoded, not HTML-escaped. The href here comes from the harness stub,
+    # so the SHIPPED routeFor is pinned separately below.
     assert 'data-pid="x&lt;y"' in got
+    assert "id=x%3Cy" in got and "id=x<y" not in got
+
+
+def test_the_shipped_route_builder_url_encodes_the_id():
+    """esc() is the wrong tool for a URL, and the log puts a link on EVERY row
+    rather than the miss list's ≤30."""
+    seg = _SHARED_JS[_SHARED_JS.index("function routeFor("):]
+    seg = seg[:seg.index("\n}")]
+    assert "encodeURIComponent(id)" in seg
+    assert "esc(m.problemId)" in _SCORE_JS      # the data attribute, in contrast
 
 
 @needs_node
@@ -376,13 +401,146 @@ def test_the_log_row_drops_the_severity_vocabulary_the_miss_list_owns():
 def test_a_lead_row_names_its_training_mode():
     """MP and IMP leads are graded on different scales; in a list with one
     aligned score column, two such rows would otherwise look comparable."""
-    mp = att("a", kind="lead", trainingMode="MP", type="partscore_lead")
-    imp = att("b", kind="lead", trainingMode="IMP", type="partscore_lead")
+    mp = att("a", kind="lead", trainingMode="MP", type="lead_3nt")
+    imp = att("b", kind="lead", trainingMode="IMP", type="lead_3nt")
     bid = att("c")
     got = run_js([f"badge({mp})", f"badge({imp})", f"badge({bid})"])
     assert "הובלה · MP" in got[0]
     assert "הובלה · IMP" in got[1]
     assert "הכרזה" in got[2] and "MP" not in got[2] and "IMP" not in got[2]
+
+
+@needs_node
+def test_a_type_with_no_taxonomy_entry_is_dropped_not_read_aloud():
+    """typeLabel falls back to the raw key (the dashboard's rows need SOMETHING
+    to name a group), but a row must not announce "compete_or_sell" inside a
+    Hebrew sentence, and "constructor" must not print "· undefined"."""
+    t = 100 * DAY
+    known = att("a", first_ms=t, ts_ms=t)
+    renamed = att("b", first_ms=t, ts_ms=t, type="retired_type_x")
+    proto = att("c", first_ms=t, ts_ms=t, type="constructor")
+    got = run_js([f"badge({known})", f"logRowHtml({known}, dayKey({t}))",
+                  f"badge({renamed})", f"logRowHtml({renamed}, dayKey({t}))",
+                  f"badge({proto})", "typeLabel('retired_type_x')"])
+    assert "קרב חוזה חלקי" in got[0] and "קרב חוזה חלקי" in got[1]
+    assert "retired_type_x" not in got[2] and "retired_type_x" not in got[3]
+    assert "undefined" not in got[4]
+    assert got[5] == "retired_type_x"   # the fallback the dashboard relies on
+
+
+@needs_node
+def test_an_undated_row_still_emits_the_time_cell():
+    """The row is a 4-track grid: dropping the empty time cell shifted every
+    later cell one track left, crushing the whole text into the 3.2em time
+    column -- exactly for the undated population the log groups apart."""
+    undated = json.dumps({"problemId": "u", "score": 90, "kind": "bidding",
+                          "chosenCall": "4H", "acceptedSet": ["4H"],
+                          "attemptCount": 1, "isFirstAttempt": True,
+                          "type": "compete_or_sell", "difficultyLevel": 2},
+                         ensure_ascii=False)
+    dated = att("d", first_ms=100 * DAY, ts_ms=100 * DAY)
+    got = run_js([f"logRowHtml({undated}, 0)",
+                  f"logRowHtml({dated}, dayKey({100 * DAY}))"])
+    for row in got:
+        assert row.count('class="rtime ltr"') == 1, row
+    assert '<span class="rtime ltr"></span>' in got[0]
+    # the miss list has no time column at all, so it must NOT gain an empty cell
+    miss = _run_js([f"missRowHtml({dated}, true)"])   # the dashboard's block
+    assert "rtime" not in miss[0]
+    # and a screen reader is told the row is undated rather than nothing
+    assert "ללא תאריך" in got[0]
+
+
+@needs_node
+def test_the_row_label_repeats_every_marker_the_row_shows():
+    """aria-label REPLACES the accessible name, so a marker missing from it is
+    a disclosure that exists for sighted users only."""
+    t = 200 * DAY
+    replay = att("b", first_ms=t - 3 * DAY, ts_ms=t, last_ms=t, attemptCount=3,
+                 score=61, correct=False, outcomeClass="suboptimal",
+                 gradedCost=2.0, acceptedSet=["4H"], chosenCall="3S")
+    got = run_js([f"logRowHtml({replay}, dayKey({t}))"])[0]
+    lbl = re.search(r'aria-label="([^"]*)"', got).group(1)
+    assert "חזרה 3 פעמים" in lbl
+    assert "נפתרה לראשונה" in lbl
+    assert "מיטבי 4H" in lbl and "ציון 61" in lbl and "קושי 3" in lbl
+    # a removed row keeps a label too -- it is still a row, just not a link
+    gone = run_js([f"(LIVE_IDS = new Set([]), logRowHtml({replay}, dayKey({t})))"])[0]
+    assert gone.startswith("<div") and "aria-label=" in gone
+
+
+@needs_node
+def test_an_exact_legacy_grade_is_not_marked_as_reconstructed():
+    """100 for an accepted call and 0 for a dead option are exact by
+    definition; only a curve-rebuilt score reads harsher than it should."""
+    t = 100 * DAY
+    ok = att("a", first_ms=t, ts_ms=t, score=None, correct=True)
+    dead = att("b", first_ms=t, ts_ms=t, score=None, correct=False,
+               outcomeClass="dead")
+    approx = att("c", first_ms=t, ts_ms=t, score=None, correct=False,
+                 outcomeClass="suboptimal", gradedCost=1.4)
+    got = run_js([f"chipHtml({ok})", f"chipHtml({dead})", f"chipHtml({approx})"])
+    assert "~" not in got[0] and ">100<" in got[0]
+    assert "~" not in got[1] and ">0<" in got[1]
+    assert "~" in got[2]
+    # the tilde is bidi-neutral, so without an explicit LTR direction the chip
+    # renders "42~" on this RTL page
+    assert 'dir="ltr"' in got[2] and 'dir="ltr"' not in got[0]
+    # and the chip carries no gloss target: it lives inside the row's <a>
+    assert "data-gloss" not in "".join(got)
+
+
+@needs_node
+def test_paging_never_dead_taps_when_one_day_overshoots_the_chunk():
+    """visibleGroups admits whole days, so a single day can already exceed
+    LIMIT + CHUNK -- a plain `LIMIT += CHUNK` then reveals nothing, the tap does
+    nothing and focus is dropped."""
+    got = run_js([
+        # day sizes [250, 5, 5]: the first day alone overshoots two chunks
+        "(() => {"
+        " const groups = [{key: 3, rows: Array(250).fill(0)},"
+        "                 {key: 2, rows: Array(5).fill(0)},"
+        "                 {key: 1, rows: Array(5).fill(0)}];"
+        " const out = []; LIMIT = CHUNK;"
+        " for (let tap = 0; tap < 2; tap++) {"
+        "   const before = visibleGroups(groups, LIMIT);"
+        "   const shownBefore = before.reduce((s, g) => s + g.rows.length, 0);"
+        "   LIMIT = Math.max(LIMIT, shownBefore) + CHUNK;"
+        "   let after = visibleGroups(groups, LIMIT);"
+        "   while (after.length === before.length && after.length < groups.length) {"
+        "     LIMIT += CHUNK; after = visibleGroups(groups, LIMIT); }"
+        "   out.push(after.length - before.length);"
+        " } return out; })()"])
+    # tap 1 must reveal SOMETHING (the bug made it reveal nothing); here it
+    # reveals both remaining days, after which there is nothing left to page and
+    # the button is replaced by the practice CTA -- hence 0 on the second tap
+    assert got[0][0] > 0, "the first tap must reveal at least one more day"
+    assert got[0] == [2, 0], got[0]
+
+
+def test_paging_and_focus_wiring():
+    seg = _HISTORY_JS[_HISTORY_JS.index("function showMore()"):
+                      _HISTORY_JS.index("function setFilter(")]
+    assert "Math.max(LIMIT, shownBefore) + CHUNK" in seg
+    assert "while (after.length === before.length" in seg
+    # a filter tap also replaces the control that was tapped
+    fseg = _HISTORY_JS[_HISTORY_JS.index("function setFilter("):
+                       _HISTORY_JS.index("function markRemoved(")]
+    assert "btn.focus()" in fseg
+
+
+def test_the_empty_state_fallback_cannot_rebuild_a_populated_page():
+    """The 8s guard exists for a sync event that never arrives; firing it while
+    400 cached rows are on screen would destroy focus and reflow mid-read."""
+    init = _HISTORY_JS[_HISTORY_JS.index("async function init()"):]
+    assert "if (!SYNCED && !firstAttempts(ATTEMPTS).length)" in init
+
+
+def test_the_deep_link_params_are_parsed():
+    init = _HISTORY_JS[_HISTORY_JS.index("async function init()"):]
+    assert 'q.get("kind")' in init and 'q.get("f") === "miss"' in init
+    # ...and the dashboard's own filtered list is what links here
+    assert 'href="history.html"' in _DASHBOARD_JS
 
 
 @needs_node
@@ -473,9 +631,11 @@ def test_the_footnotes_state_every_limit():
     seg = _HISTORY_JS[_HISTORY_JS.index("function noteHtml("):
                       _HISTORY_JS.index("function render(list)")]
     assert "שורה אחת לכל בעיה" in seg          # not one row per attempt
-    assert "הציון נשאר של הפעם הראשונה" in seg
+    assert "והציון נשאר של " in seg and 'glossHtml("firstonly"' in seg
+    assert "ללא תאריך" in seg                  # why undated rows group apart
     assert "הוסרו מהמאגר" in seg
-    assert "לפני עדכון שיטת הציון" in seg and "ללא ציון" in seg
+    assert 'נפתרו לפני ' in seg and 'glossHtml("legacy"' in seg
+    assert "ללא ציון" in seg
     assert "טרם נשמרו לענן" in seg
     assert "יכול להתעדכן בין ביקורים" in seg   # a regrade can move a score
 
@@ -516,8 +676,11 @@ def test_the_log_css_carries_its_own_felt_tones():
     the card --muted is unreadable (UI-1). The rule is id-scoped to #dash in
     dashboard.css, so the log ships its own."""
     assert "#hist { color: var(--on-felt); }" in _HISTORY_CSS
-    assert "#hist > .footnote, #hist > .dnote { color: var(--on-felt-muted); }" \
-        in _HISTORY_CSS
+    assert "#hist > .footnote { color: var(--on-felt-muted); }" in _HISTORY_CSS
+    # the one .alllink in the app that sits on the felt takes an on-felt tone:
+    # --accent over the green is 1.16:1 in light mode (invisible), and this is
+    # the escape hatch out of a filtered view
+    assert "#hist .hsum .alllink { color: var(--on-felt);" in _HISTORY_CSS
 
 
 def test_the_row_is_a_grid_and_its_targets_are_reachable():
@@ -553,12 +716,20 @@ def test_history_css_is_not_appended_to_the_dashboard_bundle():
 
 
 def test_every_glossed_key_on_the_log_resolves():
+    """A data-gloss naming a missing key fails SILENTLY (the handler looks up
+    GLOSS[key], finds nothing, and simply does not open the card)."""
     seg = _SHARED_JS[_SHARED_JS.index("const GLOSS = {"):]
     seg = seg[:seg.index("\nlet GLOSS_KEY")]
     keys = set(re.findall(r"^\s{2}([a-z0-9]+): \[", seg, re.M))
     used = set(re.findall(r'glossHtml\("([a-z0-9]+)"', _HISTORY_JS))
     used |= set(re.findall(r'data-gloss="([a-z0-9]+)"', _HISTORY_JS))
+    assert used, "the log explains none of its jargon"
     assert used <= keys, f"no GLOSS entry for {sorted(used - keys)}"
+    # and the glosses live in the footnotes, never inside a row <a>: a <button>
+    # in an <a> is invalid HTML and one tap would both navigate and open a card
+    rows = _HISTORY_JS[_HISTORY_JS.index("function logRowHtml("):
+                       _HISTORY_JS.index("function dayHtml(")]
+    assert "glossHtml" not in rows
 
 
 # ---- the shared block the two pages now sit on -----------------------------
@@ -589,8 +760,15 @@ def test_no_page_script_shadows_a_shared_declaration():
             r"^(?:const|let|var|function|class)\s+([A-Za-z_$][\w$]*)",
             src, re.M))
     shared = tops(_SHARED_JS)
-    assert not tops(_DASHBOARD_JS) & shared, tops(_DASHBOARD_JS) & shared
-    assert not tops(_HISTORY_JS) & shared, tops(_HISTORY_JS) & shared
+    for name, block in (("dashboard", _DASHBOARD_JS), ("history", _HISTORY_JS),
+                        ("lead", _LEAD_JS)):
+        assert not tops(block) & shared, (name, tops(block) & shared)
+    # the inline page bootstraps share the same global scope, and the shared
+    # block now exports generic names (badge, mean, median, typeLabel)
+    for name, page in (("index", _index_html()), ("p", _problem_html()),
+                       ("lead", _lead_html()), ("history", _history_html())):
+        inline = "\n".join(re.findall(r"<script>(.*?)</script>", page, re.S))
+        assert not tops(inline) & shared, (name, tops(inline) & shared)
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")

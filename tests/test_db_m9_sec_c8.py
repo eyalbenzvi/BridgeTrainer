@@ -38,9 +38,18 @@ def test_reanswer_bumps_ts_not_just_lastTs():
     assert "ts: serverTimestamp()" in seg
     assert "lastTs: serverTimestamp()" in seg
     # legacy docs (no firstTs) must be backfilled from the existing first-
-    # attempt ts on re-answer, or the bumped ts would reorder them (review fix)
-    assert "!existing.firstTs && tsMillis(existing)" in seg
-    assert "patch.firstTs = new Date(tsMillis(existing))" in seg
+    # attempt ts on re-answer, or the bumped ts would reorder them (review fix).
+    # `existing` IS the cached object the local bump mutates, so the pre-bump
+    # values are captured first -- reading them afterwards would backfill the
+    # re-answer's own time.
+    assert "const prevMs = tsMillis(existing);" in seg
+    assert "const hadFirstTs = !!existing.firstTs;" in seg
+    assert "if (!hadFirstTs && prevMs) patch.firstTs = new Date(prevMs);" in seg
+    assert seg.index("const prevMs") < seg.index("ATTEMPTS[problemId].ts =")
+    # ...and the local cache reflects the new activity time immediately, so a
+    # view ordered by last activity shows the replay before any sync (the
+    # practice log's whole premise)
+    assert "ATTEMPTS[problemId].lastTs = { seconds: nowSec };" in seg
 
 
 def test_dashboard_orders_by_firstTs_not_bumped_ts():
