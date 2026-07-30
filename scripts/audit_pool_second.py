@@ -42,6 +42,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from bridge_trainer.engine.explain import accumulated_cards, terse_meaning
 from bridge_trainer.scoring.tables import contract_score
 
 SEATS = "NESW"
@@ -195,6 +196,43 @@ def is_vul(vul, seat):
         seat in v)
 
 
+_BAND_FORMS = (
+    (re.compile(r"(\d+)-(\d+)$"), lambda m: (int(m.group(1)), int(m.group(2)))),
+    (re.compile(r"(\d+)-$"), lambda m: (0, int(m.group(1)))),
+    (re.compile(r"(\d+)\+$"), lambda m: (int(m.group(1)), 40)),
+    (re.compile(r"(\d+)$"), lambda m: (int(m.group(1)),) * 2),
+)
+BAND_MAX = 40          # a fragment claiming more points than the deck holds is
+                       # a convention name that happens to be numeric ("1430"),
+                       # not a band
+
+
+def displayed_bands(txt):
+    """The point bands a trainee actually reads in a terse note, as
+    ``(kind, lo, hi)`` with kind ``"hcp"``/``"pts"``.
+
+    ``terse_meaning`` renders four forms — "11-21", "21-" (an upper bound with
+    no floor), "6+", and "9" (a count its rule pinned) — each optionally
+    suffixed " pts" for a total-points band, and BOTH kinds can appear on one
+    line ("10-, 6+ pts", where GIB gave an HCP ceiling for the call and the
+    seat's earlier bidding gave the floor). So the bands are read per fragment;
+    reading only the tail of the string missed the HCP band whenever a points
+    band followed it."""
+    out = []
+    for frag in (f.strip(" .") for f in txt.split(",")):
+        pts = frag.endswith("pts")
+        core = frag[:-3].strip() if pts else frag
+        for rx, take in _BAND_FORMS:
+            m = rx.fullmatch(core)
+            if not m:
+                continue
+            lo, hi = take(m)
+            if hi <= BAND_MAX:
+                out.append(("pts" if pts else "hcp", lo, hi))
+            break
+    return out
+
+
 # ------------------------------------------------------------------- the audit
 def audit(rec):
     out = []          # (severity, code, message)
@@ -343,11 +381,21 @@ def audit(rec):
     # ("11-14" / "25+") or, when GIB gave none, a total-points band
     # ("16-18 pts"). This checks exactly those, for EVERY call including Pass
     # (the shipped gate exempts Pass, which is where the visible lies live).
-    for e in stem:
+    #
+    # The string is RE-RENDERED from the stored cards, exactly as the web
+    # client does (webapp.js terse() over accumCards()), rather than read from
+    # the stored `text`: the client re-renders on every page view, so a record
+    # written before a renderer change shows the new string while its baked
+    # text is stale — auditing the stale field audits a page nobody sees.
+    shown = accumulated_cards(
+        di, [e.get("card") or {} for e in stem]) if stem else []
+    for e, sc in zip(stem, shown):
         idx, s = e.get("idx"), e.get("seat")
-        txt = e.get("text") or ""
-        # bidding boards prefix the meaning with "<call> (<seat>): " — strip it
-        # so the bid token itself is not read as a suit-length claim
+        txt = terse_meaning(sc, call=e.get("call")) if e.get("card") \
+            else (e.get("text") or "")
+        # legacy records with no card fall back to the baked text, which on
+        # bidding boards is prefixed "<call> (<seat>): " — strip it so the bid
+        # token itself is not read as a suit-length claim
         txt = txt.split("): ", 1)[1] if "): " in txt else txt
         if s not in SEATS or idx is None:
             continue
@@ -366,18 +414,12 @@ def audit(rec):
             elif hi and L[suit] > int(hi) + 1:
                 bad("D4", f"[{idx}] {s} {e.get('call')} is displayed as "
                           f"{txt!r} — the hand holds {L[suit]} {suit} ({h})")
-        m = re.search(r"(?:^|,\s)(\d+)(?:-(\d+)|\+)(?!\s*pts)"
-                      r"[♠♥♦♣]?\s*$", txt)
-        if m and not re.search(r"[♠♥♦♣]\s*$", txt):
-            lo = int(m.group(1))
-            hi = int(m.group(2)) if m.group(2) else 40
-            if a < lo - 2 or a > hi + 2:
-                bad("D5", f"[{idx}] {s} {e.get('call')} is displayed as "
-                          f"{txt!r} — the hand has {a} HCP ({h})")
-        mp = re.search(r"(\d+)(?:-(\d+)|\+)\s*pts\s*$", txt)
-        if mp:
-            lo = int(mp.group(1))
-            hi = int(mp.group(2)) if mp.group(2) else 40
+        for kind, lo, hi in displayed_bands(txt):
+            if kind == "hcp":
+                if a < lo - 2 or a > hi + 2:
+                    bad("D5", f"[{idx}] {s} {e.get('call')} is displayed as "
+                              f"{txt!r} — the hand has {a} HCP ({h})")
+                continue
             shortness = sum({0: 3, 1: 2, 2: 1}.get(v, 0) for v in L.values())
             length = sum(max(0, v - 4) for v in L.values())
             ptmax = a + shortness + length

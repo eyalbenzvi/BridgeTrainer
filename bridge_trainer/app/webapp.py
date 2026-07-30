@@ -1564,23 +1564,91 @@ function terse(card, call) {
   }
   // a one-point band is the single number it is, not a range: GIB emits
   // "9-9"/"24-24" where its rule pinned the count, and printing that as a
-  // RANGE claimed a precision the source never had. Mirrors explain._band.
-  const band = (lo, hi) => (lo === hi ? String(lo) : lo + "-" + hi);
+  // RANGE claimed a precision the source never had. A band with no floor is
+  // an upper bound and says so ("10-", the mirror of "10+") — "0-10" claimed
+  // a floor of zero GIB never stated. Mirrors explain._band.
+  const band = (lo, hi) =>
+    (lo === hi ? String(lo) : (lo <= 0 ? hi + "-" : lo + "-" + hi));
   const hcp = card.hcp;
   const pts = card.pts;
+  let hcpFloor = 0;
   if (hcp) {
     const [lo, hi] = hcp;
+    hcpFloor = lo;
     if (hi >= 25) { if (lo > 0) frags.push(lo + "+"); }
     else frags.push(band(lo, hi));
-  } else if (pts) {
-    // no HCP band, but GIB stated total points — without this a limited pass
-    // ("No suitable call -- 8- total points") rendered with no range at all,
-    // which read as a missing explanation. Mirrors engine/explain.py.
+  }
+  // the total-points band shows when GIB gave no HCP band at all — without
+  // this a limited pass ("No suitable call -- 8- total points") rendered with
+  // no range whatsoever, which read as a missing explanation — and ALSO when
+  // the HCP band has no floor while the points band does, so an upper-bound
+  // gloss ("10- HCP") keeps the floor the seat's earlier bidding promised.
+  // Mirrors engine/explain.py.
+  if (pts && (!hcp || (hcpFloor <= 0 && pts[0] > 0))) {
     const [lo, hi] = pts;
     if (hi >= 25) { if (lo > 0) frags.push(lo + "+ pts"); }
     else frags.push(band(lo, hi) + " pts");
   }
   return frags.join(", ");
+}
+/* Fold what a seat has ALREADY shown into the card of its later call.
+   GIB glosses each call alone, so an upper-bound-only clause ("21- HCP" on a
+   reverse) arrives as [0, 21] and used to render "0-21" two calls after the
+   same seat's opening rendered "11-21". A hand does not change during the
+   auction: its constraints intersect (highest floor, lowest ceiling). Only
+   hand facts accumulate — name/gloss/forcing describe THIS call — and where
+   two glosses cannot both hold, this call's own wins.
+   Mirrors explain.merge_promises. */
+function mergePromises(prev, card) {
+  card = card || {};
+  if (!prev) return Object.assign({}, card);
+  const tighten = (a, b) => {
+    if (!a || !b) return b || (a ? [a[0], a[1]] : null);
+    const lo = Math.max(a[0], b[0]), hi = Math.min(a[1], b[1]);
+    return lo <= hi ? [lo, hi] : [b[0], b[1]];
+  };
+  const out = Object.assign({}, card);
+  out.hcp = tighten(prev.hcp, card.hcp);
+  out.pts = tighten(prev.pts, card.pts);
+  const minlen = Object.assign({}, card.minlen || {});
+  const maxlen = Object.assign({}, card.maxlen || {});
+  for (const st of "SHDC") {
+    const lo = Math.max(minlen[st] || 0, (prev.minlen || {})[st] || 0);
+    const pmx = (prev.maxlen || {})[st];
+    const hi = Math.min(maxlen[st] === undefined ? 13 : maxlen[st],
+                        pmx === undefined ? 13 : pmx);
+    if (lo > hi) continue;   // contradictory glosses — this call's own stands
+    if (lo) minlen[st] = lo;
+    if (hi < 13) maxlen[st] = hi;
+  }
+  out.minlen = minlen; out.maxlen = maxlen;
+  return out;
+}
+/* Accumulated card per entry of an explanations list ({seat, card}, in
+   auction order); `dealer` covers legacy entries that carry no seat. */
+function accumCards(entries, dealer) {
+  const seats = ["N", "E", "S", "W"];
+  const state = {}, out = [];
+  (entries || []).forEach((e, j) => {
+    const st = (e && e.seat) ||
+      seats[(Math.max(0, seats.indexOf(dealer)) + j) % 4];
+    state[st] = mergePromises(state[st], (e && e.card) || {});
+    out.push(state[st]);
+  });
+  return out;
+}
+/* Everything one seat has shown over `entries` — the state a further call by
+   that seat (an offered option) is merged into.
+   Mirrors explain.seat_promises. */
+function seatPromises(entries, dealer, seat) {
+  const seats = ["N", "E", "S", "W"];
+  let state = null;
+  (entries || []).forEach((e, j) => {
+    const st = (e && e.seat) ||
+      seats[(Math.max(0, seats.indexOf(dealer)) + j) % 4];
+    if (st === seat) state = mergePromises(state, (e && e.card) || {});
+  });
+  return state;
 }
 function vulSeats(vul) {
   const v = String(vul || "None").replace("-", "");
@@ -2907,16 +2975,20 @@ function normalize() {{
     if (c.call) policy[c.call] = c.policy;
   }}
   const cards = {{}};
+  // an option is one more call by the hero, so it shows what the hero has
+  // shown so far as well (engine/explain.py option_explanations)
+  const stemExpl = (P.explanations && P.explanations.stem) || [];
+  const heroShown = seatPromises(stemExpl, P.dealer, P.seat);
   for (const o of (P.explanations && P.explanations.options) || []) {{
     if (o.card) cards[o.bid] = o.card;
     // what the bid shows, terse; older records only baked prose like
     // "5\\u2663 \\u2014 11-21 HCP. Next call ..." \\u2014 take the first
     // clause and strip the wordiness
-    let m = o.card ? terse(o.card, o.bid) : "";
+    let m = o.card ? terse(mergePromises(heroShown, o.card), o.bid) : "";
     const first = o.text ? o.text.split(". ")[0] : "";
     if (!m && first.includes("\\u2014")) {{
       m = first.replace(/^[^\\u2014]*\\u2014\\s*/, "").replace(/\\.$/, "")
-        .replace(/^limited \\u2014 at most (\\d+) HCP$/, "0-$1")
+        .replace(/^limited \\u2014 at most (\\d+) HCP$/, "$1-")
         .replace(/\\s*HCP\\b/g, "");
     }}
     OPTSHOWS[o.bid] = m;
@@ -2954,13 +3026,15 @@ function normalize() {{
   }}
   if (P.generator)
     P.generator.n_deals = P.generator.n_deals || P.generator.samples;
-  // tap-note per stem call, from the engine card (terse grammar);
-  // fall back to the baked text minus its "1♦ (W): " prefix
+  // tap-note per stem call, from the engine card (terse grammar) with the
+  // seat's earlier promises folded in; fall back to the baked text minus its
+  // "1♦ (W): " prefix
+  const stemShown = accumCards(stemExpl, P.dealer);
   NOTES = P.auction.map((tok, j) => {{
     const e = P.explanations && P.explanations.stem &&
               P.explanations.stem[j];
     if (!e) return "";
-    const t = e.card ? terse(e.card, tok) : "";
+    const t = e.card ? terse(stemShown[j] || e.card, tok) : "";
     if (t) return t;
     return (e.text || "").replace(/^[^:]*:\\s*/, "");
   }});
@@ -3424,6 +3498,10 @@ async function init() {
     MODE = prevAns.trainingMode;
   if (MODE === "IMP" && !hasImpMetrics(P)) { MODE = "MP"; MODE_FALLBACK = true; }
   const meanings = (P.explanations && P.explanations.auction) || [];
+  // each call is displayed with everything its seat has already shown folded
+  // in, so an upper-bound-only gloss ("21- HCP" on a reverse) cannot read as
+  // "0-21" over an opening bid that promised 11+ (lead1-b8b58ea96)
+  const shownCards = accumCards(meanings, P.dealer);
   // contract is {level}{denom}{declarer}{doubled}, e.g. 4HE / 3NTWx / 6SSxx —
   // strip the declarer seat AND any double marker, then show a doubled tag.
   const cm = /^(\d(?:NT|[CDHS]))[NESW](x{0,2})$/.exec(P.contract);
@@ -3474,7 +3552,8 @@ async function init() {
     const a = meanings[openNote] || {};
     // prefer the terse grammar over the raw GIB prose, matching the
     // bidding page; both stay English by design
-    const note = a.card ? terse(a.card, a.call) : (a.text || "");
+    const note = a.card ? terse(shownCards[openNote] || a.card, a.call)
+                        : (a.text || "");
     box.innerHTML = '<div class="bidnote"><b><span class="ltr">' +
       cardHtml_or_call(a.call) + ' (' + (a.seat || "") + ')</span></b> ' +
       '<span class="en">' + note + '</span>' +
