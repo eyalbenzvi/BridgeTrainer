@@ -4,7 +4,13 @@ asserted — docs/ben_execution_plan.md §3.3 + v2 amendments 1, 2, 9, 11.
 
 Display grammar (BBO alert-card style, ux/bridge panel redesign): terse
 comma-separated fragments — optional convention name, suit lengths, HCP
-band — never prose. "6+♣, 10-12", "3+♦, 11-21", a limited pass is "0-11".
+band — never prose. "6+♣, 10-12", "3+♦, 11-21", a limited pass is "11-"
+(an upper bound only, mirroring the "11+" form — never "0-11", which
+claims a floor of zero the gloss never stated).
+
+A call's note shows what the SEAT has shown by that point in the auction,
+not what GIB says about that one call in isolation — see
+``merge_promises``.
 """
 from __future__ import annotations
 
@@ -45,6 +51,78 @@ def _glyphify(text: str) -> str:
     for k, g in SUIT_GLYPH.items():
         text = text.replace(f"!{k}", g)
     return text
+
+
+def _intersect(prev, cur):
+    """Intersect two point bands (HCP or total points). ``None`` means "this
+    call said nothing", so the other band stands. Where the two cannot both be
+    true — GIB glossed the two calls as different systemic hands — the CURRENT
+    call wins: it is the one being explained."""
+    if prev is None or cur is None:
+        return cur if prev is None else tuple(prev)
+    lo = max(int(prev[0]), int(cur[0]))
+    hi = min(int(prev[1]), int(cur[1]))
+    return (lo, hi) if lo <= hi else tuple(cur)
+
+
+def merge_promises(prev: dict | None, card: dict) -> dict:
+    """``card`` with everything the SAME SEAT has already shown folded in.
+
+    GIB glosses each call in isolation, and an upper-bound-only clause
+    ("21- HCP" on a reverse, "16- total points" on a pass) parses to (0, 21)
+    — a floor of zero the seat's own earlier bidding has usually already
+    refuted. On lead1-b8b58ea96 (1♣-P-1♥-P-2♦-P-4♥) North's 2♦ was displayed
+    "Opener reverse, 5+♣, 4+♦, 0-21" two calls after its 1♣ opening was
+    displayed "11-21", and the final pass repeated the 0.
+
+    A hand does not change during the auction, so a seat's constraints
+    INTERSECT: the highest floor and the lowest ceiling it has shown are both
+    true of it on every later call. Only hand facts accumulate — the
+    convention name, the raw gloss and the ``forcing`` flag describe THIS
+    call and come from it alone (a force is discharged by an opponent's bid,
+    and ``explain_check`` reads the flag as a live commitment).
+    """
+    if not prev:
+        return dict(card)
+    out = dict(card)
+    out["hcp"] = _intersect(prev.get("hcp"), card.get("hcp"))
+    out["pts"] = _intersect(prev.get("pts"), card.get("pts"))
+    minlen = dict(card.get("minlen") or {})
+    maxlen = dict(card.get("maxlen") or {})
+    for st in "SHDC":
+        lo = max(minlen.get(st, 0), (prev.get("minlen") or {}).get(st, 0))
+        hi = min(maxlen.get(st, 13), (prev.get("maxlen") or {}).get(st, 13))
+        if lo > hi:
+            continue          # contradictory glosses — this call's own stands
+        if lo:
+            minlen[st] = lo
+        if hi < 13:
+            maxlen[st] = hi
+    out["minlen"], out["maxlen"] = minlen, maxlen
+    return out
+
+
+def accumulated_cards(dealer_i: int, cards: list[dict]) -> list[dict]:
+    """``cards`` (one per call, in auction order) with each seat's earlier
+    promises folded into its later calls — what the trainee is shown."""
+    state: dict[int, dict] = {}
+    out = []
+    for j, card in enumerate(cards):
+        seat_i = seat_of(dealer_i, j)
+        state[seat_i] = merge_promises(state.get(seat_i), card or {})
+        out.append(state[seat_i])
+    return out
+
+
+def seat_promises(dealer_i: int, cards: list[dict],
+                  seat_i: int) -> dict | None:
+    """Everything ``seat_i`` has shown over ``cards`` — the state a further
+    call by that seat (an offered option) is merged into."""
+    state = None
+    for j, card in enumerate(cards):
+        if seat_of(dealer_i, j) == seat_i:
+            state = merge_promises(state, card or {})
+    return state
 
 
 def contract_name(tok: str) -> str:
@@ -123,17 +201,23 @@ def terse_meaning(card: dict, call: str | None = None) -> str:
         [_suit_frag(st, v) for st, v in suits]
     hcp = card.get("hcp")
     pts = card.get("pts")
+    hcp_floor = 0
     if hcp:
         lo, hi = int(hcp[0]), int(hcp[1])
+        hcp_floor = lo
         if hi >= _HCP_OPEN_TOP:
             if lo > 0:
                 frags.append(f"{lo}+")
         else:
             frags.append(_band(lo, hi))
-    elif pts:
-        # no HCP band, but GIB stated total points — without this a limited
-        # pass ("No suitable call -- 8- total points") rendered with no
-        # range at all, which read as a missing explanation
+    # the total-points band shows when GIB gave no HCP band at all — without
+    # this a limited pass ("No suitable call -- 8- total points") rendered with
+    # no range whatsoever, which read as a missing explanation — and ALSO when
+    # the HCP band has no floor while the points band does: on lead1-b8b58ea96
+    # South's 4♥ is glossed "10- HCP" alone, three calls after its 1♥ promised
+    # 6+ total points, and dropping that floor left "10-" reading as a hand
+    # that might hold nothing.
+    if pts and (not hcp or (hcp_floor <= 0 and int(pts[0]) > 0)):
         lo, hi = int(pts[0]), int(pts[1])
         if hi >= _HCP_OPEN_TOP:
             if lo > 0:
@@ -148,21 +232,36 @@ def _band(lo: int, hi: int) -> str:
     as the single number it is. GIB emits "9-9"/"24-24"/"0-0" where its rule
     pinned the count exactly, and rendering that as a RANGE claimed a precision
     the source never had — 157 published calls said things like "9-9" over a
-    seven-count."""
-    return str(lo) if lo == hi else f"{lo}-{hi}"
+    seven-count.
+
+    A band with no floor is an upper bound, and says so: "10-", the mirror of
+    the "10+" already used at the other end. GIB's "10- HCP" never claimed the
+    hand could be worthless, and "0-10" read as a range that contradicted
+    whatever the seat had already promised."""
+    if lo == hi:
+        return str(lo)
+    return f"{hi}-" if lo <= 0 else f"{lo}-{hi}"
 
 
 def stem_explanations(spot) -> list[dict]:
     """One entry per stem call; the meaning of each call comes from GIB
     (BBO gibrest), which interprets the auction prefix through that call.
-    Silent calls get no note."""
+    Silent calls get no note.
+
+    ``card`` stays GIB's card for that call alone — the gates check the gloss
+    of each call against the hand that made it — while ``text`` is rendered
+    from the seat's ACCUMULATED promises (``merge_promises``), which is what a
+    trainee reading the auction needs."""
     from . import gib_explain
+    cards = [gib_explain.card_for_auction(spot.stem[:j + 1])
+             for j in range(len(spot.stem))]
+    shown = accumulated_cards(spot.dealer_i, cards)
     out = []
     for j, tok in enumerate(spot.stem):
         seat_i = seat_of(spot.dealer_i, j)
-        card = gib_explain.card_for_auction(spot.stem[:j + 1])
-        meaning = terse_meaning(card, call=tok)
-        entry = {"idx": j, "seat": SEATS[seat_i], "call": tok, "card": card}
+        meaning = terse_meaning(shown[j], call=tok)
+        entry = {"idx": j, "seat": SEATS[seat_i], "call": tok,
+                 "card": cards[j]}
         entry["text"] = (f"{_call_name(tok)} ({SEATS[seat_i]}): {meaning}"
                          if meaning else "")
         out.append(entry)
@@ -176,6 +275,11 @@ def option_explanations(spot, verdict, policy_map, ev=None) -> list[dict]:
     cards = {}
     for b in [r["bid"] for r in verdict.table]:
         cards[b] = gib_explain.card_for_auction(spot.stem + [b])
+    # an option is one more call by the hero, so it is displayed with the
+    # hero's own earlier promises folded in (stem cards are already cached)
+    stem_cards = [gib_explain.card_for_auction(spot.stem[:j + 1])
+                  for j in range(len(spot.stem))]
+    hero_state = seat_promises(spot.dealer_i, stem_cards, spot.hero_i)
     out = []
     for row in verdict.table:
         b = row["bid"]
@@ -183,7 +287,9 @@ def option_explanations(spot, verdict, policy_map, ev=None) -> list[dict]:
             f"{contract_name(c)} {cnt / verdict.measured['n_samples']:.0%}"
             for c, cnt in row["top_contracts"])
         meaning = terse_meaning(
-            cards.get(b, {"text": "", "hcp": None, "minlen": {}}), call=b)
+            merge_promises(hero_state,
+                           cards.get(b, {"text": "", "hcp": None,
+                                         "minlen": {}})), call=b)
         lines = [
             f"{_call_name(b)} — {meaning}." if meaning
             else f"{_call_name(b)}.",

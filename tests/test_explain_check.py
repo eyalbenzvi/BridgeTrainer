@@ -276,7 +276,10 @@ def test_prose_lengths_and_total_points_parse_and_render():
 
     p = parse_meaning("No suitable call -- 8- total points")
     assert p["pts"] == (0, 8)
-    assert terse_meaning(p, call="P") == "No suitable call, 0-8 pts"
+    # an upper bound renders as one ("8-"), not as a range down to zero —
+    # GIB's "8- total points" never claimed the hand could be worthless
+    # (see tests/test_auction_promises.py)
+    assert terse_meaning(p, call="P") == "No suitable call, 8- pts"
 
     c = parse_meaning("Overcall -- twice rebiddable !C; 19+ total points")
     assert c["minlen"] == {"C": 6} and c["pts"] == (19, 40)

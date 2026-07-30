@@ -30,7 +30,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from bridge_trainer.engine.conventions import SEATS, seat_of
-from bridge_trainer.engine.explain import _call_name, terse_meaning
+from bridge_trainer.engine.explain import (_call_name, accumulated_cards,
+                                           merge_promises, seat_promises,
+                                           terse_meaning)
 from bridge_trainer.engine.gib_explain import card_for_auction
 
 EVIDENCE_SEP = " Leads to "
@@ -48,21 +50,26 @@ def rebuild_bidding(rec: dict) -> bool:
     dealer_i = SEATS.index(rec["dealer"])
     changed = False
 
+    cards = [card_for_auction(auction[: j + 1]) for j in range(len(auction))]
+    shown = accumulated_cards(dealer_i, cards)   # what the trainee reads
     stem = []
     for j, tok in enumerate(auction):
-        card = card_for_auction(auction[: j + 1])
-        meaning = terse_meaning(card, call=tok)
+        meaning = terse_meaning(shown[j], call=tok)
         seat = SEATS[seat_of(dealer_i, j)]
-        stem.append({"idx": j, "seat": seat, "call": tok, "card": card,
+        stem.append({"idx": j, "seat": seat, "call": tok, "card": cards[j],
                      "text": (f"{_call_name(tok)} ({seat}): {meaning}"
                               if meaning else "")})
     if not _same(stem, ex.get("stem") or []):
         ex["stem"] = stem
         changed = True
 
+    hero_i = SEATS.index(rec["seat"]) if rec.get("seat") in SEATS \
+        else seat_of(dealer_i, len(auction))
+    hero_shown = seat_promises(dealer_i, cards, hero_i)
     for o in ex.get("options") or []:
         card = card_for_auction(auction + [o["bid"]])
-        meaning = terse_meaning(card, call=o["bid"])
+        meaning = terse_meaning(merge_promises(hero_shown, card),
+                                call=o["bid"])
         text = o.get("text") or ""
         if EVIDENCE_SEP in text:
             head = (f"{_call_name(o['bid'])} — {meaning}." if meaning
@@ -115,8 +122,8 @@ def run_firestore(key_path: str | None) -> None:
         FirestorePool, _firestore_safe, _retry_transient)
     pool = FirestorePool(key_path)
     recs = pool.stream_records(
-        fields=["kind", "dealer", "auction", "engine_auction_complete",
-                "explanations"])
+        fields=["kind", "dealer", "seat", "auction",
+                "engine_auction_complete", "explanations"])
     n = 0
     for rec in recs:
         if rebuild(rec):
