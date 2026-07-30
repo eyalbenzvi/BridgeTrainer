@@ -14,14 +14,16 @@ from importlib import resources
 
 import pytest
 
-from bridge_trainer.app.webapp import (_dashboard_html, _index_html,
-                                       _lead_html, _problem_html, _sdk_module_urls)
+from bridge_trainer.app.webapp import (_dashboard_html, _history_html,
+                                       _index_html, _lead_html,
+                                       _problem_html, _sdk_module_urls)
 
 PAGES = {
     "index.html": _index_html,
     "p.html": _problem_html,
     "lead.html": _lead_html,
     "dashboard.html": _dashboard_html,
+    "history.html": _history_html,
 }
 
 

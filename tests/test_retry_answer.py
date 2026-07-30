@@ -16,7 +16,7 @@ import tempfile
 
 import pytest
 
-from bridge_trainer.app.webapp import (_DASHBOARD_JS, _SHARED_JS,
+from bridge_trainer.app.webapp import (_DASHBOARD_JS, _SCORE_JS, _SHARED_JS,
                                        _dashboard_html, _index_html,
                                        _lead_html, _problem_html)
 from test_home_early_click import _extract_function
@@ -80,6 +80,8 @@ def test_answered_problem_offers_retry_without_polluting_score_or_session(html_f
 
 
 def test_dashboard_and_summary_review_links_use_retry():
-    # rendered output (the f-string's doubled braces collapse to single)
-    assert "{retry: true}" in _DASHBOARD_JS
+    # rendered output (the f-string's doubled braces collapse to single).
+    # The row builder the dashboard and the practice log share is where the
+    # retry link is now formed, so both pages get it from one place.
+    assert "{retry: true}" in _SCORE_JS
     assert "{retry: true}" in _index_html()

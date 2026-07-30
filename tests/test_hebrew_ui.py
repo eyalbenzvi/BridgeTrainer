@@ -21,7 +21,7 @@ import tempfile
 import pytest
 
 from bridge_trainer.app.webapp import (_SHARED_JS,
-    _dashboard_html, _index_html,
+    _dashboard_html, _history_html, _index_html,
                                         _lead_html, _problem_html)
 
 # Universal terms that stay Latin by design (see the makeover plan §7):
@@ -50,6 +50,7 @@ def test_no_english_in_visible_chrome():
     pages = {
         "index": _index_html(), "problem": _problem_html(),
         "lead": _lead_html(), "dashboard": _dashboard_html(),
+        "history": _history_html(),
     }
     for name, page in pages.items():
         leaked = _english_words(page)
@@ -58,7 +59,7 @@ def test_no_english_in_visible_chrome():
 
 def test_pages_declare_hebrew_rtl():
     for page in (_index_html(), _problem_html(), _lead_html(),
-                 _dashboard_html()):
+                 _dashboard_html(), _history_html()):
         assert 'lang="he"' in page
         assert 'dir="rtl"' in page
 
@@ -76,7 +77,7 @@ def test_call_labels_are_hebrew():
 
 def test_glossary_uses_lakichot_not_trikim():
     # standard Israeli terminology: לקיחות, never טריקים
-    for page in (_lead_html(), _dashboard_html()):
+    for page in (_lead_html(), _dashboard_html(), _history_html()):
         assert "טריק" not in _visible_text(page)
 
 
@@ -97,7 +98,8 @@ def test_no_convention_translation_table():
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not available")
 @pytest.mark.parametrize("render", [
-    _index_html, _problem_html, _lead_html, _dashboard_html])
+    _index_html, _problem_html, _lead_html, _dashboard_html,
+    _history_html])
 def test_inline_scripts_parse(render):
     scripts = re.findall(r"<script>(.*?)</script>", render(), flags=re.S)
     assert scripts, "page has no inline script"

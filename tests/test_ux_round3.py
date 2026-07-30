@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from bridge_trainer.app.webapp import (_CSS, _SHARED_JS, _dashboard_html,
+                                       _history_html,
                                         _index_html, _lead_html, _problem_html)
 
 
@@ -54,7 +55,8 @@ def test_tap_targets_and_no_hardcoded_tint():
 
 # ---- PERF-F-8 / UX-I-4: head theme snippet + lead skeleton + guidance -------
 def test_theme_applied_in_head_on_every_page():
-    for page in (_index_html(), _problem_html(), _lead_html(), _dashboard_html()):
+    for page in (_index_html(), _problem_html(), _lead_html(),
+                 _dashboard_html(), _history_html()):
         # the inline snippet runs before the stylesheet link
         head = page[:page.index("app.css")]
         assert "localStorage.getItem('bt_theme')" in head

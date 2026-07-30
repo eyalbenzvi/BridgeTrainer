@@ -22,33 +22,46 @@ import tempfile
 import pytest
 
 from bridge_trainer.app.webapp import (_CSS, _DASHBOARD_CSS, _DASHBOARD_JS,
-                                       _SCORE_JS, _SHARED_JS,
-                                       _dashboard_html, _taxonomy_he_json)
+                                       _HISTORY_CSS, _HISTORY_JS, _SCORE_JS,
+                                       _SHARED_JS, _dashboard_html,
+                                       _taxonomy_he_json)
 
 needs_node = pytest.mark.skipif(shutil.which("node") is None,
                                 reason="node not available")
 
 
-def run_js(exprs: list[str]) -> list:
-    """Evaluate expressions against the score module + the dashboard's own JS.
+def run_js(exprs: list[str], block: str | None = None,
+           cut_at: str | None = None) -> list:
+    """Evaluate expressions against the score module + one page's own JS.
 
     _SCORE_JS rather than the whole _SHARED_JS: the shared block installs a
     document-level click handler for the glossary at import time, which a bare
     node run has no DOM for. The score module is deliberately DOM-free (its own
-    header says so), and it is where the dashboard's new helpers live.
+    header says so), and it is where the shared attempt helpers live.
 
-    The dashboard script's last lines bootstrap against window.BT, so they are
-    dropped; everything above them is pure functions.
+    The page script's last lines bootstrap against window.BT, so they are
+    dropped at `cut_at`; everything above is pure functions.
 
-    TYPE_NAMES is the one name the dashboard borrows from the excluded shared
-    block. It is supplied from the same taxonomy modules the page builds it
-    from, so a label asserted here is the label that ships.
+    Three names the page borrows from the EXCLUDED part of the shared block are
+    stubbed: TYPE_NAMES (from the same taxonomy modules the page builds it from,
+    so a label asserted here is the label that ships) plus glossHtml/routeFor,
+    which the shared row builder calls. The stubs are transparent, so an
+    assertion about a row's text still reads the real text.
+
+    `block`/`cut_at` let the history-page tests reuse this harness instead of
+    growing a third copy of it (tests/test_history_page.py).
     """
-    cut = _DASHBOARD_JS.index("// refresh the dashboard once the background")
+    block = _DASHBOARD_JS if block is None else block
+    cut = block.index(cut_at or "// refresh the dashboard once the background")
     src = (_SCORE_JS + "\n"
-           + "const localStorage = {getItem: () => null, setItem: () => {}};\n"
+           + "const localStorage = {getItem: () => null, setItem: () => {},"
+           + " removeItem: () => {}};\n"
            + "const TYPE_NAMES = " + _taxonomy_he_json() + ";\n"
-           + _DASHBOARD_JS[:cut] + "\n"
+           + "function glossHtml(k, l) { return l; }\n"
+           + "function routeFor(kind, id, o) { return (kind === 'lead'"
+           + " ? 'lead.html' : 'p.html') + '?id=' + encodeURIComponent(id)"
+           + " + ((o && o.retry) ? '&retry=1' : ''); }\n"
+           + block[:cut] + "\n"
            + "console.log(JSON.stringify([" + ",".join(exprs) + "]));")
     fd, path = tempfile.mkstemp(suffix=".js")
     try:
@@ -389,7 +402,10 @@ def test_low_sample_rows_are_aggregated_not_repeated():
 
 
 def test_thresholds_scale_with_the_strength_of_the_claim():
-    assert "MIN_N = 5" in _DASHBOARD_JS          # a mean appears
+    # MIN_N is shared with the practice log, so it is declared once, in the
+    # shared block -- two copies of "5" is exactly the drift this pins against
+    assert "MIN_N = 5" in _SCORE_JS              # a mean appears
+    assert "MIN_N =" not in _DASHBOARD_JS        # ...and only there
     assert "MIN_CI = 12" in _DASHBOARD_JS        # an interval appears
     assert "MIN_LABEL = 20" in _DASHBOARD_JS     # may be NAMED the weakest
     # the wording carries the epistemic status
@@ -569,6 +585,10 @@ def test_emitted_assets_equal_the_constants():
             == _DASHBOARD_CSS
         assert (root / "dashboard.js").read_text(encoding="utf-8") \
             == _DASHBOARD_JS
+        assert (root / "history.css").read_text(encoding="utf-8") \
+            == _HISTORY_CSS
+        assert (root / "history.js").read_text(encoding="utf-8") \
+            == _HISTORY_JS
     finally:
         shutil.rmtree(d)
 

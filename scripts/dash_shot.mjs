@@ -17,9 +17,11 @@ page.on("console", m => {
 });
 page.on("pageerror", e => console.error("[pageerror]", e.message));
 await page.goto("file://" + file);
-// render() replaces the "טוען…" placeholder with real cards
+// render() replaces the "טוען…" placeholder with real cards (#dash on the
+// dashboard, #hist on the practice log)
 await page.waitForFunction(
-  () => document.querySelectorAll("#dash .card, #dash .dtab").length > 0,
+  () => document.querySelectorAll("#dash .card, #dash .dtab, #hist .card")
+    .length > 0,
   null, {timeout: 15000});
 await page.waitForTimeout(400);
 const tab = (flags.find(f => f.startsWith("--tab=")) || "").slice(6);
