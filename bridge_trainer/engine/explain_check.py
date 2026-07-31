@@ -58,6 +58,22 @@ says should be accepted — the winner reaches slam and makes it — not the
 bridge merit of inviting, and the board teaches "never invite, blast".
 ``invite_violations`` catches both halves from the stored record alone.
 
+Sixth motivating board (ben1-19fb00aa07e): after 2NT-P-3♥-P-3♠-P the
+hero (4 HCP, six spades) had 4♠ graded best — rightly, game opposite a
+20-21 notrump — but the gloss shown for that very answer was GIB's
+"Mild slam try. No shortness, 9-10 total points", and the rollout ends
+in 4♠ on 512 of 512 layouts. In the system that produced the evidence
+the call is a plain signoff; in the system the gloss describes, this
+hand would never bid it (GIB's weak route is a four-level transfer).
+The hand check forgave the band — 9-10 against the hand's loosest
+total of 8 is inside SLACK_PTS — and the invitation gate's
+never-accepted half only judged LOSING options, requiring a winner
+that reaches the level to corroborate the refusal, so the winner
+itself was exempt. Now an accepted answer whose own gloss is an
+invitation partner never accepts is fatal on the acceptance share
+alone: the board's central lesson — "this is the correct call, and it
+means a slam try with 9-10" — is false in both systems at once.
+
 Independent checks — these four, plus the three rollout rules of
 docs/4nt_projection_and_gloss_gate.md (``meaningless_gloss_violations``,
 ``forcing_contract_violations``, ``answer_insensitive_violations``), which
@@ -113,9 +129,12 @@ are documented at their own definitions:
     "Game try suit", "Quantitative invite", "Mild slam try") whose
     rollout gives partner no decision to make: the invited level is
     reached on essentially every sampled layout, or on none of them while
-    the board's own winner gets there and beats the invitation. Both
-    halves compare the displayed MEANING against the EVIDENCE the board
-    publishes, which is why they need neither the engine nor the cards.
+    the board's own winner gets there and beats the invitation — or on
+    none of them while the invitation IS the board's accepted answer
+    (ben1-19fb00aa07e), so the very call being taught is a signoff
+    narrated as a try. All three compare the displayed MEANING against
+    the EVIDENCE the board publishes, which is why they need neither the
+    engine nor the cards.
 """
 from __future__ import annotations
 
@@ -1388,6 +1407,22 @@ def invite_violations(option_cards: dict, table: list[dict], accepted: str,
         lesson a trainee draws ("inviting costs 5 IMPs, blast instead") is
         an artifact of the partner model.
 
+    never accepted, and it IS the answer
+        the ACCEPTED call's own gloss is an invitation and the invited
+        level is reached on <= INVITE_NEVER of its layouts
+        (ben1-19fb00aa07e: the winning 4♠ glossed "Mild slam try, 9-10"
+        to a 4-count, rollout 4♠ on 512/512). No corroboration from a
+        winner is needed — the call IS the winner, so the board's central
+        lesson is the gloss, and the same evidence the board publishes
+        ("Leads to 4♠S 100%") refutes it: partner never has the decision
+        the narration says the call poses. A genuine try graded best is
+        untouched — held with the values the gloss states, partner
+        accepts it on SOME sampled layouts. Measured 2026-07-31 over the
+        1311 published bidding boards: 11 accepted answers carry an
+        invitational gloss, their acceptance shares are 0.00, 0.01, then
+        0.11 and upward — the extreme is separated from the thinnest
+        real try by an empty decade, so INVITE_NEVER cuts cleanly.
+
     never declined
         the invited level is reached on >= INVITE_ALWAYS of the layouts.
         Partner has no decision at all: the call is a commitment in the
@@ -1433,7 +1468,16 @@ def invite_violations(option_cards: dict, table: list[dict], accepted: str,
                        f"layouts — partner never declines, so the call is a "
                        f"commitment, not an invitation")
             continue
-        if share > INVITE_NEVER or not accepted or accepted == bid:
+        if share > INVITE_NEVER:
+            continue
+        if accepted == bid:
+            out.append(f"option {bid}: gloss {gloss!r} invites to a {want} "
+                       f"and is the board's own answer, but the rollout "
+                       f"reaches one on {share:.0%} of layouts — partner "
+                       f"never accepts, so the board teaches a signoff "
+                       f"narrated as a try")
+            continue
+        if not accepted:
             continue
         margin = -float(rows[bid].get("ev_imp_vs_top") or 0.0)
         won = _reach_share(dist(accepted), hero_i, want, n_samples)

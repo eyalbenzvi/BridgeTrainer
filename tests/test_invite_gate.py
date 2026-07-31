@@ -137,6 +137,70 @@ def test_the_winning_call_is_checked_too():
     assert len(bad) == 1 and "never declines" in bad[0]
 
 
+# ben1-19fb00aa07e: after 2NT-P-3H-P-3S-P the hero (4 HCP, six spades) has
+# 4S graded best — game opposite 20-21 — while GIB glosses that very answer
+# "Mild slam try. No shortness, 9-10 total points" and the rollout ends in
+# 4S on all 512 layouts. The old never-accepted half judged only LOSING
+# options, so the board's own answer was narrated as a try nobody plays.
+_MILD_TRY_S = ("Mild slam try. No shortness -- 2+ !C; 2+ !D; 2+ !H; 6+ !S; "
+               "9-10 total points")
+
+
+def test_a_never_accepted_try_that_wins_is_a_violation():
+    table = [_row("4S", 1.95, [("4SS", N)]),
+             _row("3NT", -1.95, [("4SS", 288), ("3NS", 224)]),
+             _row("P", -7.64, [("3SS", N)])]
+    bad = invite_violations(
+        {"4S": _card(_MILD_TRY_S), "3NT": _card("5 !S; 5-10 HCP"),
+         "P": _card("No suitable call -- 5+ !S; 3- total points")},
+        table, "4S", 0, N)
+    assert len(bad) == 1
+    assert bad[0].startswith("option 4S")
+    assert "board's own answer" in bad[0]
+    assert "signoff narrated as a try" in bad[0]
+
+
+def test_a_winning_try_partner_sometimes_accepts_is_kept():
+    # acceptance 11% — the thinnest rate the published pool shows on a real
+    # accepted try (the extreme sits at 0.00-0.01, then an empty decade)
+    table = [_row("4S", 1.2, [("4SS", 456), ("6SS", 56)]),
+             _row("3NT", -1.2, [("3NS", N)])]
+    assert invite_violations(
+        {"4S": _card(_MILD_TRY_S), "3NT": _card("5 !S; 5-10 HCP")},
+        table, "4S", 0, N) == []
+
+
+def test_record_violations_flags_the_stored_winner_try_board():
+    from bridge_trainer.engine.explain_check import record_violations
+    rec = {
+        "kind": "bidding", "dealer": "S", "seat": "N",
+        "full_deal": {"N": "T87653.AT7.T2.84", "E": "J92.Q63.7.KJ9752",
+                      "S": "AKQ.K9.QJ854.AQ3", "W": "4.J8542.AK963.T6"},
+        "quality": {"n_samples": N},
+        "verdict": {"accepted": "4S", "table": [
+            _row("4S", 1.95, [("4SS", N)]),
+            _row("3NT", -1.95, [("4SS", 288), ("3NS", 224)]),
+            _row("P", -7.64, [("3SS", N)])]},
+        "explanations": {
+            "stem": [{"idx": 0, "seat": "S", "call": "2NT",
+                      "card": _card("Two NT opener. Could have 5M. -- 2-5 !C; "
+                                    "2-5 !D; 2-5 !H; 2-5 !S; 20-21 HCP")},
+                     {"idx": 2, "seat": "N", "call": "3H",
+                      "card": _card("Jacoby transfer -- 5+ !S")},
+                     {"idx": 4, "seat": "S", "call": "3S",
+                      "card": _card("Transfer completed to S -- 2-5 !C; "
+                                    "2-5 !D; 2-5 !H; 2-5 !S; 20-21 HCP")}],
+            "options": [{"bid": "4S", "card": _card(_MILD_TRY_S)},
+                        {"bid": "3NT", "card": _card("5 !S; 5-10 HCP")},
+                        {"bid": "P", "card": _card("No suitable call -- "
+                                                   "5+ !S; 3- total points")}],
+        },
+    }
+    fatal, _soft = record_violations(rec)
+    hits = [v for v in fatal if "signoff narrated as a try" in v]
+    assert hits and hits[0].startswith("option 4S")
+
+
 def test_record_violations_flags_the_stored_board():
     from bridge_trainer.engine.explain_check import record_violations
     rec = {

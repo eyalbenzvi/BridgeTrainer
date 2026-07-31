@@ -59,6 +59,11 @@ reaches it, over the layouts the hero's side declares:
   charged ≥ 1.0 IMPs for missing it. The board then asserts both that
   the level is right and that the systemic invitation to it never gets
   there.
+* **never accepted, and it is the answer** (added 2026-07-31, see
+  below) — reached on ≤ 2% of layouts while the invitation *is* the
+  board's accepted call. No winner corroborates here because the call
+  is the winner: the gloss is the board's central lesson, and the
+  board's own projection refutes it.
 
 Either one rejects the **board**, not the option, for the reason
 `forcing_pass_violations` gives: the same partner model produced the
@@ -113,6 +118,65 @@ Cost: nothing. The check counts contracts the confirm rollout already
 produced, so it adds no sampling and no network call — unlike
 `band_violations`, it can also re-judge stored records, which is what
 the purge below does.
+
+## The answer itself: a try graded best that partner never accepts
+
+Reported from the field 2026-07-31 and measured over the published
+Firestore pool of that day (1311 bidding boards). `ben1-19fb00aa07e` —
+`2NT-P-3♥-P-3♠-P`, hero responder with ♠T87653 ♥AT7 ♦T2 ♣84 (4 HCP, six
+spades) opposite a 20-21 notrump — was published with 4♠ as the winner,
+and 4♠ is the right call: game opposite 20-21 with a sixth spade. But
+the gloss shown on that very answer was GIB's
+
+> 4♠ — *Mild slam try*. No shortness, 6+♠, 9-10 pts. Leads to 4♠S 100%.
+
+The line contradicts itself on the screen: a slam try that leads to 4♠
+on 100% of layouts, shown to a hand holding 4 points against a stated
+9-10. In the system that produced the evidence (Ben's rollout — opener
+passes 4♠ on 512 of 512 layouts) the call is a plain signoff; in the
+system the gloss describes, this hand would never bid it — GIB's weak
+route to 4♠ is a four-level transfer, and transfer-then-raise is the
+stronger sequence. The trainee is taught a declaration whose displayed
+meaning is false in both systems at once.
+
+Both existing checks stepped around it. The gloss-vs-hand check
+(`hand_violations`) forgave the band: 9-10 total points against the
+hand's loosest countable total of 8 is a 1-point miss, inside
+`SLACK_PTS` — correctly, since band shading is the trainer's subject
+matter. And the never-accepted half above judged only *losing* options
+— its corroboration ("the winner reaches the level") exists to prove a
+refused invitation was charged for the refusal, so the winner itself
+was exempt.
+
+The fix drops the corroboration exactly when none is needed: when the
+invitational gloss sits on the **accepted call itself**, the acceptance
+share alone convicts. Partner never accepting a try held with the
+values the gloss states is not a thin invitation — opposite a known
+20-21, a real 9-10 try is accepted on a fair share of layouts — it is
+the signature of a gloss describing a different hand than the one that
+bid it.
+
+Measured on the pool, the extreme is separated by an empty decade, so
+`INVITE_NEVER` cuts cleanly with no new threshold:
+
+| acceptance rate of the invited level (accepted call only) | rows |
+|---|---|
+| 0.00 – 0.02 (**never accepted**) | 2 |
+| 0.03 – 0.10 | 0 |
+| 0.11 – 0.30 | 3 |
+| 0.31 – 0.70 | 4 |
+| 0.71 – 0.97 | 2 |
+
+The two rows at the extreme are the reported board and one sibling —
+the same sequence, the same gloss on the same winning 4♠:
+
+| board | option | gloss | hero | measured |
+|---|---|---|---|---|
+| `ben1-19fb00aa07e` | 4♠ (winner) | Mild slam try, 9-10 pts | 4 HCP | slam on 0% of layouts |
+| `ben1-19faf4e6649` | 4♠ (winner) | Mild slam try, 14-15 pts | 8 HCP | slam on 1% of layouts |
+
+Cost: still nothing — the same stored distributions, one more branch.
+Both boards were purged with `purge-mislabeled-invites` on 2026-07-31.
 
 ## Operations
 
