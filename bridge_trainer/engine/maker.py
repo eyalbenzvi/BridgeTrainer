@@ -401,8 +401,10 @@ def forge_one(engine, seed: int, audit_prescreen: bool = False) -> BoardOutcome:
 
     # ---- invitation gate: an option GIB glosses as an invitation whose
     # rollout gives partner no decision — the invited level reached on
-    # every layout, or on none while the winner gets there and the
-    # invitation is charged for missing it (ben1-19f947b9723). Free (it
+    # every layout, on none while the winner gets there and the
+    # invitation is charged for missing it (ben1-19f947b9723), or on
+    # none while the invitation is itself the graded answer, a signoff
+    # narrated as a try (ben1-19fb00aa07e). Free (it
     # counts the confirm rollout's own contracts) and run on the PUBLISHED
     # evidence, so what the gate judges is exactly what the board shows.
     # Distinct from R1 above: that rule asks whether the rollout DISCARDED
