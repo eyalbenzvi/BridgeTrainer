@@ -89,14 +89,14 @@ each mode now has its own file, log and failure signal.
 
 **The forge cycle** — `forge-cycle.yml` is the production factory and the only
 scheduled forge workflow. It calls the three forges as reusable workflows, one
-after another, each forging a batch of 15 and pushing it to Firestore:
+after another, each forging a batch of 10 and pushing it to Firestore:
 
 | stage | workflow | batch | observed |
 | --- | --- | --- | --- |
-| 1 | bidding (`forge-bidding.yml`) | 15 | ~11 min |
-| 2 | leads MP (`forge-leads-mp.yml`) | 15 | ~50 min |
-| 3 | leads IMP (`forge-leads-imp.yml`) | 15 | ~32 min |
-| | **cycle** | **45** | **~93 min** |
+| 1 | bidding (`forge-bidding.yml`) | 10 | ~11 min |
+| 2 | leads MP (`forge-leads-mp.yml`) | 10 | ~50 min |
+| 3 | leads IMP (`forge-leads-imp.yml`) | 10 | ~32 min |
+| | **cycle** | **30** | **~93 min** |
 
 Stages chain on `needs:`, so each starts the moment the previous one finishes —
 no stage waits for a clock slot, and a fast or slow stage just shifts the rest
@@ -109,8 +109,8 @@ current one ends and starts immediately. The `forge-cycle` concurrency group
 holds one run in flight and at most one pending, so the surplus firings cannot
 build a backlog — a firing arriving while one is already pending replaces it.
 Expect the occasional **cancelled** run in the Actions list: that is the
-mechanism working, not a failure. Throughput is ~15.5 cycles a day, i.e. ~675
-problems a day, 225 per type.
+mechanism working, not a failure. Throughput is ~15.5 cycles a day, i.e. ~465
+problems a day, 155 per type.
 
 Every run uses the script's per-run time-based seed default, so it works fresh
 boards. Tune the batches with repository variables (Settings → Secrets and
