@@ -10,7 +10,7 @@ name: Forge lead problems (IMP)
 # Two ways to run:
 #   * AS A CYCLE STAGE — forge-cycle.yml calls this workflow as the last of its
 #     three back-to-back stages, passing no count, which selects the batch size
-#     below (FORGE_LEADS_IMP_COUNT problems, default 15). That is the production
+#     below (FORGE_LEADS_IMP_COUNT problems, default 10). That is the production
 #     path; this file has no schedule of its own. Tune it without editing YAML
 #     via repository variables (Settings → Secrets and variables → Actions →
 #     Variables): FORGE_LEADS_IMP_COUNT and FORGE_LEADS_IMP_MAX_SECONDS
@@ -54,7 +54,7 @@ on:
       count:
         description: "Number of problems to generate"
         type: string
-        default: "15"
+        default: "10"
         required: true
       seed:
         description: "RNG seed (blank = unique per run, so re-runs add new boards)"
@@ -135,7 +135,7 @@ jobs:
           if [ -z "$COUNT" ]; then
             # cycle stage: batch size and budget from the repo variables. The
             # script's time-based seed default gives each run fresh boards.
-            N="${FORGE_COUNT:-15}"
+            N="${FORGE_COUNT:-10}"
             BUDGET="${FORGE_MAX_SECONDS:-3000}"
             echo ">> cycle $MODE batch: $N problems, ${BUDGET}s"
             MAX_SECONDS="$BUDGET" \
@@ -155,7 +155,7 @@ jobs:
           FORGE_COUNT: ${{ vars.FORGE_LEADS_IMP_COUNT }}
         run: |
           if [ -z "$COUNT" ]; then
-            HEAD="cycle stage, ${FORGE_COUNT:-15} problems"
+            HEAD="cycle stage, ${FORGE_COUNT:-10} problems"
           else
             HEAD="requested $COUNT"
           fi

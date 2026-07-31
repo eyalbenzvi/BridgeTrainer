@@ -119,12 +119,12 @@ def test_the_cycle_grants_every_stage_the_scope_it_needs():
 
 
 @pytest.mark.parametrize("wf", STAGES, ids=lambda p: p.stem)
-def test_a_stage_forges_fifteen_problems_when_the_cycle_calls_it(wf):
+def test_a_stage_forges_ten_problems_when_the_cycle_calls_it(wf):
     """The cycle passes no count; a blank count selects the batch size. It must
     not fall through to the script's own much larger default."""
     text = wf.read_text(encoding="utf-8")
     assert 'if [ -z "$COUNT" ]; then' in text
-    assert '"${FORGE_COUNT:-15}"' in text
+    assert '"${FORGE_COUNT:-10}"' in text
     # ...and the blank count must not trip the dispatch-only validation
     steps = _load(wf)["jobs"]["forge"]["steps"]
     validate = [s for s in steps if s.get("name") == "Validate inputs"][0]

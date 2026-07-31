@@ -2,7 +2,7 @@ name: Forge cycle
 
 # The production problem factory: runs the three forges back-to-back, forever.
 #
-# Each stage is one batch of 15 problems, and each starts the moment the
+# Each stage is one batch of 10 problems, and each starts the moment the
 # previous one finishes (`needs:`), not on a clock — so no stage idles waiting
 # for its slot, and a fast or slow stage simply shifts the rest of the cycle.
 #
@@ -20,8 +20,8 @@ name: Forge cycle
 # already pending replaces it, and you will see the occasional **cancelled**
 # run in the Actions list. That is the mechanism working, not a failure.
 #
-# Throughput: ~15.5 cycles a day => ~675 problems a day (225 per type), and
-# ~46 GitHub Models requests a day for bidding classification (5 problems per
+# Throughput: ~15.5 cycles a day => ~465 problems a day (155 per type), and
+# ~31 GitHub Models requests a day for bidding classification (5 problems per
 # request), well inside the free tier's ~150/day.
 #
 # This is the ONLY scheduled forge workflow. The three stage workflows have no

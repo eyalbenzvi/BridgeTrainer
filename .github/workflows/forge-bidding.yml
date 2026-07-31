@@ -14,13 +14,13 @@ name: Forge bidding problems
 # Two ways to run:
 #   * AS A CYCLE STAGE — forge-cycle.yml calls this workflow as the first of its
 #     three back-to-back stages, passing no count, which selects the batch size
-#     below (FORGE_BIDDING_COUNT problems, default 15). That is the production
+#     below (FORGE_BIDDING_COUNT problems, default 10). That is the production
 #     path; this file has no schedule of its own. Tune via repository variables
 #     (Settings → Secrets and variables → Actions → Variables):
 #     FORGE_BIDDING_COUNT and FORGE_BIDDING_MAX_SECONDS (generation time budget,
 #     default 1800 — ~1.5x the observed ~11 min run, so it truncates a
-#     pathological batch instead of stalling the cycle). At 15 problems per
-#     cycle and ~15.5 cycles a day that is ~46 GitHub Models requests a day
+#     pathological batch instead of stalling the cycle). At 10 problems per
+#     cycle and ~15.5 cycles a day that is ~31 GitHub Models requests a day
 #     (5 problems per request), well inside the free tier's ~150 requests/day
 #     for a low-tier model.
 #   * MANUAL — Actions tab → "Run workflow": pick count, seed, time budget. Use
@@ -65,7 +65,7 @@ on:
       count:
         description: "Number of problems to generate"
         type: string
-        default: "15"
+        default: "10"
         required: true
       seed:
         description: "RNG seed (blank = unique per run, so re-runs add new boards)"
@@ -148,7 +148,7 @@ jobs:
           if [ -z "$COUNT" ]; then
             # cycle stage: batch size and budget from the repo variables.
             # Time-based seed default => fresh boards.
-            N="${FORGE_COUNT:-15}"
+            N="${FORGE_COUNT:-10}"
             BUDGET="${FORGE_MAX_SECONDS:-1800}"
             echo ">> cycle bidding batch: $N problems, ${BUDGET}s"
             MAX_SECONDS="$BUDGET" \
@@ -168,7 +168,7 @@ jobs:
           FORGE_COUNT: ${{ vars.FORGE_BIDDING_COUNT }}
         run: |
           if [ -z "$COUNT" ]; then
-            HEAD="cycle stage, ${FORGE_COUNT:-15} problems"
+            HEAD="cycle stage, ${FORGE_COUNT:-10} problems"
           else
             HEAD="requested $COUNT"
           fi
