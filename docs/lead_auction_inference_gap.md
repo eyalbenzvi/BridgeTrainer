@@ -246,6 +246,26 @@ reading. Phase 1 removes the gloss-contradicting deals; calibration on the
 validated remainder is near-strict; under it the reference board's verdict
 becomes the passive diamond — CHANGED, stable across both readings, kept.
 
+**Production dry-run (2026-08-02, read-only, 100-board random sample of the
+3,308-problem lead pool):**
+
+* Phase 1: **356 deals (10.8%) contradict their own glosses** — unfixable,
+  slated for deletion; 2,952 validated.
+* Phase 2 recalibration on the validated subset: p = 0.94–1.00 per clause
+  kind → stop / partial_stop / honor_all / strong_rebiddable all fit to the
+  0.02 clamp floor, exactly the near-strict reading the validated pool
+  justifies.
+* Phase 3 (sample of 100): 92 regraded, 6 honor_sensitive, 2 empty_set,
+  0 errors — and **23% of surviving boards get a CHANGED answer**.
+* Extrapolated to the full pool: ≈590 deletions (~18%), ≈2,700 boards kept,
+  ≈600–700 of them with a corrected recommendation. The reference board
+  `lead1-19fa5daef4b` regrades to the passive cluster (MP accepted
+  {C7,C6,HQ,DT,D9}; IMP {C7,C6}), stable across both readings, SA demoted
+  to a difficulty-4 trap.
+* Nothing was written: apply with
+  `python scripts/migrate_lead_card_world.py --key sa.json --workers 8
+  --apply` (run when no forge push is active), expected ~2–4 h wall-clock.
+
 Longer term (not in this branch): fold the gib-card profile into Ben's
 proposal stage (constrain, then consistency-score); auto-derive negative
 inferences from calls NOT chosen (the DSL's alt_groups can now express
