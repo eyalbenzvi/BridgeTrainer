@@ -182,3 +182,75 @@ def test_sampler_from_record_places_key_honor_with_declarer():
     # determinism in the seed
     ls2 = sampler_from_record(rec, max_seconds=60.0).sample(problem, 120, seed=1)
     assert [hd["N"] for hd in ls2.hands] == [hd["N"] for hd in ls.hands]
+
+
+# ---- the inference gate (one definition for forge + pool audit) -----------
+
+def _reading(winner, delta=None, ci=None):
+    r = {"winner": winner, "means": {}, "diagnostics": {}}
+    if delta is not None:
+        r["published_delta"] = {"delta": delta, "ci95": list(ci), "ess": 200}
+    return r
+
+
+def test_verdict_stable_when_published_wins_both_readings():
+    from bridge_trainer.engine.lead_gib_constraints import inference_verdict
+    readings = {"soft": _reading("SA", 0.0, (0.0, 0.0)),
+                "strict": _reading("SA", 0.0, (0.0, 0.0))}
+    assert inference_verdict("SA", readings)[0] == "stable"
+
+
+def test_verdict_refuted_on_ci_clean_loss_in_any_reading():
+    from bridge_trainer.engine.lead_gib_constraints import inference_verdict
+    readings = {"soft": _reading("SA", 0.0, (0.0, 0.0)),
+                "strict": _reading("D5", -0.25, (-0.40, -0.07))}
+    status, detail = inference_verdict("SA", readings)
+    assert status == "inference_refuted"
+    assert "strict" in detail and "D5" in detail
+
+
+def test_verdict_refuted_on_margin_even_when_ci_touches_zero():
+    from bridge_trainer.engine.lead_gib_constraints import (
+        REFUTE_MARGIN, inference_verdict)
+    readings = {"soft": _reading("SA", 0.0, (0.0, 0.0)),
+                "strict": _reading("D5", -(REFUTE_MARGIN + 0.05),
+                                   (-0.5, 0.02))}
+    assert inference_verdict("SA", readings)[0] == "inference_refuted"
+
+
+def test_verdict_honor_sensitive_when_readings_disagree_within_noise():
+    from bridge_trainer.engine.lead_gib_constraints import inference_verdict
+    readings = {"soft": _reading("SA", 0.0, (0.0, 0.0)),
+                "strict": _reading("D5", -0.05, (-0.2, 0.1))}
+    assert inference_verdict("SA", readings)[0] == "honor_sensitive"
+
+
+def test_verdict_abstains_without_constraints_or_answer():
+    from bridge_trainer.engine.lead_gib_constraints import inference_verdict
+    assert inference_verdict("SA", {"soft": {"diagnostics": {}},
+                                    "strict": {"diagnostics": {}}})[0] \
+        == "abstain"
+    assert inference_verdict(None, {"soft": _reading("SA")})[0] == "abstain"
+
+
+def test_forge_helper_blocks_refuted_and_passes_stable(monkeypatch):
+    from bridge_trainer.engine import lead_maker, lead_gib_constraints
+
+    rec = {"contract": "3NTN", "verdict": {"accepted": ["SA"]}}
+
+    def fake_gate_refuted(record, **kw):
+        return ("inference_refuted", "strict: SA loses 0.25 to D5", {})
+
+    monkeypatch.setattr(lead_gib_constraints, "inference_gate",
+                        fake_gate_refuted)
+    t = {}
+    out = lead_maker._inference_gate_reject(rec, t)
+    assert out is not None and out[0] == "inference_refuted"
+    assert "inference_gate_s" in t
+
+    monkeypatch.setattr(lead_gib_constraints, "inference_gate",
+                        lambda record, **kw: ("stable", "ok", {}))
+    assert lead_maker._inference_gate_reject(rec, {}) is None
+    monkeypatch.setattr(lead_gib_constraints, "inference_gate",
+                        lambda record, **kw: ("abstain", "none", {}))
+    assert lead_maker._inference_gate_reject(rec, {}) is None

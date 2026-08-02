@@ -136,23 +136,58 @@ Surfaces:
   when the cards actually constrained a seat, like the rule-engine
   constraint sampler).
 
-## 5. Recommendations
+## 5. Policy (enforced, not advisory)
 
-1. **Pool hygiene:** run `scripts/audit_lead_inference.py --all-leads`
-   against production; treat `published_loses` as delete/regenerate (the
-   verdict is refuted by the auction's own stated meaning) and
-   `honor_sensitive` as "no single answer — re-audit with more samples or
-   accept both leads".
-2. **Forge gate:** before publishing a lead problem, require the winner to
-   survive the soft AND strict gib-card readings (two Ben-free sampler runs;
-   filter-before-DDS keeps it cheap). A board whose winner flips between
-   readings is a fine *training* board only if the accepted set includes
-   both winners — otherwise regenerate.
-3. **Diagnose by honor location:** the decisive statistic on ace-lead boards
-   is P(missing top honor of the led suit @ declarer/dummy/partner) — the
-   SK-strata table of §2 costs nothing extra (the strata machinery already
-   exists) and pinpoints where any two samplers disagree.
-4. **Longer term:** fold the gib-card profile into Ben's proposal stage
-   (constrain, then consistency-score) instead of only re-weighting after
-   the fact; and extend `domain.constraints` with per-seat disjunction
-   support so "didn't bid 2NT"-type denials become encodable.
+The app trains lead-finding. A board whose published answer no expert would
+choose is not a weak board — it is a wrong one, and wrong answers teach the
+opposite of the skill. Boards are generated at scale (~27s each), so the
+asymmetry is total: rejecting a good board costs seconds; publishing a bad
+answer costs trust. Hence a binary gate, not a flag.
+
+**The rule (one definition — `engine/lead_gib_constraints.inference_verdict`,
+shared by the forge and the pool audit so they cannot drift):** a lead
+problem ships with a single answer ONLY if that answer survives BOTH
+readings of its own displayed auction cards —
+
+* `inference_refuted` — in either reading the published lead loses to the
+  reading's winner with a CI clear of 0, **or** by more than
+  `REFUTE_MARGIN = 0.15` DD tricks (a low-sample tie must not smuggle a
+  refuted answer through). **Blocked / deleted.**
+* `honor_sensitive` — soft and strict crown different winners: there is no
+  single answer to teach. **Blocked / deleted.**
+* `stable` / `abstain` (nothing in the auction was recognisable) — ships.
+
+Enforcement points, all in this branch:
+
+1. **Forge (blocking):** `forge_lead_one` now runs the gate on every
+   would-be-accepted record — both the normal and the `lead_doubled` paths —
+   after all cheaper gates, and rejects with reason
+   `inference_refuted` / `honor_sensitive`. Measured cost: **15.5s** per
+   accepted board (2×250 Ben-free layouts + endplay), zero cost on the
+   ~90% of boards the earlier gates already kill. On this board the forge
+   now prints: `inference_refuted strict: SA loses 0.39 DD tricks to D5
+   (CI [-0.57, -0.22])` — the SA answer can never be published again.
+2. **Pool purge (one command):**
+   `python scripts/audit_lead_inference.py --key sa.json --all-leads
+   --purge` audits every stored lead problem under the same verdict and
+   DELETES the flagged ones (index-first `remove`, the forcing-pass purge
+   machinery; user attempts stay, regrading as `missing_problem`). Run it
+   once against production; the forge refills the pool under the new gate.
+   `lead1-19fa5daef4b` is flagged `inference_refuted` and goes.
+3. **Deeper audits when wanted:** `trainer lead-posterior-audit --samplers
+   gib-constraint,gib-constraint-strict,current,...` — the pair votes in
+   the cross-sampler verdict.
+
+Rationale for the two named readings (rather than one number): the flip
+point on this board is P(SK@declarer)≈0.88 — inside the honest uncertainty
+band of "partial stop". Any single interpretation would be a tunable
+opinion; requiring the answer to survive BOTH ends of the band is what
+"clear-cut" means operationally. The strict reading is exactly "the student
+believed the card"; the soft reading is "the bidder stretched". An answer
+that needs one of them to be false is not teachable.
+
+Longer term (not in this branch): fold the gib-card profile into Ben's
+proposal stage (constrain, then consistency-score) so the primary verdict
+table itself is graded on an auction-consistent distribution; extend
+`domain.constraints` with per-seat disjunctions so "didn't bid 2NT"-type
+denials become encodable.

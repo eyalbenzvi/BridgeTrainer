@@ -136,6 +136,25 @@ class LeadOutcome:
     detail: str = ""               # preformatted log tail (no [i/count])
 
 
+def _inference_gate_reject(rec, t) -> tuple[str, str] | None:
+    """Run the auction-inference gate on a finished record; (reason, detail)
+    when it must be rejected, None when it may ship. ``inference_refuted``
+    (the auction's stated meaning beats the published answer) and
+    ``honor_sensitive`` (the answer flips between the soft and strict
+    readings of the announced stops) both block; ``stable``/``abstain``
+    pass. One definition with scripts/audit_lead_inference.py — both call
+    engine/lead_gib_constraints.inference_verdict."""
+    from .lead_gib_constraints import inference_gate
+    tg = time.perf_counter()
+    try:
+        status, detail, _readings = inference_gate(rec)
+    finally:
+        t["inference_gate_s"] = time.perf_counter() - tg
+    if status in ("inference_refuted", "honor_sensitive"):
+        return status, f"{status} {detail} contract={rec['contract']}"
+    return None
+
+
 def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
                    require_doubled: bool = False,
                    doubled_min_gap: float = 0.0,
@@ -248,6 +267,10 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
         rec = build_lead_record(seed, hands, dealer_i, vul, fc, leader_i,
                                 hand, full_auction, le, v, auc, notes,
                                 elapsed, target_mode=target_mode)
+        bad_inference = _inference_gate_reject(rec, t)
+        if bad_inference:
+            return LeadOutcome(seed, "rejected", bad_inference[0], timings=t,
+                               detail=bad_inference[1])
         detail = (f"ACCEPTED {rec['id']} [{target_mode}] lead "
                   f"{SEATS[leader_i]} vs {contract} "
                   f"(doubled) best={'/'.join(v.best)} "
@@ -341,6 +364,16 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
     if unsound:
         return LeadOutcome(seed, "rejected", "board_unsound", timings=t,
                            detail="board_unsound " + "; ".join(unsound[:3]))
+    # ---- auction-inference gate (lead1-19fa5daef4b): regrade the finished
+    # record under the soft AND strict readings of its own GIB cards (Ben-free
+    # ConstraintSampler + endplay DDS). An answer the auction's stated meaning
+    # refutes, or one that flips between readings, must never ship — the
+    # auction is the whole evidence the student reads. Runs last because only
+    # boards that survived every cheaper gate pay the two DDS regrades.
+    bad_inference = _inference_gate_reject(rec, t)
+    if bad_inference:
+        return LeadOutcome(seed, "rejected", bad_inference[0], timings=t,
+                           detail=bad_inference[1])
     detail = (f"ACCEPTED {rec['id']} [{target_mode}] lead {SEATS[leader_i]} "
               f"vs {contract} best={'/'.join(v.best)} "
               f"gap={v.measured.get('gap')} "

@@ -227,6 +227,108 @@ def sampler_from_record(record: dict, stop_miss_scale: float = 1.0, **kw):
                              **kw)
 
 
+# ---------------------------------------------------------------------------
+# the inference gate: no lead board ships with an answer the auction refutes
+# ---------------------------------------------------------------------------
+# Reject when the published best lead trails the reading's winner by more
+# than this many DD tricks, even if the bootstrap CI still touches 0 —
+# a low-sample tie must not smuggle a refuted answer through.
+REFUTE_MARGIN = 0.15
+GATE_SAMPLES = 250
+GATE_SECONDS = 60.0
+
+
+def regrade_readings(record: dict, samples: int = GATE_SAMPLES,
+                     seed: int = 1, n_boot: int = 600) -> dict:
+    """Grade every lead of *record* under BOTH interpretation strengths of
+    its own GIB cards: ``soft`` (default miss mass on announced stops) and
+    ``strict`` (announcements taken literally). Ben-free; endplay DDS on
+    physical cards. Returns {reading: {winner, means, published_delta:
+    {delta, ci95, ess}, diagnostics}} — empty dict per reading when the
+    constraints produced no layouts (the gate then abstains)."""
+    from .lead_posterior import build_problem, delta_report, evaluate_layouts
+
+    problem = build_problem(record["hand"], list(record["auction"]),
+                            record["dealer"], record.get("vul", "None"),
+                            record["contract"])
+    published = (((record.get("verdict") or {}).get("accepted")) or [None])[0]
+    out = {}
+    for reading, scale in (("soft", 1.0), ("strict", 0.0)):
+        sampler = sampler_from_record(record, stop_miss_scale=scale,
+                                      max_seconds=GATE_SECONDS)
+        ls = sampler.sample(problem, samples, seed)
+        diag = getattr(ls, "constraint_diagnostics", {})
+        if ls.n == 0 or not diag.get("any_constraint_applied"):
+            out[reading] = {"diagnostics": diag}
+            continue
+        ev = evaluate_layouts(ls)
+        means = ev.weighted_mean()
+        order = ev.ranking()
+        r = {"winner": order[0],
+             "means": {c: round(means[c], 3) for c in order},
+             "diagnostics": diag}
+        if published and published in ev.def_tricks:
+            dr = delta_report(ev.def_tricks[published],
+                              ev.def_tricks[order[0]],
+                              weight=ls.weight, n_boot=n_boot, seed=seed)
+            r["published_delta"] = {"delta": dr["mean"],
+                                    "ci95": dr["boot_ci95"],
+                                    "ess": dr["ess"]}
+        out[reading] = r
+    return out
+
+
+def inference_verdict(published: str | None, readings: dict) -> tuple[str, str]:
+    """(status, detail) for a published single answer against the two-reading
+    regrade. ONE definition, shared by the forge gate and the pool audit
+    script, so they cannot drift.
+
+    * ``inference_refuted`` — in some reading the published lead loses to
+      that reading's winner decisively: the bootstrap CI excludes 0, OR the
+      point loss exceeds REFUTE_MARGIN tricks. The board must not ship /
+      must leave the pool: its answer is contradicted by the auction's own
+      stated meaning.
+    * ``honor_sensitive`` — the two readings crown different winners and at
+      least one of them is not the published lead: there is no single
+      answer to teach. Must not ship as a single-answer board.
+    * ``abstain`` — no published answer, or neither reading produced
+      constrained layouts (nothing recognisable in the auction).
+    * ``stable`` — the published answer is the winner (or within noise of
+      it) under BOTH readings.
+    """
+    graded = {k: v for k, v in readings.items() if v.get("winner")}
+    if not published or not graded:
+        return "abstain", "no published answer or no constrained layouts"
+    for reading, r in graded.items():
+        pd = r.get("published_delta")
+        if pd is None:
+            continue
+        lo, hi = pd["ci95"]
+        loses_ci = published != r["winner"] and not (lo <= 0 <= hi)
+        loses_margin = pd["delta"] < -REFUTE_MARGIN
+        if loses_ci or loses_margin:
+            return ("inference_refuted",
+                    f"{reading}: {published} loses {-pd['delta']:.2f} DD "
+                    f"tricks to {r['winner']} (CI {pd['ci95']})")
+    winners = {r["winner"] for r in graded.values()}
+    if len(winners) > 1 and winners != {published}:
+        return ("honor_sensitive",
+                "readings disagree: " + ", ".join(
+                    f"{k}->{v['winner']}" for k, v in sorted(graded.items())))
+    return "stable", "published answer survives both readings"
+
+
+def inference_gate(record: dict, samples: int = GATE_SAMPLES, seed: int = 1,
+                   n_boot: int = 600) -> tuple[str, str, dict]:
+    """Forge-time gate: (status, detail, readings). ``inference_refuted`` and
+    ``honor_sensitive`` block publication; ``stable``/``abstain`` pass."""
+    readings = regrade_readings(record, samples=samples, seed=seed,
+                                n_boot=n_boot)
+    published = (((record.get("verdict") or {}).get("accepted")) or [None])[0]
+    status, detail = inference_verdict(published, readings)
+    return status, detail, readings
+
+
 def sampler_from_problem(problem, stop_miss_scale: float = 1.0, **kw):
     """Same, for a bare LeadProblem — fetches the GIB cards live (one HTTP
     GET per call, cached; see engine/gib_explain.py). For the audit CLI."""
