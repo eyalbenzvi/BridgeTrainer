@@ -1,25 +1,26 @@
 {
  "alt_group": {
-  "n": 27,
-  "p": 0.7778,
-  "base_n": 54,
-  "p0": 0.037,
+  "n": 16,
+  "p": 1.0,
+  "base_n": 32,
+  "p0": 0.0625,
   "weight": null,
   "kept_default": 0.05
  },
  "at_best_partial": {
-  "n": 56,
-  "p": 0.3571,
-  "base_n": 112,
-  "p0": 0.3482,
-  "weight": 0.9
+  "n": 15,
+  "p": 1.0,
+  "base_n": 30,
+  "p0": 0.2667,
+  "weight": null,
+  "kept_default": 0.15
  },
  "honor_all": {
-  "n": 401,
-  "p": 0.7606,
-  "base_n": 820,
-  "p0": 0.0622,
-  "weight": 0.0209
+  "n": 263,
+  "p": 0.943,
+  "base_n": 541,
+  "p0": 0.0222,
+  "weight": 0.02
  },
  "honor_any": {
   "n": 10,
@@ -29,41 +30,33 @@
   "weight": null,
   "kept_default": 0.1
  },
- "honor_none": {
-  "n": 13,
-  "p": 0.2308,
-  "base_n": 26,
-  "p0": 0.6538,
-  "weight": null,
-  "kept_default": 0.05
- },
  "partial_stop": {
-  "n": 1654,
-  "p": 0.8386,
-  "base_n": 3310,
-  "p0": 0.6278,
-  "weight": 0.3247
+  "n": 1181,
+  "p": 0.9983,
+  "base_n": 2364,
+  "p0": 0.5859,
+  "weight": 0.02
  },
  "solid": {
-  "n": 43,
-  "p": 0.7209,
-  "base_n": 86,
+  "n": 26,
+  "p": 1.0,
+  "base_n": 52,
   "p0": 0.0,
   "weight": null,
   "kept_default": 0.05
  },
  "stop": {
-  "n": 492,
-  "p": 0.8679,
-  "base_n": 996,
-  "p0": 0.6245,
-  "weight": 0.2532
+  "n": 405,
+  "p": 1.0,
+  "base_n": 822,
+  "p0": 0.5912,
+  "weight": 0.02
  },
  "strong_rebiddable": {
-  "n": 145,
-  "p": 0.7931,
-  "base_n": 294,
-  "p0": 0.0102,
+  "n": 116,
+  "p": 0.9828,
+  "base_n": 236,
+  "p0": 0.0,
   "weight": 0.02
  },
  "two_stops": {

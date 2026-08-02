@@ -98,7 +98,30 @@ def main() -> int:
                          "boards, update the calibration file, regrade "
                          "stored attempts. Default is a dry run.")
     ap.add_argument("--out", default=None, help="write the JSON report here")
+    ap.add_argument("--state", default=None,
+                    help="checkpoint file (apply mode): every board's write "
+                         "is recorded as it lands, so a killed run resumes "
+                         "where it stopped instead of starting over")
     args = ap.parse_args()
+
+    state_done: set[str] = set()
+    state_flags: set[str] = set()
+    if args.state:
+        sp = Path(args.state)
+        if sp.exists():
+            for line in sp.read_text().splitlines():
+                line = line.strip()
+                if line.startswith("FLAG:"):
+                    state_flags.add(line[5:])
+                elif line:
+                    state_done.add(line.split(":", 1)[-1])
+        state_f = open(sp, "a", buffering=1)      # line-buffered append
+
+        def checkpoint(token: str) -> None:
+            state_f.write(token + "\n")
+    else:
+        def checkpoint(token: str) -> None:      # noqa: ARG001
+            pass
 
     if args.key:
         from bridge_trainer.pool.firestore_store import FirestorePool
@@ -136,27 +159,77 @@ def main() -> int:
     for kind, e in fitted.items():
         print(f"  {kind:18s} n={e['n']:5d} p={e['p']} -> w={e['weight']}")
 
-    # ---- phase 3: regrade ------------------------------------------------
-    todo = validated
+    # ---- apply-mode upfront writes (idempotent, checkpointed) ------------
+    removed = 0
+    if args.apply:
+        from bridge_trainer.engine.lead_gib_constraints import (
+            CALIBRATION_PATH)
+        if "calibration" not in state_flags:
+            CALIBRATION_PATH.write_text(json.dumps(fitted, indent=1) + "\n")
+            checkpoint("FLAG:calibration")
+            print(f"calibration written to {CALIBRATION_PATH}")
+        for pid in sorted(deletions):
+            if pid in state_done:
+                continue
+            removed += bool(pool.remove(pid))
+            checkpoint(f"DEL:{pid}")
+            state_done.add(pid)
+        print(f"gloss deletions applied: {removed}")
+
+    # ---- phase 3: regrade (apply mode writes EACH board as it lands) -----
+    todo = [rec for rec in validated if rec["id"] not in state_done]
+    if state_done:
+        print(f"phase 3 resume: {len(state_done)} already processed, "
+              f"{len(todo)} to go")
     if args.limit and args.limit < len(todo):
         rng = random.Random(args.seed)
         todo = rng.sample(todo, args.limit)
         print(f"phase 3 sampling {len(todo)}/{len(validated)} boards")
+
+    from bridge_trainer.pool.firestore_store import _firestore_safe
+
+    updated = 0
+    reports = []
+
+    def handle(r: dict) -> None:
+        nonlocal updated, removed
+        reports.append(r)
+        if not args.apply:
+            return
+        if r["status"] == "regraded":
+            pool._col.document(r["id"]).set(
+                _firestore_safe(r["update"]), merge=True)
+            updated += 1
+            checkpoint(f"UPD:{r['id']}")
+        elif r["status"] in ("honor_sensitive", "empty_set"):
+            removed += bool(pool.remove(r["id"]))
+            checkpoint(f"DEL:{r['id']}")
+        elif r["status"] == "no_constraints":
+            checkpoint(f"KEEP:{r['id']}")
+        # errors are NOT checkpointed: the board is left untouched and a
+        # rerun retries it.
+        n = len(reports)
+        if n % 25 == 0:
+            print(f"  ... {n}/{len(todo)} regraded "
+                  f"({updated} updated, {removed} deleted)")
+
     jobs = [(rec, args.seed, args.samples) for rec in todo]
     if args.workers > 1:
         with ProcessPoolExecutor(max_workers=args.workers,
                                  initializer=_init_worker,
                                  initargs=(overrides,)) as ex:
-            reports = list(ex.map(_regrade_one, jobs, chunksize=4))
+            for r in ex.map(_regrade_one, jobs, chunksize=2):
+                handle(r)
     else:
         _init_worker(overrides)
-        reports = [_regrade_one(j) for j in jobs]
+        for j in jobs:
+            handle(_regrade_one(j))
 
     by_status = Counter(r["status"] for r in reports)
     changed = [r for r in reports
                if r["status"] == "regraded" and r.get("answer_changed")]
     for r in reports:
-        if r["status"] in ("honor_sensitive", "empty_set", "error"):
+        if r["status"] in ("honor_sensitive", "empty_set"):
             deletions.setdefault(r["id"], f"{r['status']}: "
                                  f"{r.get('detail', '')}"[:200])
     print(f"\nphase 3 regrade: {dict(by_status)}")
@@ -164,7 +237,6 @@ def main() -> int:
     for r in changed[:12]:
         print(f"  {r['id']}: {r['published']} -> {r['new_accepted']}")
 
-    # ---- phase 4: writes -------------------------------------------------
     summary = {
         "lead_total": len(records),
         "gloss_unfulfilled": sum(
@@ -176,26 +248,19 @@ def main() -> int:
         "errors": by_status.get("error", 0),
         "deletions": len(deletions),
         "applied": bool(args.apply),
+        "resumed_over": len(state_done),
         "recalibrated_weights": overrides,
     }
     if args.apply:
-        from bridge_trainer.engine.lead_gib_constraints import (
-            CALIBRATION_PATH)
-        CALIBRATION_PATH.write_text(json.dumps(fitted, indent=1) + "\n")
-        from bridge_trainer.pool.firestore_store import _firestore_safe
-        updated = 0
-        for r in reports:
-            if r["status"] == "regraded" and r["id"] not in deletions:
-                pool._col.document(r["id"]).set(
-                    _firestore_safe(r["update"]), merge=True)
-                updated += 1
-        removed = 0
-        for pid in deletions:
-            removed += bool(pool.remove(pid))
         print(f"\napplied: {updated} docs updated, {removed} deleted")
         summary.update(updated=updated, removed=removed)
-        from bridge_trainer.pool.firestore_store import regrade_attempts
-        summary["regrade_attempts"] = regrade_attempts(args.key)
+        if by_status.get("error", 0) == 0 and "attempts" not in state_flags:
+            from bridge_trainer.pool.firestore_store import regrade_attempts
+            summary["regrade_attempts"] = regrade_attempts(args.key)
+            checkpoint("FLAG:attempts")
+        elif by_status.get("error", 0):
+            print("errors present - regrade_attempts deferred; rerun to "
+                  "retry the failed boards first")
     else:
         print("\nDRY RUN — no writes. Re-run with --apply to execute.")
 
