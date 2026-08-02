@@ -67,6 +67,12 @@ class SeatFeatures:
         lens = np.stack([self.suit_lengths[s] for s in SUIT_NAMES], axis=1)
         return (lens.min(axis=1) >= 2) & ((lens == 2).sum(axis=1) <= 1)
 
+    def holds(self, suit: str, rank: str) -> np.ndarray:
+        """Bool per layout: this seat holds the specific card, e.g. ('C','Q').
+        The primitive behind honor-holding constraints (HonorSpec)."""
+        cid = SUIT_NAMES.index(suit) * 13 + RANK_NAMES.index(rank)
+        return (self.cards == cid).any(axis=1)
+
     def take(self, mask_or_idx: np.ndarray) -> "SeatFeatures":
         return SeatFeatures(cards=self.cards[mask_or_idx])
 

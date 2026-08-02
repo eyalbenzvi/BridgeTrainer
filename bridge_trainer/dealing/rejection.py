@@ -25,6 +25,38 @@ from ..semantics.predicates import PREDICATES
 from .features import SeatFeatures, hand_to_pbn, parse_hand_pbn
 
 
+def _honor_spec_weight(spec, f: SeatFeatures) -> np.ndarray:
+    """Per-layout factor of one HonorSpec: 1 where the spec holds, else its
+    miss weight. 'all' = holds every listed rank, 'any' = at least one,
+    'none' = none of them."""
+    held = np.stack([f.holds(spec.suit, r) for r in spec.ranks], axis=1)
+    if spec.mode == "all":
+        sat = held.all(axis=1)
+    elif spec.mode == "any":
+        sat = held.any(axis=1)
+    else:                       # 'none'
+        sat = ~held.any(axis=1)
+    return np.where(sat, 1.0, spec.weight)
+
+
+def _soft_seat_weight(sc, f: SeatFeatures) -> np.ndarray:
+    """One seat's multiplicative weight from suit-length bands, suit-quality
+    bands, honor specs and denials (everything except the HCP band, which
+    stage 1 already applied for base constraints, and alt_groups, which the
+    caller combines). Shared by base constraints and alternatives."""
+    w = np.ones(len(f.cards), dtype=np.float64)
+    for suit in SUITS:
+        w *= sc.suit_weights[suit][f.suit_lengths[suit]]
+        w *= sc.suit_hcp_weights[suit][f.suit_hcp[suit]]
+    for spec in sc.honor_specs:
+        w *= _honor_spec_weight(spec, f)
+    for d in sc.denials:
+        hit = ((f.hcp >= d.hcp_lo) & (f.hcp <= d.hcp_hi)
+               & (f.suit_lengths[d.suit] >= d.min_len))
+        w *= np.where(hit, d.weight, 1.0)
+    return w
+
+
 class RejectionDealSource:
     def __init__(self, my_seat: Seat, batch_size: int = 50_000):
         self.my_seat = my_seat
@@ -109,7 +141,8 @@ class RejectionDealSource:
             weights[idx[ok]] *= w[ok]
             alive[idx[~ok]] = False
 
-        # Stage 2: suit-length + suit-quality band weights + denials.
+        # Stage 2: suit-length + suit-quality band weights + honor specs +
+        # denials + disjunction groups.
         for seat in self.hidden_seats:
             sc = constraints.seats.get(seat)
             if sc is None:
@@ -118,14 +151,14 @@ class RejectionDealSource:
             if not len(idx):
                 return perm[:0], weights[:0]
             f = SeatFeatures(cards=perm[idx][:, slices[seat]])
-            w = np.ones(len(idx), dtype=np.float64)
-            for suit in SUITS:
-                w *= sc.suit_weights[suit][f.suit_lengths[suit]]
-                w *= sc.suit_hcp_weights[suit][f.suit_hcp[suit]]
-            for d in sc.denials:
-                hit = ((f.hcp >= d.hcp_lo) & (f.hcp <= d.hcp_hi)
-                       & (f.suit_lengths[d.suit] >= d.min_len))
-                w *= np.where(hit, d.weight, 1.0)
+            w = _soft_seat_weight(sc, f)
+            for group in sc.alt_groups:
+                # a group's factor is the best alternative the hand satisfies
+                gw = np.zeros(len(idx), dtype=np.float64)
+                for alt in group:
+                    aw = alt.hcp_weights[f.hcp] * _soft_seat_weight(alt, f)
+                    gw = np.maximum(gw, aw)
+                w *= gw
             ok = w > 0
             weights[idx[ok]] *= w[ok]
             alive[idx[~ok]] = False

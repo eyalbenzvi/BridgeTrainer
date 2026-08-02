@@ -22,19 +22,34 @@ board at forge time) can be graded under a distribution that honours what the
 auction explicitly said — with no dependency on the hand-authored YAML
 rulesets' coverage.
 
+Coverage: the compiler handles the COMPLETE measured GIB vocabulary — 94
+distinct clause patterns over 91,910 instances in the production pool
+(fixture: tests/data/gib_vocab_patterns.json) — lengths/HCP/points via the
+parsed card fields; stops (full/partial/likely/at-best/two) as leader-
+relative suit-quality bands; specific honor holdings (``!CKQ``, ``no
+!DAK``, ``Q+ in !D``) as HonorSpec primitives; ``!SAKQ,no !S`` as an
+alternatives (disjunction) group; solid/exact/strong suit qualities; and
+auction facts as recognised no-ops. Soft miss weights are CALIBRATED
+likelihood ratios measured on real deals (semantics/gib_calibration.json,
+regenerate with scripts/calibrate_gib_vocab.py), scaled by the reading
+strength (``stop_miss_scale=0`` = strict).
+
 Honest labelling, same contract as ConstraintSampler: this is a modelled
-prior (per-seat bands + soft stop weights + silence denials), NOT a
-calibrated posterior. Known limitation: disjunctive negative inferences
-("responder chose 2D, so he lacks stops in ALL THREE side suits or is
-unbalanced") are not representable as per-suit bands and are not encoded;
-the chosen calls' own stop annotations carry most of that information.
+prior, NOT a calibrated deal posterior. Known limitation: negative
+inferences from calls NOT chosen ("responder chose 2D over 2NT, so he
+lacks one of the three side stops or is unbalanced") are not auto-derived —
+the DSL can now express them (alt_groups), but nothing compiles them yet;
+the chosen calls' own annotations carry most of that information.
 """
 from __future__ import annotations
 
+import json
 import re
+from functools import lru_cache
+from pathlib import Path
 
 from ..domain.constraints import (
-    MAX_SUIT_HCP, Band, ConstraintProfile, Denial, SeatConstraints)
+    MAX_SUIT_HCP, Band, ConstraintProfile, Denial, HonorSpec, SeatConstraints)
 
 SUITS = ("S", "H", "D", "C")
 HONOR_HCP = {"A": 4, "K": 3, "Q": 2, "J": 1}
@@ -42,16 +57,56 @@ HONOR_HCP = {"A": 4, "K": 3, "Q": 2, "J": 1}
 # GIB writes "stop in !D", "partial stop in !S", "likely stop in !H".
 _STOP = re.compile(r"(partial\s+|likely\s+)?stop in !([SHDC])", re.I)
 
-# Modelled-prior weights: how much mass stays on "announced a stop but does
-# not actually hold the key honor(s)" — nonzero on purpose (players do bid
-# 3NT on 'just a balanced hand' when no alternative call exists).
-FULL_STOP_MISS_WEIGHT = 0.15
-PARTIAL_STOP_MISS_WEIGHT = 0.35
+# Modelled-prior weights: how much mass stays on "announced X but does not
+# actually hold it" — nonzero on purpose (players do bid 3NT on 'just a
+# balanced hand' when no alternative call exists). These are DEFAULTS; the
+# calibration file (semantics/gib_calibration.json, written by
+# scripts/calibrate_gib_vocab.py) overrides them per clause kind with
+# likelihood ratios measured on real deals.
+DEFAULT_MISS_WEIGHTS = {
+    "stop": 0.15,
+    "partial_stop": 0.35,          # 'likely stop' counts as partial
+    "at_best_partial": 0.15,       # weight on "actually holds a FULL stop"
+    "two_stops": 0.15,
+    "honor_all": 0.05,             # '!CKQ' — near-definitional promises
+    "honor_any": 0.10,             # 'Q+ in !D'
+    "honor_none": 0.05,            # 'no !DAK'
+    "solid": 0.05,                 # 'solid 6-card !S'
+    "alt_group": 0.05,             # floor when no alternative matches
+    "strong_rebiddable": 0.30,     # quality margin for 'strong rebiddable'
+}
+FULL_STOP_MISS_WEIGHT = DEFAULT_MISS_WEIGHTS["stop"]
+PARTIAL_STOP_MISS_WEIGHT = DEFAULT_MISS_WEIGHTS["partial_stop"]
 # Silence denial: a concealed seat that only ever passed after an enemy
 # opening rarely holds a sound overcall (decent 5-card suit + values).
 SILENCE_DENIAL = dict(hcp_lo=9, hcp_hi=16, min_len=5, weight=0.2)
 # Bidders stretch: HCP core bands get a +-1 margin at this weight.
 HCP_MARGIN_WEIGHT = 0.3
+
+CALIBRATION_PATH = (Path(__file__).resolve().parent.parent / "semantics"
+                    / "gib_calibration.json")
+
+
+@lru_cache(maxsize=1)
+def _calibrated_weights() -> dict:
+    """DEFAULT_MISS_WEIGHTS overridden by the checked-in calibration file
+    (measured likelihood ratios), when present."""
+    weights = dict(DEFAULT_MISS_WEIGHTS)
+    try:
+        data = json.loads(CALIBRATION_PATH.read_text())
+    except (OSError, ValueError):
+        return weights
+    for kind, entry in data.items():
+        w = (entry or {}).get("weight")
+        if kind in weights and isinstance(w, (int, float)) and 0 <= w < 1:
+            weights[kind] = float(w)
+    return weights
+
+
+def miss_weight(kind: str, miss_scale: float = 1.0) -> float:
+    """Calibrated miss weight for a clause kind, scaled by the reading
+    strength (miss_scale=0 -> strict: announcements taken literally)."""
+    return _calibrated_weights()[kind] * miss_scale
 
 
 def stop_threshold(leader_holding: str) -> int:
@@ -82,38 +137,321 @@ def stop_bands(leader_holding: str, partial: bool,
     thr = stop_threshold(leader_holding)
     if thr <= 0:
         return None
-    miss_w = (PARTIAL_STOP_MISS_WEIGHT if partial
-              else FULL_STOP_MISS_WEIGHT) * miss_scale
+    miss_w = miss_weight("partial_stop" if partial else "stop", miss_scale)
     bands = [Band(thr, MAX_SUIT_HCP)]
     if thr >= 1 and miss_w > 0:
         bands.append(Band(0, thr - 1, min(miss_w, 1.0)))
     return bands
 
 
+def two_stop_bands(leader_holding: str,
+                   miss_scale: float = 1.0) -> list[Band] | None:
+    """'two stops in !X': the seat covers the suit twice — threshold is the
+    sum of the two cheapest missing honors (falls back to a single stop when
+    only one honor is out)."""
+    missing = sorted(HONOR_HCP[h] for h in "AKQJ"
+                     if h not in leader_holding.upper())
+    if not missing:
+        return None
+    thr = min(sum(missing[:2]), MAX_SUIT_HCP)
+    miss_w = miss_weight("two_stops", miss_scale)
+    bands = [Band(thr, MAX_SUIT_HCP)]
+    if thr >= 1 and miss_w > 0:
+        bands.append(Band(0, thr - 1, min(miss_w, 1.0)))
+    return bands
+
+
+def at_best_partial_bands(leader_holding: str,
+                          miss_scale: float = 1.0) -> list[Band] | None:
+    """'at best partial stop in !X' — a NEGATIVE promise: the seat does NOT
+    hold a full stop. The inverse of stop_bands: core mass below the stop
+    threshold, reduced mass on 'actually holds it after all'."""
+    thr = stop_threshold(leader_holding)
+    if thr <= 0:
+        return None
+    miss_w = miss_weight("at_best_partial", miss_scale)
+    bands = [Band(0, thr - 1)] if thr >= 1 else []
+    if miss_w > 0:
+        bands.append(Band(thr, MAX_SUIT_HCP, min(miss_w, 1.0)))
+    return bands or None
+
+
 def stops_in_card(card: dict) -> list[tuple[str, bool]]:
-    """[(suit, is_partial)] stop announcements in one GIB card's raw string."""
+    """[(suit, is_partial)] stop announcements in one GIB card's raw string.
+    'likely stop' counts as partial; 'at best partial stop' is a different,
+    NEGATIVE clause and is deliberately not matched here."""
     raw = (card or {}).get("gib_raw") or ""
-    return [(m.group(2).upper(), bool(m.group(1)))
-            for m in _STOP.finditer(raw)]
+    out = []
+    for c in _clauses(raw):
+        m = _STOP.fullmatch(c)
+        if m:
+            out.append((m.group(2).upper(), bool(m.group(1))))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# the full GIB clause vocabulary (measured over the whole pool: 94 distinct
+# patterns; see docs/lead_auction_inference_gap.md). Clauses that
+# parse_meaning already folds into the card's hcp/pts/minlen/maxlen fields
+# are recognised NO-OPs here, as are pure auction facts ("forcing to 3N").
+# ---------------------------------------------------------------------------
+_RE_HONORS = re.compile(r"^!([SHDC])([AKQJT]+)$")               # !CKQ
+_RE_HONORS_OR_VOID = re.compile(                                # !SAKQ,no !S
+    r"^!([SHDC])([AKQJT]+),\s*no !([SHDC])$")
+_RE_NO_HONORS = re.compile(r"^no !([SHDC])([AKQJT]+)$")         # no !DAK
+_RE_HONOR_PLUS = re.compile(r"^([AKQJT])\+ in !([SHDC])$")      # Q+ in !D
+_RE_CARD_EXACT = re.compile(r"^(\d+)-card !([SHDC])$")          # 3-card !D
+_RE_SOLID = re.compile(r"^solid (\d+)-card !([SHDC])$")         # solid 6-card
+_RE_STRONG_REBID = re.compile(r"^strong rebiddable !([SHDC])$")
+_RE_TWO_STOPS = re.compile(r"^two stops in !([SHDC])$")
+_RE_AT_BEST = re.compile(r"^at best partial stop in !([SHDC])$")
+# recognised, but carrying no hand constraint (auction facts / already in
+# the parsed card fields via parse_meaning)
+_NOOP_RES = [
+    re.compile(r"^forcing( to \d+[NSHDC])?$"),
+    re.compile(r"^game force$"),
+    re.compile(r"^opponents cannot play undoubled below \d+N$"),
+    re.compile(r"^\d+- losers$"),
+    re.compile(r"^\d+(-\d+)?\s*[+-]?\s*!([SHDC])$"),            # suit ranges
+    re.compile(r"^\d+(-\d+)?\s*[+-]?\s*HCP$", re.I),
+    re.compile(r"^\d+(-\d+)?\s*[+-]?\s*total points$", re.I),
+    re.compile(r"^(twice rebiddable|rebiddable|biddable) !([SHDC])$"),
+]
+
+
+def _clauses(raw: str) -> list[str]:
+    body = raw.split("--", 1)[-1] if "--" in raw else raw
+    return [c.strip() for c in body.split(";") if c.strip()]
+
+
+def _honor_ranks_vs_leader(ranks: str, leader_holding: str):
+    """Split promised ranks into (still promisable, contradicted-by-leader).
+    A rank the LEADER holds cannot be in the concealed hand: the gloss is
+    contradicted there and the spec degrades gracefully (reported, never a
+    zero-mass constraint)."""
+    held = set(leader_holding.upper())
+    promisable = "".join(r for r in ranks if r not in held)
+    contradicted = "".join(r for r in ranks if r in held)
+    return promisable, contradicted
+
+
+def compile_clause(clause: str, leader_suits: list[str],
+                   miss_scale: float = 1.0) -> dict | None:
+    """One raw GIB clause -> a constraint effect, or None when unrecognised.
+
+    The effect dict may carry: ``suits`` / ``suit_hcp`` (suit -> band list),
+    ``honor_specs`` (list), ``alt_groups`` (list of groups), and
+    ``contradicted`` (clause text whose promise the leader's own hand makes
+    impossible — reported upward, constraint skipped). A recognised no-op
+    returns an empty dict."""
+    for r in _NOOP_RES:
+        if r.match(clause):
+            return {}
+
+    m = _STOP.fullmatch(clause)
+    if m:
+        suit = m.group(2).upper()
+        bands = stop_bands(leader_suits[SUITS.index(suit)], bool(m.group(1)),
+                           miss_scale=miss_scale)
+        return {"suit_hcp": {suit: bands}} if bands else {}
+
+    m = _RE_AT_BEST.match(clause)
+    if m:
+        suit = m.group(1)
+        bands = at_best_partial_bands(leader_suits[SUITS.index(suit)],
+                                      miss_scale=miss_scale)
+        return {"suit_hcp": {suit: bands}} if bands else {}
+
+    m = _RE_TWO_STOPS.match(clause)
+    if m:
+        suit = m.group(1)
+        bands = two_stop_bands(leader_suits[SUITS.index(suit)],
+                               miss_scale=miss_scale)
+        return {"suit_hcp": {suit: bands}} if bands else {}
+
+    m = _RE_HONORS_OR_VOID.match(clause)
+    if m and m.group(1) == m.group(3):
+        suit, ranks = m.group(1), m.group(2)
+        promisable, contradicted = _honor_ranks_vs_leader(
+            ranks, leader_suits[SUITS.index(suit)])
+        if not promisable:
+            return {"contradicted": clause}
+        floor = max(miss_weight("alt_group", miss_scale), 0.0)
+        group = [
+            SeatConstraints.from_bands(honor_specs=[
+                HonorSpec(suit, promisable, "all", 0.0)]),
+            SeatConstraints.from_bands(suits={suit: [Band(0, 0)]}),
+        ]
+        if floor > 0:
+            group.append(SeatConstraints.from_bands(
+                hcp=[Band(0, 40, min(floor, 1.0))]))
+        return {"alt_groups": [group]}
+
+    m = _RE_HONORS.match(clause)
+    if m:
+        suit, ranks = m.group(1), m.group(2)
+        promisable, contradicted = _honor_ranks_vs_leader(
+            ranks, leader_suits[SUITS.index(suit)])
+        if not promisable:
+            return {"contradicted": clause}
+        w = miss_weight("honor_all", miss_scale)
+        return {"honor_specs": [HonorSpec(suit, promisable, "all", w)]}
+
+    m = _RE_NO_HONORS.match(clause)
+    if m:
+        suit, ranks = m.group(1), m.group(2)
+        promisable, _ = _honor_ranks_vs_leader(
+            ranks, leader_suits[SUITS.index(suit)])
+        if not promisable:      # leader holds them all: trivially true
+            return {}
+        w = miss_weight("honor_none", miss_scale)
+        return {"honor_specs": [HonorSpec(suit, promisable, "none", w)]}
+
+    m = _RE_HONOR_PLUS.match(clause)
+    if m:
+        floor_rank, suit = m.group(1), m.group(2)
+        order = "AKQJT"
+        ranks = order[:order.index(floor_rank) + 1]
+        promisable, _ = _honor_ranks_vs_leader(
+            ranks, leader_suits[SUITS.index(suit)])
+        if not promisable:
+            return {"contradicted": clause}
+        w = miss_weight("honor_any", miss_scale)
+        return {"honor_specs": [HonorSpec(suit, promisable, "any", w)]}
+
+    m = _RE_CARD_EXACT.match(clause)
+    if m:
+        n, suit = int(m.group(1)), m.group(2)
+        return {"suits": {suit: [Band(n, n)]}}
+
+    m = _RE_SOLID.match(clause)
+    if m:
+        n, suit = int(m.group(1)), m.group(2)
+        effect = {"suits": {suit: [Band(n, min(n + 1, 13))]}}
+        promisable, contradicted = _honor_ranks_vs_leader(
+            "AKQ", leader_suits[SUITS.index(suit)])
+        if promisable:
+            w = miss_weight("solid", miss_scale)
+            effect["honor_specs"] = [HonorSpec(suit, promisable, "all", w)]
+        else:
+            effect["contradicted"] = clause
+        return effect
+
+    m = _RE_STRONG_REBID.match(clause)
+    if m:
+        suit = m.group(1)
+        margin = miss_weight("strong_rebiddable", 1.0)
+        bands = [Band(5, MAX_SUIT_HCP)]
+        if margin > 0:
+            bands.append(Band(3, 4, min(margin, 1.0)))
+        return {"suits": {suit: [Band(5, 13)]}, "suit_hcp": {suit: bands}}
+
+    return None
+
+
+def clause_kind(clause: str) -> str | None:
+    """The calibration bucket a clause belongs to, or None for hard /
+    no-op clauses (lengths, HCP, auction facts) that need no calibration."""
+    if _RE_AT_BEST.match(clause):
+        return "at_best_partial"
+    if _RE_TWO_STOPS.match(clause):
+        return "two_stops"
+    m = _STOP.fullmatch(clause)
+    if m:
+        return "partial_stop" if m.group(1) else "stop"
+    if _RE_HONORS_OR_VOID.match(clause):
+        return "alt_group"
+    if _RE_HONORS.match(clause):
+        return "honor_all"
+    if _RE_NO_HONORS.match(clause):
+        return "honor_none"
+    if _RE_HONOR_PLUS.match(clause):
+        return "honor_any"
+    if _RE_SOLID.match(clause):
+        return "solid"
+    if _RE_STRONG_REBID.match(clause):
+        return "strong_rebiddable"
+    return None
+
+
+def _hand_suit_hcp(hand_pbn: str, suit: str) -> int:
+    holding = hand_pbn.split(".")[SUITS.index(suit)]
+    return sum(HONOR_HCP.get(c, 0) for c in holding.upper())
+
+
+def _spec_satisfied(spec: HonorSpec, hand_pbn: str) -> bool:
+    holding = set(hand_pbn.split(".")[SUITS.index(spec.suit)].upper())
+    held = [r in holding for r in spec.ranks]
+    if spec.mode == "all":
+        return all(held)
+    if spec.mode == "any":
+        return any(held)
+    return not any(held)
+
+
+def clause_core_satisfied(clause: str, leader_hand: str,
+                          seat_hand: str) -> bool | None:
+    """Does *seat_hand* satisfy the CORE (weight-1.0) region of *clause*,
+    compiled relative to *leader_hand*? None when the clause compiles to no
+    testable constraint. This is the measurement primitive the calibration
+    script uses: p = P(core satisfied | clause announced) on real deals."""
+    effect = compile_clause(clause, leader_hand.split("."), miss_scale=1.0)
+    if not effect or effect.get("contradicted"):
+        return None
+
+    def core_ok(bands, value):
+        return any(b.lo <= value <= b.hi and b.weight >= 0.999
+                   for b in bands)
+
+    checks = []
+    for suit, bands in (effect.get("suit_hcp") or {}).items():
+        checks.append(core_ok(bands, _hand_suit_hcp(seat_hand, suit)))
+    for suit, bands in (effect.get("suits") or {}).items():
+        checks.append(core_ok(
+            bands, len(seat_hand.split(".")[SUITS.index(suit)])))
+    for spec in effect.get("honor_specs") or []:
+        checks.append(_spec_satisfied(spec, seat_hand))
+    for group in effect.get("alt_groups") or []:
+        def alt_ok(alt):
+            ok = all(_spec_satisfied(s, seat_hand) for s in alt.honor_specs)
+            for suit in SUITS:
+                ln = len(seat_hand.split(".")[SUITS.index(suit)])
+                ok &= bool(alt.suit_weights[suit][ln] >= 0.999)
+            return ok
+        # a constant-floor alternative (hcp weight < 1 everywhere) is the
+        # soft escape hatch, not a core option — exclude it from "satisfied"
+        checks.append(any(alt_ok(alt) for alt in group
+                          if alt.hcp_weights.max() >= 0.999))
+    if not checks:
+        return None
+    return all(checks)
 
 
 def _card_is_empty(card: dict) -> bool:
     return not card or (card.get("hcp") is None and card.get("pts") is None
                         and not card.get("minlen") and not card.get("maxlen")
-                        and not stops_in_card(card))
+                        and not (card.get("gib_raw") or "").strip())
 
 
-def seat_constraints_from_card(card: dict, leader_hand: str,
-                               miss_scale: float = 1.0) -> SeatConstraints:
-    """One call's GIB card -> SeatConstraints (bands only, no denials).
+def compile_card(card: dict, leader_hand: str,
+                 miss_scale: float = 1.0) -> tuple[SeatConstraints, dict]:
+    """One call's GIB card -> (SeatConstraints, diagnostics).
 
     * ``hcp (lo, hi)`` -> core band with a +-1 stretch margin;
     * ``pts (lo, hi)`` (total points) -> only the UPPER bound binds HCP
       (distribution points inflate the total, never deflate it);
     * ``minlen``/``maxlen`` -> hard per-suit length bands (GIB length
       promises are definitional: '3- !S' in an inverted raise IS the call);
-    * ``stop in !X`` / ``partial stop in !X`` -> suit-HCP bands relative to
-      the leader's own holding in X (see ``stop_bands``).
+    * every other clause of the raw meaning string goes through
+      ``compile_clause`` — the full measured GIB vocabulary: stops (full /
+      partial / likely / at-best-partial / two), specific honor holdings
+      (``!CKQ``, ``no !DAK``, ``Q+ in !D``), honor-or-void alternatives
+      (``!SAKQ,no !S``) and exact / solid / strong suit qualities.
+
+    Clause effects are merged MULTIPLICATIVELY (conjunction), so an exact
+    '6-card !S' narrows a '4+ !S' from the parsed fields instead of
+    widening it. diagnostics: {"unrecognized": [...], "contradicted": [...]}
+    — both degrade gracefully (reported upward, never dropped silently).
     """
     hcp_bands = None
     hcp = card.get("hcp")
@@ -137,16 +475,30 @@ def seat_constraints_from_card(card: dict, leader_hand: str,
         if (lo, hi) != (0, 13):
             suits[s] = [Band(lo, hi)]
 
-    suit_hcp = {}
+    sc = SeatConstraints.from_bands(hcp=hcp_bands, suits=suits or None)
+    diag = {"unrecognized": [], "contradicted": []}
     leader_suits = leader_hand.split(".")
-    for suit, partial in stops_in_card(card):
-        bands = stop_bands(leader_suits[SUITS.index(suit)], partial,
-                           miss_scale=miss_scale)
-        if bands:
-            suit_hcp[suit] = bands
+    for clause in _clauses((card or {}).get("gib_raw") or ""):
+        effect = compile_clause(clause, leader_suits, miss_scale=miss_scale)
+        if effect is None:
+            diag["unrecognized"].append(clause)
+            continue
+        if effect.get("contradicted"):
+            diag["contradicted"].append(effect["contradicted"])
+        if effect.get("suits") or effect.get("suit_hcp") \
+                or effect.get("honor_specs") or effect.get("alt_groups"):
+            sc = sc.merge(SeatConstraints.from_bands(
+                suits=effect.get("suits"),
+                suit_hcp=effect.get("suit_hcp"),
+                honor_specs=effect.get("honor_specs"),
+                alt_groups=effect.get("alt_groups")))
+    return sc, diag
 
-    return SeatConstraints.from_bands(
-        hcp=hcp_bands, suits=suits or None, suit_hcp=suit_hcp or None)
+
+def seat_constraints_from_card(card: dict, leader_hand: str,
+                               miss_scale: float = 1.0) -> SeatConstraints:
+    """Back-compat wrapper over ``compile_card`` (diagnostics dropped)."""
+    return compile_card(card, leader_hand, miss_scale=miss_scale)[0]
 
 
 def profile_from_explained_auction(entries: list[dict], leader: str,
@@ -169,6 +521,7 @@ def profile_from_explained_auction(entries: list[dict], leader: str,
     """
     seats: dict[str, SeatConstraints] = {}
     unrecognized: list[str] = []
+    contradicted: list[str] = []
     opened_suit = None
     opener_side_seats: set[str] = set()
     for e in entries:
@@ -182,8 +535,12 @@ def profile_from_explained_auction(entries: list[dict], leader: str,
             if call != "P":     # an unexplained PASS constrains nothing anyway
                 unrecognized.append(f"{seat}:{call}")
             continue
-        sc = seat_constraints_from_card(card, leader_hand,
-                                        miss_scale=stop_miss_scale)
+        sc, diag = compile_card(card, leader_hand,
+                                miss_scale=stop_miss_scale)
+        unrecognized.extend(f"{seat}:{call}:{c}"
+                            for c in diag["unrecognized"])
+        contradicted.extend(f"{seat}:{call}:{c}"
+                            for c in diag["contradicted"])
         seats[seat] = seats[seat].merge(sc) if seat in seats else sc
 
     if silence_denials:
@@ -201,6 +558,9 @@ def profile_from_explained_auction(entries: list[dict], leader: str,
 
     profile = ConstraintProfile(seats=seats)
     profile.unrecognized_calls = unrecognized
+    # gloss promises the leader's own hand makes impossible (e.g. a card
+    # claiming an honor the leader holds) — reported, constraints skipped
+    profile.contradicted_clauses = contradicted
     return profile
 
 

@@ -1,0 +1,77 @@
+{
+ "alt_group": {
+  "n": 27,
+  "p": 0.7778,
+  "base_n": 54,
+  "p0": 0.037,
+  "weight": null,
+  "kept_default": 0.05
+ },
+ "at_best_partial": {
+  "n": 56,
+  "p": 0.3571,
+  "base_n": 112,
+  "p0": 0.3482,
+  "weight": 0.9
+ },
+ "honor_all": {
+  "n": 401,
+  "p": 0.7606,
+  "base_n": 820,
+  "p0": 0.0622,
+  "weight": 0.0209
+ },
+ "honor_any": {
+  "n": 10,
+  "p": 1.0,
+  "base_n": 20,
+  "p0": 0.3,
+  "weight": null,
+  "kept_default": 0.1
+ },
+ "honor_none": {
+  "n": 13,
+  "p": 0.2308,
+  "base_n": 26,
+  "p0": 0.6538,
+  "weight": null,
+  "kept_default": 0.05
+ },
+ "partial_stop": {
+  "n": 1654,
+  "p": 0.8386,
+  "base_n": 3310,
+  "p0": 0.6278,
+  "weight": 0.3247
+ },
+ "solid": {
+  "n": 43,
+  "p": 0.7209,
+  "base_n": 86,
+  "p0": 0.0,
+  "weight": null,
+  "kept_default": 0.05
+ },
+ "stop": {
+  "n": 492,
+  "p": 0.8679,
+  "base_n": 996,
+  "p0": 0.6245,
+  "weight": 0.2532
+ },
+ "strong_rebiddable": {
+  "n": 145,
+  "p": 0.7931,
+  "base_n": 294,
+  "p0": 0.0102,
+  "weight": 0.02
+ },
+ "two_stops": {
+  "n": 10,
+  "p": 1.0,
+  "base_n": 20,
+  "p0": 0.4,
+  "weight": null,
+  "kept_default": 0.15
+ }
+}

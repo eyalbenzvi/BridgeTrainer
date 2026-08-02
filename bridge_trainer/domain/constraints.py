@@ -42,6 +42,31 @@ class Denial:
 
 
 @dataclass(frozen=True)
+class HonorSpec:
+    """Weighted constraint on holding SPECIFIC cards in one suit — the DSL
+    primitive behind GIB clauses like ``!CKQ`` (holds the club K and Q),
+    ``no !DAK`` (holds neither top diamond) and ``Q+ in !D`` (an honor at
+    least as good as the queen). ``mode``: 'all' = holds every rank listed,
+    'any' = at least one, 'none' = none of them. Hands FAILING the spec keep
+    ``weight`` (0 = rejected outright)."""
+
+    suit: str
+    ranks: str                # subset of "AKQJT"
+    mode: str = "all"
+    weight: float = 0.0
+
+    def __post_init__(self) -> None:
+        if self.suit not in SUITS:
+            raise ValueError(f"honor-spec suit must be one of {SUITS}")
+        if not self.ranks or any(r not in "AKQJT" for r in self.ranks):
+            raise ValueError(f"honor-spec ranks must be honors: {self.ranks!r}")
+        if self.mode not in ("all", "any", "none"):
+            raise ValueError(f"honor-spec mode {self.mode!r}")
+        if not (0.0 <= self.weight < 1.0):
+            raise ValueError("honor-spec weight must be in [0, 1)")
+
+
+@dataclass(frozen=True)
 class Band:
     lo: int
     hi: int
@@ -83,6 +108,13 @@ class SeatConstraints:
                                  for s in SUITS})
     denials: list[Denial] = field(default_factory=list)
     exclusions: list[str] = field(default_factory=list)
+    honor_specs: list[HonorSpec] = field(default_factory=list)
+    # Disjunction groups: each group is a list of alternative SeatConstraints
+    # ("!SAKQ,no !S" = solid top spades OR a void). A hand's factor for a
+    # group is the MAX over its alternatives' weights; groups (and the base
+    # constraints) multiply as usual. Alternatives may not nest further
+    # groups — one level is what the GIB vocabulary needs.
+    alt_groups: list[list["SeatConstraints"]] = field(default_factory=list)
 
     @classmethod
     def from_bands(
@@ -92,6 +124,8 @@ class SeatConstraints:
         suit_hcp: dict[str, list[Band]] | None = None,
         denials: list[Denial] | None = None,
         exclusions: list[str] | None = None,
+        honor_specs: list[HonorSpec] | None = None,
+        alt_groups: list[list["SeatConstraints"]] | None = None,
     ) -> "SeatConstraints":
         sc = cls()
         if hcp:
@@ -103,6 +137,14 @@ class SeatConstraints:
                 bands, MAX_SUIT_HCP + 1)
         sc.denials = list(denials or [])
         sc.exclusions = list(exclusions or [])
+        sc.honor_specs = list(honor_specs or [])
+        sc.alt_groups = [list(g) for g in (alt_groups or [])]
+        for g in sc.alt_groups:
+            if not g:
+                raise ValueError("empty alternatives group")
+            for alt in g:
+                if alt.alt_groups:
+                    raise ValueError("alternatives may not nest alt_groups")
         return sc
 
     def merge(self, other: "SeatConstraints") -> "SeatConstraints":
@@ -116,6 +158,8 @@ class SeatConstraints:
                 for s in SUITS},
             denials=self.denials + other.denials,
             exclusions=sorted(set(self.exclusions) | set(other.exclusions)),
+            honor_specs=self.honor_specs + other.honor_specs,
+            alt_groups=self.alt_groups + other.alt_groups,
         )
         return merged
 
@@ -129,6 +173,10 @@ class SeatConstraints:
             "denials": [[d.hcp_lo, d.hcp_hi, d.suit, d.min_len,
                          round(d.weight, 6)] for d in self.denials],
             "exclusions": list(self.exclusions),
+            "honor_specs": [[h.suit, h.ranks, h.mode, round(h.weight, 6)]
+                            for h in self.honor_specs],
+            "alt_groups": [[alt.fingerprint() for alt in g]
+                           for g in self.alt_groups],
         }
 
 
