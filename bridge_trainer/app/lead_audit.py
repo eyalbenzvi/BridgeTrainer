@@ -58,6 +58,15 @@ def _make_sampler(name: str, threshold, engine, fixture, problem=None):
         # gracefully and are reported in the run's constraint diagnostics.
         from ..engine.lead_samplers import ConstraintSampler
         return ConstraintSampler.from_auction(problem)
+    if name in ("gib-constraint", "gib-constraint-strict"):
+        # Ben-free but networked: constraints from the auction's GIB cards
+        # (one cached HTTP GET per call), including announced stops. The
+        # strict variant takes stop announcements literally — the two
+        # together form the interpretation sweep that catches honor-location-
+        # sensitive verdicts (docs/lead_auction_inference_gap.md).
+        from ..engine.lead_gib_constraints import sampler_from_problem
+        return sampler_from_problem(
+            problem, stop_miss_scale=0.0 if name.endswith("strict") else 1.0)
     raise ValueError(f"unknown sampler {name}")
 
 
@@ -160,7 +169,8 @@ def run_audit(hand, auction, dealer, vul, contract, *, samplers, thresholds,
             # constrained a concealed seat (an all-unrecognised auction leaves
             # it equivalent to uniform, so it must not masquerade as a vote).
             is_valid = sname in ("current", "ben-replay", "ben-likelihood")
-            if sname == "constraint":
+            if sname in ("constraint", "gib-constraint",
+                         "gib-constraint-strict"):
                 cd = r.get("constraint_diagnostics", {})
                 is_valid = bool(cd.get("any_constraint_applied"))
             if is_valid:

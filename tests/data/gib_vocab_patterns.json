@@ -1,0 +1,380 @@
+{
+ "clauses": [
+  {
+   "pattern": "<n>- total points",
+   "example": "12- total points"
+  },
+  {
+   "pattern": "<n>-<n> HCP",
+   "example": "15-17 HCP"
+  },
+  {
+   "pattern": "<n>- HCP",
+   "example": "11- HCP"
+  },
+  {
+   "pattern": "<n>-<n> total points",
+   "example": "12-22 total points"
+  },
+  {
+   "pattern": "<n>+ total points",
+   "example": "6+ total points"
+  },
+  {
+   "pattern": "<n>-<n> !C",
+   "example": "2-5 !C"
+  },
+  {
+   "pattern": "<n>+ !S",
+   "example": "4+ !S"
+  },
+  {
+   "pattern": "<n>-<n> !D",
+   "example": "2-5 !D"
+  },
+  {
+   "pattern": "<n>-<n> !H",
+   "example": "2-5 !H"
+  },
+  {
+   "pattern": "<n>-<n> !S",
+   "example": "2-5 !S"
+  },
+  {
+   "pattern": "<n>+ !H",
+   "example": "5+ !H"
+  },
+  {
+   "pattern": "<n>+ !D",
+   "example": "5+ !D"
+  },
+  {
+   "pattern": "<n>+ HCP",
+   "example": "13+ HCP"
+  },
+  {
+   "pattern": "<n>+ !C",
+   "example": "3+ !C"
+  },
+  {
+   "pattern": "<n>- !S",
+   "example": "3- !S"
+  },
+  {
+   "pattern": "<n>- !H",
+   "example": "3- !H"
+  },
+  {
+   "pattern": "forcing to <n>N",
+   "example": "forcing to 3N"
+  },
+  {
+   "pattern": "<n> !S",
+   "example": "2 !S"
+  },
+  {
+   "pattern": "<n>- !D",
+   "example": "4- !D"
+  },
+  {
+   "pattern": "<n> !H",
+   "example": "5 !H"
+  },
+  {
+   "pattern": "partial stop in !H",
+   "example": "partial stop in !H"
+  },
+  {
+   "pattern": "partial stop in !C",
+   "example": "partial stop in !C"
+  },
+  {
+   "pattern": "biddable !C",
+   "example": "biddable !C"
+  },
+  {
+   "pattern": "partial stop in !S",
+   "example": "partial stop in !S"
+  },
+  {
+   "pattern": "<n>- !C",
+   "example": "4- !C"
+  },
+  {
+   "pattern": "forcing",
+   "example": "forcing"
+  },
+  {
+   "pattern": "partial stop in !D",
+   "example": "partial stop in !D"
+  },
+  {
+   "pattern": "<n> HCP",
+   "example": "16 HCP"
+  },
+  {
+   "pattern": "twice rebiddable !C",
+   "example": "twice rebiddable !C"
+  },
+  {
+   "pattern": "rebiddable !C",
+   "example": "rebiddable !C"
+  },
+  {
+   "pattern": "stop in !S",
+   "example": "stop in !S"
+  },
+  {
+   "pattern": "stop in !H",
+   "example": "stop in !H"
+  },
+  {
+   "pattern": "<n> total points",
+   "example": "23 total points"
+  },
+  {
+   "pattern": "biddable !D",
+   "example": "biddable !D"
+  },
+  {
+   "pattern": "twice rebiddable !D",
+   "example": "twice rebiddable !D"
+  },
+  {
+   "pattern": "likely stop in !S",
+   "example": "likely stop in !S"
+  },
+  {
+   "pattern": "likely stop in !H",
+   "example": "likely stop in !H"
+  },
+  {
+   "pattern": "twice rebiddable !H",
+   "example": "twice rebiddable !H"
+  },
+  {
+   "pattern": "stop in !D",
+   "example": "stop in !D"
+  },
+  {
+   "pattern": "rebiddable !D",
+   "example": "rebiddable !D"
+  },
+  {
+   "pattern": "strong rebiddable !H",
+   "example": "strong rebiddable !H"
+  },
+  {
+   "pattern": "!HQ",
+   "example": "!HQ"
+  },
+  {
+   "pattern": "!CQ",
+   "example": "!CQ"
+  },
+  {
+   "pattern": "likely stop in !D",
+   "example": "likely stop in !D"
+  },
+  {
+   "pattern": "!CKQ",
+   "example": "!CKQ"
+  },
+  {
+   "pattern": "twice rebiddable !S",
+   "example": "twice rebiddable !S"
+  },
+  {
+   "pattern": "rebiddable !H",
+   "example": "rebiddable !H"
+  },
+  {
+   "pattern": "!DQ",
+   "example": "!DQ"
+  },
+  {
+   "pattern": "likely stop in !C",
+   "example": "likely stop in !C"
+  },
+  {
+   "pattern": "stop in !C",
+   "example": "stop in !C"
+  },
+  {
+   "pattern": "!SQ",
+   "example": "!SQ"
+  },
+  {
+   "pattern": "strong rebiddable !S",
+   "example": "strong rebiddable !S"
+  },
+  {
+   "pattern": "!DKQ",
+   "example": "!DKQ"
+  },
+  {
+   "pattern": "biddable !S",
+   "example": "biddable !S"
+  },
+  {
+   "pattern": "<n> !D",
+   "example": "2 !D"
+  },
+  {
+   "pattern": "rebiddable !S",
+   "example": "rebiddable !S"
+  },
+  {
+   "pattern": "opponents cannot play undoubled below <n>N",
+   "example": "opponents cannot play undoubled below 2N"
+  },
+  {
+   "pattern": "<n>-card !D",
+   "example": "3-card !D"
+  },
+  {
+   "pattern": "<n>-card !C",
+   "example": "3-card !C"
+  },
+  {
+   "pattern": "!SKQ",
+   "example": "!SKQ"
+  },
+  {
+   "pattern": "at best partial stop in !H",
+   "example": "at best partial stop in !H"
+  },
+  {
+   "pattern": "!CA",
+   "example": "!CA"
+  },
+  {
+   "pattern": "solid <n>-card !S",
+   "example": "solid 6-card !S"
+  },
+  {
+   "pattern": "!SAKQ,no !S",
+   "example": "!SAKQ,no !S"
+  },
+  {
+   "pattern": "forcing to <n>S",
+   "example": "forcing to 3S"
+  },
+  {
+   "pattern": "at best partial stop in !C",
+   "example": "at best partial stop in !C"
+  },
+  {
+   "pattern": "<n> !C",
+   "example": "3 !C"
+  },
+  {
+   "pattern": "!HKQ",
+   "example": "!HKQ"
+  },
+  {
+   "pattern": "at best partial stop in !S",
+   "example": "at best partial stop in !S"
+  },
+  {
+   "pattern": "biddable !H",
+   "example": "biddable !H"
+  },
+  {
+   "pattern": "forcing to <n>H",
+   "example": "forcing to 3H"
+  },
+  {
+   "pattern": "forcing to <n>D",
+   "example": "forcing to 3D"
+  },
+  {
+   "pattern": "solid <n>-card !C",
+   "example": "solid 6-card !C"
+  },
+  {
+   "pattern": "Q+ in !D",
+   "example": "Q+ in !D"
+  },
+  {
+   "pattern": "!DA",
+   "example": "!DA"
+  },
+  {
+   "pattern": "strong rebiddable !C",
+   "example": "strong rebiddable !C"
+  },
+  {
+   "pattern": "strong rebiddable !D",
+   "example": "strong rebiddable !D"
+  },
+  {
+   "pattern": "two stops in !D",
+   "example": "two stops in !D"
+  },
+  {
+   "pattern": "solid <n>-card !H",
+   "example": "solid 6-card !H"
+  },
+  {
+   "pattern": "!HAKQ,no !H",
+   "example": "!HAKQ,no !H"
+  },
+  {
+   "pattern": "at best partial stop in !D",
+   "example": "at best partial stop in !D"
+  },
+  {
+   "pattern": "solid <n>-card !D",
+   "example": "solid 6-card !D"
+  },
+  {
+   "pattern": "no !CAK",
+   "example": "no !CAK"
+  },
+  {
+   "pattern": "no !DAK",
+   "example": "no !DAK"
+  },
+  {
+   "pattern": "!SA",
+   "example": "!SA"
+  },
+  {
+   "pattern": "no !DA",
+   "example": "no !DA"
+  },
+  {
+   "pattern": "!HA",
+   "example": "!HA"
+  },
+  {
+   "pattern": "no !HAK",
+   "example": "no !HAK"
+  },
+  {
+   "pattern": "!DK",
+   "example": "!DK"
+  },
+  {
+   "pattern": "<n>-card !S",
+   "example": "4-card !S"
+  },
+  {
+   "pattern": "<n>- losers",
+   "example": "4- losers"
+  },
+  {
+   "pattern": "two stops in !C",
+   "example": "two stops in !C"
+  },
+  {
+   "pattern": "two stops in !H",
+   "example": "two stops in !H"
+  },
+  {
+   "pattern": "<n>-card !H",
+   "example": "4-card !H"
+  }
+ ]
+}

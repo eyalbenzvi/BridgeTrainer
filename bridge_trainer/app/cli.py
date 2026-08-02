@@ -501,7 +501,8 @@ def main(argv: list[str] | None = None) -> int:
     lpa.add_argument("--contract", default=None,
                      help="e.g. 3NTW, 4HEx")
     lpa.add_argument("--samplers", default="uniform",
-                     help="comma list: uniform,constraint,current,fixture,"
+                     help="comma list: uniform,constraint,gib-constraint,"
+                          "gib-constraint-strict,current,fixture,"
                           "ben-replay,ben-likelihood")
     lpa.add_argument("--thresholds", default="0.70",
                      help="comma list of 'current' acceptance thresholds")
