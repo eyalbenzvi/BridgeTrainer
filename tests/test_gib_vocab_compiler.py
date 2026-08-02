@@ -214,9 +214,16 @@ def test_fit_weights_is_a_likelihood_ratio_with_clamps():
     spec.loader.exec_module(mod)
     fitted = mod.fit_weights({
         "stop": {"n": 100, "hold": 80, "base_n": 300, "base_hold": 150},
+        "sure": {"n": 200, "hold": 200, "base_n": 600, "base_hold": 300},
         "rare": {"n": 5, "hold": 5, "base_n": 15, "base_hold": 5},
     }, min_n=30)
-    assert fitted["stop"]["weight"] == pytest.approx(0.25)   # (0.2/0.8)*(1)
+    # Laplace-smoothed likelihood ratio: p=(80.5/101), p0=(150.5/301)
+    p, p0 = 80.5 / 101, 150.5 / 301
+    want = ((1 - p) / p) * (p0 / (1 - p0))
+    assert fitted["stop"]["weight"] == pytest.approx(round(want, 4))
+    # a fully-validated kind (p -> 1) fits to the near-strict clamp floor
+    # instead of falling back to the default
+    assert fitted["sure"]["weight"] == pytest.approx(mod.CLAMP[0])
     assert fitted["rare"]["weight"] is None                  # keeps default
 
 

@@ -233,24 +233,74 @@ def test_verdict_abstains_without_constraints_or_answer():
     assert inference_verdict(None, {"soft": _reading("SA")})[0] == "abstain"
 
 
-def test_forge_helper_blocks_refuted_and_passes_stable(monkeypatch):
-    from bridge_trainer.engine import lead_maker, lead_gib_constraints
+def test_forge_card_world_grade_rejects_and_replaces(monkeypatch):
+    """_card_world_grade: gloss violation and honor-sensitivity reject the
+    board; a successful regrade replaces le/verdict; an unconstrained
+    auction falls back to Ben's evaluation with honest provenance."""
+    from bridge_trainer.engine import lead_maker, lead_card_world
+    from bridge_trainer.engine.lead_verdict import LeadVerdict
 
-    rec = {"contract": "3NTN", "verdict": {"accepted": ["SA"]}}
+    # SEATS order in lead_maker is N,E,S,W
+    hands = ["K82.A85.KQ6.KT42", LEADER_HAND,
+             "T63.J74.AJ3.AQJ3", "9.KT9632.842.985"]
+    fc = {"level": 3, "denom": "N", "declarer_i": 0, "doubled": 0}
+    auction = [e["call"] for e in ENTRIES] + ["P", "P", "P"]
+    ben_le = type("B0", (), {"softmax": {"SA": 0.4}})()
 
-    def fake_gate_refuted(record, **kw):
-        return ("inference_refuted", "strict: SA loses 0.25 to D5", {})
+    def run(judge=lambda le: LeadVerdict(True, "accepted", best=["D5"])):
+        t = {}
+        out = lead_maker._card_world_grade(
+            7, hands, 2, (True, True), fc, 1, LEADER_HAND, auction, ENTRIES,
+            ben_le, judge, "MP", t)
+        assert "card_world_s" in t
+        return out
 
-    monkeypatch.setattr(lead_gib_constraints, "inference_gate",
-                        fake_gate_refuted)
+    # gloss violation -> reject
+    monkeypatch.setattr(lead_card_world, "gloss_violations",
+                        lambda *a, **k: ["N:3NT: 'partial stop' unfulfilled"])
+    le2, v2, grading, bad = run()
+    assert bad is not None and bad[0] == "gloss_unfulfilled"
+
+    # unconstrained auction -> Ben fallback, honest provenance
+    monkeypatch.setattr(lead_card_world, "gloss_violations",
+                        lambda *a, **k: [])
+    monkeypatch.setattr(
+        lead_card_world, "card_world_evaluation",
+        lambda *a, **k: (None, {"fallback": "no_constraints_recognised"}))
+    le2, v2, grading, bad = run()
+    assert bad is None and le2 is ben_le and v2 is None
+    assert grading["distribution"] == "ben_samples_fallback"
+
+    # regrade + stability pass -> replacement le/verdict + provenance
+    fake_le = type("L", (), {"softmax": {}, "n_samples": 300})()
+    ben_le2 = type("B", (), {"softmax": {"SA": 0.4}})()
+    monkeypatch.setattr(lead_card_world, "card_world_evaluation",
+                        lambda *a, **k: (fake_le, {"ess": 250.0,
+                                                   "any": True}))
+    monkeypatch.setattr(lead_card_world, "stability_check",
+                        lambda *a, **k: (True, {"overlap": True}))
     t = {}
-    out = lead_maker._inference_gate_reject(rec, t)
-    assert out is not None and out[0] == "inference_refuted"
-    assert "inference_gate_s" in t
+    le2, v2, grading, bad = lead_maker._card_world_grade(
+        7, hands, 2, (True, True), fc, 1, LEADER_HAND, auction, ENTRIES,
+        ben_le2, lambda le: LeadVerdict(True, "accepted", best=["D5"]),
+        "MP", t)
+    assert bad is None and le2 is fake_le and v2.best == ["D5"]
+    assert grading["distribution"] == "gib_cards_calibrated"
 
-    monkeypatch.setattr(lead_gib_constraints, "inference_gate",
-                        lambda record, **kw: ("stable", "ok", {}))
-    assert lead_maker._inference_gate_reject(rec, {}) is None
-    monkeypatch.setattr(lead_gib_constraints, "inference_gate",
-                        lambda record, **kw: ("abstain", "none", {}))
-    assert lead_maker._inference_gate_reject(rec, {}) is None
+    # stability failure -> honor_sensitive reject
+    monkeypatch.setattr(lead_card_world, "stability_check",
+                        lambda *a, **k: (False, {"strict_best": ["SA"]}))
+    le2, v2, grading, bad = lead_maker._card_world_grade(
+        7, hands, 2, (True, True), fc, 1, LEADER_HAND, auction, ENTRIES,
+        ben_le2, lambda le: LeadVerdict(True, "accepted", best=["D5"]),
+        "MP", t)
+    assert bad is not None and bad[0] == "honor_sensitive"
+
+    # card-world judge rejection -> cards_<reason>
+    monkeypatch.setattr(lead_card_world, "stability_check",
+                        lambda *a, **k: (True, {}))
+    le2, v2, grading, bad = lead_maker._card_world_grade(
+        7, hands, 2, (True, True), fc, 1, LEADER_HAND, auction, ENTRIES,
+        ben_le2, lambda le: LeadVerdict(False, "suit_indifferent"),
+        "MP", t)
+    assert bad is not None and bad[0] == "cards_suit_indifferent"

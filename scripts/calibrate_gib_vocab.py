@@ -80,14 +80,19 @@ def measure(records) -> dict:
 
 
 def fit_weights(stats: dict, min_n: int = MIN_N) -> dict:
+    """Laplace-smoothed likelihood ratios (add-1/2), so the extremes a
+    VALIDATED pool produces (p -> 1.0 once gloss-contradicting boards can no
+    longer ship) fit cleanly to the near-strict clamp floor instead of
+    falling back to the un-validated defaults."""
     out = {}
     for kind, st in sorted(stats.items()):
         n, hold = st["n"], st["hold"]
         bn, bh = st["base_n"], st["base_hold"]
         entry = {"n": n, "p": round(hold / n, 4) if n else None,
                  "base_n": bn, "p0": round(bh / bn, 4) if bn else None}
-        if n >= min_n and 0 < hold < n and bn and 0 < bh < bn:
-            p, p0 = hold / n, bh / bn
+        if n >= min_n and bn >= min_n:
+            p = (hold + 0.5) / (n + 1)
+            p0 = (bh + 0.5) / (bn + 1)
             w = ((1 - p) / p) * (p0 / (1 - p0))
             entry["weight"] = round(min(max(w, CLAMP[0]), CLAMP[1]), 4)
         else:

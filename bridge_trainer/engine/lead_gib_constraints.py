@@ -103,10 +103,30 @@ def _calibrated_weights() -> dict:
     return weights
 
 
+# Runtime overrides on top of the checked-in calibration — set by the
+# backward-migration script after it RE-calibrates on the gloss-validated
+# subset of the pool, so regrading uses the post-validation weights without
+# touching the repo file in a dry run.
+_RUNTIME_OVERRIDES: dict[str, float] = {}
+
+
+def set_calibration_overrides(weights: dict | None) -> None:
+    """Override calibrated miss weights for this process (None/{} clears).
+    Values outside [0, 1) are ignored."""
+    _RUNTIME_OVERRIDES.clear()
+    for kind, w in (weights or {}).items():
+        if kind in DEFAULT_MISS_WEIGHTS and isinstance(w, (int, float)) \
+                and 0 <= w < 1:
+            _RUNTIME_OVERRIDES[kind] = float(w)
+
+
 def miss_weight(kind: str, miss_scale: float = 1.0) -> float:
     """Calibrated miss weight for a clause kind, scaled by the reading
     strength (miss_scale=0 -> strict: announcements taken literally)."""
-    return _calibrated_weights()[kind] * miss_scale
+    base = _RUNTIME_OVERRIDES.get(kind)
+    if base is None:
+        base = _calibrated_weights()[kind]
+    return base * miss_scale
 
 
 def stop_threshold(leader_holding: str) -> int:

@@ -22,6 +22,7 @@ from ..scoring.lead_metrics import (TRAINING_MODES, compute_lead_metrics,
 from .conventions import (SEATS, contract_str, final_contract,
                           opening_leader)
 from .lead_classify import classify_contract
+from .lead_posterior import build_problem
 from .lead_verdict import P_OBVIOUS, judge_lead_mode, prejudge_lead_mode
 from .scanner import VUL_NAMES, bid_out
 
@@ -136,23 +137,69 @@ class LeadOutcome:
     detail: str = ""               # preformatted log tail (no [i/count])
 
 
-def _inference_gate_reject(rec, t) -> tuple[str, str] | None:
-    """Run the auction-inference gate on a finished record; (reason, detail)
-    when it must be rejected, None when it may ship. ``inference_refuted``
-    (the auction's stated meaning beats the published answer) and
-    ``honor_sensitive`` (the answer flips between the soft and strict
-    readings of the announced stops) both block; ``stable``/``abstain``
-    pass. One definition with scripts/audit_lead_inference.py — both call
-    engine/lead_gib_constraints.inference_verdict."""
-    from .lead_gib_constraints import inference_gate
+def _card_world_grade(seed, hands, dealer_i, vul, fc, leader_i, hand,
+                      full_auction, auc, le, judge, target_mode, t):
+    """Card-world grading step, shared by the normal and doubled paths.
+
+    The PUBLISHED verdict must be graded on the world the displayed glosses
+    describe (docs/lead_auction_inference_gap.md), so after Ben's own gates
+    pass this: (1) rejects a deal whose hands contradict the glosses'
+    probabilistic promises (stops, honor holdings — ``gloss_unfulfilled``);
+    (2) re-grades every lead on the record's compiled card constraints at
+    calibrated weights; (3) requires the answer to survive the strict
+    reading (``honor_sensitive`` otherwise). Ben keeps dealing, bidding,
+    the candidate softmax and the interestingness gates; only the grading
+    distribution changes.
+
+    Returns (le', verdict', grading_provenance, None) on success, where le'
+    replaces Ben's evaluation in the published record — or (None, None,
+    None, (reason, detail)) when the board must be rejected. When the
+    auction constrained nothing recognisable, Ben's evaluation is kept and
+    the provenance says so (an honest fallback, not a fake grade).
+    """
+    from .lead_card_world import (card_world_evaluation, gloss_violations,
+                                  stability_check)
     tg = time.perf_counter()
     try:
-        status, detail, _readings = inference_gate(rec)
+        contract = contract_str(fc)
+        problem = build_problem(hand, list(full_auction), SEATS[dealer_i],
+                                VUL_NAMES[vul], contract)
+        bad = gloss_violations(auc, {SEATS[i]: h for i, h in enumerate(hands)},
+                               hand, SEATS[leader_i])
+        if bad:
+            return None, None, None, (
+                "gloss_unfulfilled",
+                "gloss_unfulfilled " + "; ".join(bad[:3])
+                + f" contract={contract}")
+        le_cw, diag = card_world_evaluation(problem, auc, le.softmax,
+                                            seed=seed,
+                                            doubled=bool(fc["doubled"]))
+        if le_cw is None:
+            grading = {"distribution": "ben_samples_fallback",
+                       "reason": diag.get("fallback")}
+            return le, None, grading, None
+        v_cw = judge(le_cw)
+        if not v_cw.accepted:
+            return None, None, None, (
+                "cards_" + v_cw.reason,
+                f"cards_{v_cw.reason} gap={v_cw.measured.get('gap')} "
+                f"contract={contract}")
+        stable, stab = stability_check(problem, auc, list(v_cw.best),
+                                       le.softmax, seed=seed,
+                                       target_mode=target_mode,
+                                       vul=VUL_NAMES[vul])
+        if not stable:
+            return None, None, None, (
+                "honor_sensitive",
+                f"honor_sensitive calibrated={'/'.join(v_cw.best)} strict="
+                f"{'/'.join(stab.get('strict_best') or [])} "
+                f"contract={contract}")
+        grading = {"distribution": "gib_cards_calibrated",
+                   "n": le_cw.n_samples, "ess": diag.get("ess"),
+                   "strict_agreed": True, "seed": seed}
+        return le_cw, v_cw, grading, None
     finally:
-        t["inference_gate_s"] = time.perf_counter() - tg
-    if status in ("inference_refuted", "honor_sensitive"):
-        return status, f"{status} {detail} contract={rec['contract']}"
-    return None
+        t["card_world_s"] = time.perf_counter() - tg
 
 
 def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
@@ -261,16 +308,24 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
                        f"contract={contract}")
         te = time.perf_counter()
         auc = auction_meanings(dealer_i, full_auction)
-        notes = card_notes(v)
         t["explain_s"] = time.perf_counter() - te
+        # card-world grading (doubled boards keep force-accept semantics for
+        # the interestingness gates, so the judge closure passes force=True)
+        le2, v2, grading, bad_cw = _card_world_grade(
+            seed, hands, dealer_i, vul, fc, leader_i, hand, full_auction,
+            auc, le, lambda l: judge(l, force=True), target_mode, t)
+        if bad_cw:
+            return LeadOutcome(seed, "rejected", bad_cw[0], timings=t,
+                               detail=bad_cw[1])
+        if v2 is not None:
+            le, v = le2, v2
+        notes = card_notes(v)
         elapsed = time.perf_counter() - t_board
         rec = build_lead_record(seed, hands, dealer_i, vul, fc, leader_i,
                                 hand, full_auction, le, v, auc, notes,
                                 elapsed, target_mode=target_mode)
-        bad_inference = _inference_gate_reject(rec, t)
-        if bad_inference:
-            return LeadOutcome(seed, "rejected", bad_inference[0], timings=t,
-                               detail=bad_inference[1])
+        if grading:
+            rec["generator"]["grading"] = grading
         detail = (f"ACCEPTED {rec['id']} [{target_mode}] lead "
                   f"{SEATS[leader_i]} vs {contract} "
                   f"(doubled) best={'/'.join(v.best)} "
@@ -346,12 +401,28 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
             seed, "rejected", "expl_vs_hand", timings=t,
             detail="expl_vs_hand " + "; ".join(bad[:3]) +
                    (f" (+{len(bad) - 3} more)" if len(bad) > 3 else ""))
-    notes = card_notes(v)
     t["explain_s"] = time.perf_counter() - te
+    # ---- card-world grading (docs/lead_auction_inference_gap.md): the
+    # PUBLISHED verdict is re-graded on the distribution the displayed gloss
+    # cards describe (calibrated weights), the deal must honour its glosses'
+    # probabilistic promises, and the answer must survive the strict reading.
+    # Runs last because only boards that survived every cheaper gate pay the
+    # two DDS regrades.
+    le2, v2, grading, bad_cw = _card_world_grade(
+        seed, hands, dealer_i, vul, fc, leader_i, hand, full_auction,
+        auc, le, judge, target_mode, t)
+    if bad_cw:
+        return LeadOutcome(seed, "rejected", bad_cw[0], timings=t,
+                           detail=bad_cw[1])
+    if v2 is not None:
+        le, v = le2, v2
+    notes = card_notes(v)
     elapsed = time.perf_counter() - t_board
     rec = build_lead_record(seed, hands, dealer_i, vul, fc, leader_i,
                             hand, full_auction, le, v, auc, notes, elapsed,
                             target_mode=target_mode)
+    if grading:
+        rec["generator"]["grading"] = grading
     # ---- the remaining record gates, run on the FINISHED record so the forge
     # and scripts/audit_pool.py apply one definition and cannot drift: an
     # auction no partnership produces (a 15-count that never bid; a game bid in
@@ -364,16 +435,6 @@ def forge_lead_one(engine, seed: int, audit_prescreen: bool = False,
     if unsound:
         return LeadOutcome(seed, "rejected", "board_unsound", timings=t,
                            detail="board_unsound " + "; ".join(unsound[:3]))
-    # ---- auction-inference gate (lead1-19fa5daef4b): regrade the finished
-    # record under the soft AND strict readings of its own GIB cards (Ben-free
-    # ConstraintSampler + endplay DDS). An answer the auction's stated meaning
-    # refutes, or one that flips between readings, must never ship — the
-    # auction is the whole evidence the student reads. Runs last because only
-    # boards that survived every cheaper gate pay the two DDS regrades.
-    bad_inference = _inference_gate_reject(rec, t)
-    if bad_inference:
-        return LeadOutcome(seed, "rejected", bad_inference[0], timings=t,
-                           detail=bad_inference[1])
     detail = (f"ACCEPTED {rec['id']} [{target_mode}] lead {SEATS[leader_i]} "
               f"vs {contract} best={'/'.join(v.best)} "
               f"gap={v.measured.get('gap')} "
