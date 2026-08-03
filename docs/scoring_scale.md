@@ -146,6 +146,24 @@ each, MP mode):
 plausibly makes, which is the population the 50-85 calibration target
 talks about.
 
+**Production run (2026-08-03).** `trainer pool backfill-mp-ties` dropped
+955 leads from the MP accepted set of 453 of the 2794 published lead
+problems (4493 docs); a second run reports 0, and the Python migration and
+the client's `btLeadAccepted` agree on all 2794 records. `trainer pool
+regrade-attempts` then rewrote 37 of 380 stored attempts (314 already
+current, 29 on deleted problems left as-is), and likewise re-reports 0.
+The reference board `lead1-19fa8ed5599` now accepts only the five spade
+spots; ♥K/♥Q/♥J score 75 with the breakdown line
+`פער 0.90 IMP בתוצאה (0.00 לקיחות) · מדורגת 2 מתוך 6 · +3 הקלת שדה`.
+
+Deliberately NOT migrated: each affected board's stored `difficulty` /
+`quality.trap`, which the narrowed accepted set would also move (BEN's
+favourite is now outside the answer on some of them, i.e. a trap). That is
+a property of the PROBLEM, not of the answer, it feeds the index and the
+user's difficulty filters, and re-levelling the pool is its own change.
+New boards get it right at forge time. `explanations.cards` is likewise
+left alone — producer-side data the client never reads.
+
 ### Opening leads, IMP mode (unit: IMPs)
 
 * `tau = 1.75 IMP` — slightly tighter than bidding: a lead is final,
