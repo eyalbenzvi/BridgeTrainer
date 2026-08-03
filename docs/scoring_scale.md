@@ -164,6 +164,20 @@ user's difficulty filters, and re-levelling the pool is its own change.
 New boards get it right at forge time. `explanations.cards` is likewise
 left alone — producer-side data the client never reads.
 
+**History cleanup (2026-08-03).** The 29 attempts the run above left as-is
+were the deleted-problem remainder, so `trainer pool
+purge-orphan-attempts` removed them: 29 of 411 stored attempts across 3
+users (28 lead, 1 bidding; 29 distinct problems, all long gone from the
+pool — including pre-rename `lead1i-*` and short-id `lead1-013b34ca`
+boards). All 29 carried the full modern field set, so nothing was lost to
+btScoreOfAttempt's cost-only fallback that wasn't already unverifiable.
+A second pass reports 0 orphans of 383. `trainer pool regrade-attempts`
+then found **0 of 382 to change** — with the orphans gone every remaining
+attempt's stored grade already matches the published problem it was graded
+against, which is the state the MP-tie regrade left the live rows in.
+Nothing in the pool itself changed here: 4573 problem docs before and
+after, only the users' `attempts` subtrees were touched.
+
 ### Opening leads, IMP mode (unit: IMPs)
 
 * `tau = 1.75 IMP` — slightly tighter than bidding: a lead is final,
