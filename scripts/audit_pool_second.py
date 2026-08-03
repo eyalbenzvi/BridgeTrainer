@@ -566,18 +566,29 @@ def audit(rec):
         if bym.get("accepted") and sorted(bym["accepted"]) != sorted(acc):
             bad("F12", f"verdict.accepted {acc} != by_mode.{mode}.accepted "
                        f"{bym['accepted']}")
-        # two leads with identical evidence must be graded identically
-        metric = "exp_imps" if mode == "IMP" else "avg_def_tricks"
+        # Two leads with identical evidence must be graded identically. In MP
+        # "identical evidence" spans BOTH published metrics: equal average
+        # tricks alone is not a tie when the two leads cash out to different
+        # results, which is exactly the case the score-domain tie policy
+        # demotes (scoring/lead_metrics.mp_score_domain_tie).
+        metrics = ["exp_imps"] if mode == "IMP" else ["avg_def_tricks",
+                                                      "exp_imps"]
         if acc:
-            accv = [c[metric] for c in cands
-                    if c.get("card") in acc and metric in c]
-            if accv:
+            metrics = [m for m in metrics
+                       if all(m in c for c in cands if c.get("card") in acc)]
+            accv = [[c[m] for m in metrics] for c in cands
+                    if c.get("card") in acc]
+            if metrics and accv:
                 for c in cands:
-                    if (c.get("card") not in acc and metric in c
-                            and any(abs(c[metric] - v) < 1e-9 for v in accv)):
+                    if c.get("card") in acc or any(m not in c for m in metrics):
+                        continue
+                    mine = [c[m] for m in metrics]
+                    if any(all(abs(a - b) < 1e-9 for a, b in zip(mine, v))
+                           for v in accv):
                         bad("F13", f"{c.get('card')} scores exactly the same "
-                                   f"{metric} ({c[metric]}) as the accepted "
-                                   f"lead(s) {acc} but is graded wrong")
+                                   f"{'/'.join(metrics)} "
+                                   f"({'/'.join(str(x) for x in mine)}) as an "
+                                   f"accepted lead {acc} but is graded wrong")
         # score plausibility: exp_score must sit inside the range the
         # contract can actually produce
         pc = parse_contract(rec.get("contract") or "")

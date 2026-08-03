@@ -665,6 +665,98 @@ def backfill_dead_options(key_path: str | None = None,
             "stale_flags": stale_flags, "total": len(records)}
 
 
+# ---- MP score-domain ties (published accepted sets) ----------------------
+
+def mp_score_tie_update(rec: dict) -> dict | None:
+    """The Firestore write payload that brings ONE published lead record's MP
+    accepted set in line with the score-domain tie policy, or None when the
+    record already satisfies it.
+
+    An average-trick tie is not a tie when the two leads cash out to
+    materially different results, so the leads more than
+    ``TIE_EPS_MP_SCORE`` IMPs behind the MP recommendation leave the accepted
+    set (scoring.lead_metrics.mp_score_domain_tie) and are graded on the
+    curve instead of being handed 100. Everything the client reads as "this
+    lead is accepted in MP" moves together: ``verdict.by_mode.MP.accepted``,
+    the per-row ``recommended_mp`` flags in ``verdict.table`` and
+    ``candidates``, and — for a board FORGED for MP, where the two are the
+    same set — ``verdict.accepted``.
+
+    Recomputed from the record's OWN stored aggregates, which is exactly what
+    the client scores from (``btLeadAccepted``), so a migrated document and
+    the page agree by construction. Pure: no Firestore, no re-simulation.
+    Arrays are returned whole because a merge write replaces them wholesale.
+    """
+    from ..scoring.lead_metrics import mp_score_domain_tie, target_mode_of
+
+    if rec.get("kind") != "lead":
+        return None
+    v = rec.get("verdict") or {}
+    table = v.get("table") or []
+    mp = (v.get("by_mode") or {}).get("MP") or {}
+    stored = list(mp.get("accepted") or v.get("accepted") or [])
+    if len(stored) < 2 or not table:
+        return None
+    imps = {r.get("card"): r.get("exp_imps") for r in table if r.get("card")}
+    kept = mp_score_domain_tie(stored, mp.get("recommended") or stored[0],
+                               imps)
+    if len(kept) == len(stored):
+        return None
+    keep = set(kept)
+
+    def reflag(rows: list) -> list:
+        return [{**r, "recommended_mp": r.get("card") in keep} for r in rows]
+
+    verdict = {"by_mode": {"MP": {"accepted": kept}}, "table": reflag(table)}
+    if target_mode_of(rec) == "MP" and v.get("accepted"):
+        # an MP board's verdict.accepted IS its MP accepted set (audit F12);
+        # filter in place so its own suit-then-rank order survives
+        verdict["accepted"] = [c for c in v["accepted"] if c in keep]
+    payload = {"verdict": verdict}
+    if rec.get("candidates"):
+        payload["candidates"] = reflag(rec["candidates"])
+    return payload
+
+
+def backfill_mp_score_ties(key_path: str | None = None,
+                           dry_run: bool = False) -> dict:
+    """Migration: apply the MP score-domain tie policy to every published
+    lead problem (see ``mp_score_tie_update``), so a lead that only ties the
+    recommendation on average tricks — while costing real result — stops
+    being graded 100.
+
+    Bidding docs and lead docs whose MP tie already holds in the score domain
+    are read but never written. The index carries no verdict data, so it is
+    untouched. Run ``regrade_attempts`` afterwards to bring stored history
+    onto the new grades.
+
+    Returns {leads, updated, demoted, total}. ``dry_run`` reports without
+    writing."""
+    remote = FirestorePool(key_path)
+    records = remote.stream_records(
+        fields=["kind", "verdict", "candidates", "training", "generator"])
+    updated = leads = demoted = 0
+    for rec in records:
+        if rec.get("kind") != "lead":
+            continue
+        leads += 1
+        payload = mp_score_tie_update(rec)
+        if payload is None:
+            continue
+        updated += 1
+        before = ((rec.get("verdict") or {}).get("by_mode") or {}
+                  ).get("MP") or {}
+        demoted += len(before.get("accepted")
+                       or (rec.get("verdict") or {}).get("accepted") or []) \
+            - len(payload["verdict"]["by_mode"]["MP"]["accepted"])
+        if not dry_run:
+            _retry_transient(lambda rid=rec["id"], p=payload:
+                             remote._col.document(rid).set(
+                                 _firestore_safe(p), merge=True))
+    return {"leads": leads, "updated": updated, "demoted": demoted,
+            "total": len(records)}
+
+
 def forcing_pass_offenders(records: list[dict]) -> dict:
     """{problemId: reason} for bidding records that offer Pass while the
     hero's side is still under a live force (engine/explain_check
@@ -932,17 +1024,19 @@ function regradeLead(P, card, mode) {
   const v = P.verdict || {};
   const trainingMode = mode === "IMP" ? "IMP" : "MP";
   const bm = (v.by_mode && v.by_mode[trainingMode]) || null;
-  const accepted = (bm && bm.accepted && bm.accepted.length)
-    ? bm.accepted : (v.accepted || []);
+  const accepted = btLeadAccepted(P, trainingMode);   // the scorer's own set
   const correct = accepted.includes(card);
   const row = (v.table || []).find(r => r.card === card);
   const rankKey = trainingMode === "IMP" ? "rank_imp" : "rank_mp";
+  const parts = btScoreLead(P, card, trainingMode);
   let gradedCost = 0;
   if (row && !correct) {
     if (trainingMode === "IMP" && row.exp_imps !== undefined) {
       const best = (v.table || []).find(r => accepted.includes(r.card));
       if (best && best.exp_imps !== undefined)
         gradedCost = Math.max(0, +best.exp_imps - +row.exp_imps);
+    } else if (parts.cost !== undefined) {
+      gradedCost = parts.cost;      // the gap the scorer charged (_SCORE_JS)
     } else if (row.vs_best !== undefined) {
       gradedCost = Math.max(0, -(+row.vs_best));
     }
@@ -950,7 +1044,7 @@ function regradeLead(P, card, mode) {
   const primaryValue = row
     ? (trainingMode === "IMP" ? row.exp_imps : row.avg_def_tricks) : null;
   return {...metaOf(P), correct, gradedCost,
-          score: btScoreLead(P, card, trainingMode).score,
+          score: parts.score,
           rankingMetric: trainingMode === "IMP" ? "exp_imps"
                                                 : "exp_def_tricks",
           chosenRank: row && row[rankKey] !== undefined ? row[rankKey] : null,

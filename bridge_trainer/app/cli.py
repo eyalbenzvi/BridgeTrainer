@@ -300,6 +300,17 @@ def cmd_pool_backfill_dead(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_pool_backfill_mp_ties(args: argparse.Namespace) -> int:
+    from ..pool.firestore_store import backfill_mp_score_ties
+    summary = backfill_mp_score_ties(key_path=args.key, dry_run=args.dry_run)
+    verb = "would drop" if args.dry_run else "dropped"
+    print(f"{verb} {summary['demoted']} lead(s) from the MP accepted set of "
+          f"{summary['updated']} of {summary['leads']} lead problems "
+          f"({summary['total']} docs total); run `trainer pool "
+          f"regrade-attempts` next to bring history onto the new grades")
+    return 0
+
+
 def cmd_pool_purge_forcing_pass(args: argparse.Namespace) -> int:
     from ..pool.firestore_store import purge_forcing_pass
     summary = purge_forcing_pass(key_path=args.key, dry_run=args.dry_run)
@@ -610,6 +621,19 @@ def main(argv: list[str] | None = None) -> int:
     pd.add_argument("--dry-run", action="store_true",
                     help="report counts without writing")
     pd.set_defaults(func=cmd_pool_backfill_dead)
+
+    pt = pool_sub.add_parser(
+        "backfill-mp-ties",
+        help="migration: apply the MP score-domain tie policy to published "
+             "lead problems — a lead that only ties the recommendation on "
+             "average tricks, while costing real result, leaves the accepted "
+             "set and is graded on the curve instead of scoring 100")
+    pt.add_argument("--key", default=None,
+                    help="service-account JSON (or set "
+                         "GOOGLE_APPLICATION_CREDENTIALS)")
+    pt.add_argument("--dry-run", action="store_true",
+                    help="report counts without writing")
+    pt.set_defaults(func=cmd_pool_backfill_mp_ties)
 
     pf = pool_sub.add_parser(
         "purge-forcing-pass",

@@ -139,6 +139,43 @@ def test_unknown_mode_rejected():
 
 
 # --------------------------------------------------------------------------
+# an MP tie must hold in the score domain too (docs/scoring_scale.md)
+# --------------------------------------------------------------------------
+# Against 3NT-E (defense needs 5 tricks), on four layouts:
+#   SA: 5,5,3,3  -> avg 4.0, sets half the time
+#   HK: 4,4,4,4  -> avg 4.0, never sets
+# Identical trick averages, opposite results. HK must not be graded 100.
+FALSE_TIE = {"SA": np.array([5, 5, 3, 3]), "HK": np.array([4, 4, 4, 4])}
+
+
+def test_mp_tie_requires_the_score_domain_to_agree():
+    m = compute_lead_metrics(FALSE_TIE, CONTRACT, VUL)
+    assert m["SA"]["exp_def_tricks"] == m["HK"]["exp_def_tricks"]  # the tie
+    assert m["SA"]["exp_imps"] - m["HK"]["exp_imps"] > 0.05        # the truth
+    assert accepted_set(m, "MP") == ["SA"]
+    assert mode_rankings(m)["MP"]["accepted"] == ["SA"]
+    # ...and it is a NARROWING, never a re-ranking: MP still recommends the
+    # card with the most defensive tricks
+    assert mode_rankings(m)["MP"]["recommended"] == "SA"
+
+
+def test_mp_tie_survives_when_the_score_domain_agrees():
+    tricks = {"SA": np.array([5, 5, 3, 3]), "HK": np.array([5, 5, 3, 3])}
+    m = compute_lead_metrics(tricks, CONTRACT, VUL)
+    assert accepted_set(m, "MP") == ["SA", "HK"]
+
+
+def test_forge_verdict_applies_the_score_domain_test():
+    """judge_lead narrows its own accepted set the same way, so the record's
+    verdict.accepted and by_mode.MP.accepted cannot disagree (audit F12)."""
+    le = LeadEvaluation(cards=list(FALSE_TIE), def_tricks=FALSE_TIE,
+                        softmax={c: 0.1 for c in FALSE_TIE}, n_samples=4,
+                        quality=1.0, contract=CONTRACT, doubled=False)
+    assert judge_lead(le, force=True).best == ["SA", "HK"]   # no vul: as measured
+    assert judge_lead(le, vul=VUL, force=True).best == ["SA"]
+
+
+# --------------------------------------------------------------------------
 # record building: both metrics in both modes, per-mode ranks, metadata
 # --------------------------------------------------------------------------
 

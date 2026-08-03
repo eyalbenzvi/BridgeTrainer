@@ -220,14 +220,37 @@ def prejudge_lead_mode(le: LeadEvaluation, mode: str,
     return prejudge_lead_values(le, _mode_values(le, scale, vul), scale)
 
 
+def _mp_score_domain_narrow(le: LeadEvaluation, best_cards: list,
+                            vul: str) -> list:
+    """Drop from an MP trick-tie the cards that do NOT tie in the score
+    domain (scoring.lead_metrics.mp_score_domain_tie). Equal average tricks
+    can still cash out to a materially worse result, and grading that as a
+    tie hands 100 to the worse lead."""
+    from ..scoring.lead_metrics import (compute_lead_metrics,
+                                        mp_score_domain_tie, rank_leads)
+    metrics = compute_lead_metrics(le.def_tricks, le.contract, vul)
+    # the anchor is the MP ranking's top card, which is always in the tie
+    return mp_score_domain_tie(
+        best_cards, rank_leads(metrics, "MP")[0],
+        {c: metrics[c]["exp_imps"] for c in metrics})
+
+
 def judge_lead_values(le: LeadEvaluation, values: dict, scale: ModeScale,
-                      force: bool = False) -> LeadVerdict:
+                      force: bool = False,
+                      vul: str | None = None) -> LeadVerdict:
     """The shared verdict machinery, graded on `values` (card -> per-sample
     array in the mode's unit). judge_lead / judge_lead_imp are the public
-    per-mode entry points."""
+    per-mode entry points.
+
+    *vul* is the board's vulnerability name. It is what the MP grade needs to
+    put its trick tie through the score-domain test; without it (the legacy
+    tricks-only ``judge_lead(le)`` entry point) the tie stays as measured.
+    """
     avg = _averages(values)
     best_avg = max(avg.values())
     best_cards = [c for c in le.cards if avg[c] >= best_avg - TIE_EPS]
+    if scale.mode == "MP" and vul is not None:
+        best_cards = _mp_score_domain_narrow(le, best_cards, vul)
     # a stable, suit-then-rank order for the accepted set
     best_cards.sort(key=lambda c: (SUITS.index(_suit(c)), le.cards.index(c)))
     winner = max(avg, key=lambda c: avg[c])
@@ -305,10 +328,12 @@ def judge_lead_values(le: LeadEvaluation, values: dict, scale: ModeScale,
                        measured=measured, table=table)
 
 
-def judge_lead(le: LeadEvaluation, force: bool = False) -> LeadVerdict:
+def judge_lead(le: LeadEvaluation, vul: str | None = None,
+               force: bool = False) -> LeadVerdict:
     """MP verdict: grade every lead by average double-dummy defensive
-    tricks (the original, pre-split behavior)."""
-    return judge_lead_values(le, le.def_tricks, MP_SCALE, force)
+    tricks (the original, pre-split behavior). Pass *vul* to put the trick
+    tie through the score-domain test as well (judge_lead_values)."""
+    return judge_lead_values(le, le.def_tricks, MP_SCALE, force, vul)
 
 
 def judge_lead_imp(le: LeadEvaluation, vul: str,
@@ -316,11 +341,12 @@ def judge_lead_imp(le: LeadEvaluation, vul: str,
     """IMP verdict: grade every lead by its expected IMP value from the
     final duplicate score (needs the board's vulnerability name). The trick
     average never determines the accepted set here."""
-    return judge_lead_values(le, _imp_values(le, vul), IMP_SCALE, force)
+    return judge_lead_values(le, _imp_values(le, vul), IMP_SCALE, force, vul)
 
 
 def judge_lead_mode(le: LeadEvaluation, mode: str, vul: str | None = None,
                     force: bool = False) -> LeadVerdict:
     """Dispatch to the mode's verdict gate ('MP' or 'IMP')."""
     scale = SCALES[mode]
-    return judge_lead_values(le, _mode_values(le, scale, vul), scale, force)
+    return judge_lead_values(le, _mode_values(le, scale, vul), scale, force,
+                             vul)

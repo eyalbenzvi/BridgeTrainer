@@ -841,40 +841,100 @@ function btScoreBidding(P, action) {
   out.score = Math.round(btClamp(out.base + out.leniency, 1, SCORE_MAX_NONBEST));
   return out;
 }
+/* MP's leading metric — the average number of defensive tricks — cannot see
+   WHERE those tricks fall. Two leads can average the same number and still
+   produce very different results: one takes its tricks while the contract is
+   going down, the other only after it is home. So an average-trick tie is not
+   by itself proof that two leads are interchangeable, and grading it as one
+   hands 100 to a materially worse lead (lead1-19fa8ed5599: ♥K averages 3.480
+   tricks against a spade spot's 3.482 — a 0.002 "tie" — yet beats 3NT on 28%
+   of the layouts instead of 37%, and is 0.90 IMP behind on the same evidence).
+
+   The score domain settles it, and every mode-aware row carries it (exp_imps,
+   measured against the board's own datum). Hence, in MP:
+     * accepted (100) = tied on tricks AND within LEAD_TIE_IMP of the
+       recommendation in the score domain — btLeadAccepted below;
+     * interchangeable (the tie key behind the matchpoint rank and the field
+       leniency group) = equal on BOTH metrics at display precision;
+     * the charged gap = the WORSE of the two yardsticks — the trick gap, and
+       the score-domain gap put on the trick scale by the two modes' taus — so
+       a lead that costs most of an IMP is never charged 0.00 tricks.
+   IMP mode already ranks and grades in the score domain, so none of this
+   changes it. See docs/scoring_scale.md and scoring/lead_metrics.py, which
+   applies the identical rule at forge time. */
+const LEAD_TIE_IMP = 0.05;    // score-domain tie epsilon, in IMPs
+                              // (== lead_metrics.TIE_EPS_MP_SCORE)
+const IMP_TO_TRICKS = SCORE_TAU.leadMP / SCORE_TAU.leadIMP;
+/* The accepted (score-100) leads of a mode, as the POLICY defines them: the
+   stored set, narrowed in MP by the score-domain tie test. Published records
+   are migrated to the narrowed set, so this is normally the identity; it
+   exists so scoring, grading and the "עדיף היה" line share ONE definition and
+   `correct` can never disagree with `score`. Tolerant of every stored shape
+   (accepted as a string, no by_mode); legacy tricks-only records — no
+   exp_imps to judge by — keep their stored set untouched. */
+function btLeadAccepted(P, mode) {
+  mode = mode === "IMP" ? "IMP" : "MP";
+  const v = (P && P.verdict) || {};
+  const bm = v.by_mode && v.by_mode[mode];
+  let acc = (bm && bm.accepted && bm.accepted.length) ? bm.accepted
+                                                      : v.accepted;
+  acc = (typeof acc === "string" ? [acc] : (acc || [])).filter(Boolean);
+  if (mode !== "MP" || acc.length < 2) return acc;
+  const rows = v.table || [];
+  const impOf = c => {
+    const r = rows.find(x => x.card === c);
+    return r && r.exp_imps !== undefined && r.exp_imps !== null
+      ? +r.exp_imps : null;
+  };
+  const anchor = (bm && bm.recommended) || acc[0];
+  const ref = impOf(anchor);
+  if (ref === null) return acc;
+  // the anchor is the recommendation: it is always accepted, and a lead that
+  // is BETTER than it in the score domain is never dropped for being different
+  const kept = acc.filter(c => c === anchor ||
+                               (impOf(c) === null ? true
+                                                  : impOf(c) >= ref - LEAD_TIE_IMP));
+  return kept.length ? kept : acc;
+}
 /* leads: MP grades tricks below best BLENDED with the matchpoint rank
-   (distinct trick values — the second-best lead still beats most of the
+   (distinct value groups — the second-best lead still beats most of the
    room); IMP grades expected IMPs below the mode's best, pure magnitude.
    No dead pin (leads have no dead concept) and no CI haircut (per-card CIs
    aren't published; ties already collapse into the accepted set at forge
    time).
 
    Tie invariant — "what the engine cannot distinguish, the score must not
-   distinguish": cards the active mode ranks identically (same leading metric
-   to display precision, i.e. interchangeable leads) MUST score the same. So
+   distinguish": cards the active mode ranks identically (same metrics to
+   display precision, i.e. interchangeable leads) MUST score the same. So
    every score input is a property of the tie-GROUP, not the individual card:
-   the gap is charged on the rounded leading metric (equal-ranked cards share
-   a cost, hence a base), and field leniency uses the group's TOTAL policy
-   weight (the sum of the interchangeable cards' BEN softmax — the field's
-   probability of finding that one idea) instead of the per-card softmax,
-   which used to split otherwise-identical cards by a few points. */
+   the gap is charged on the rounded metrics (equal-ranked cards share a cost,
+   hence a base), and field leniency uses the group's TOTAL policy weight (the
+   sum of the interchangeable cards' BEN softmax — the field's probability of
+   finding that one idea) instead of the per-card softmax, which used to split
+   otherwise-identical cards by a few points. The converse holds too: what the
+   engine CAN distinguish — see the score-domain note above — the score must
+   not merge, so in MP the tie key spans both metrics. */
 function btScoreLead(P, card, mode) {
   mode = mode === "IMP" ? "IMP" : "MP";
   const v = (P && P.verdict) || {};
-  const bm = v.by_mode && v.by_mode[mode];
-  const accepted = (bm && bm.accepted && bm.accepted.length)
-    ? bm.accepted : (v.accepted || []);
+  const accepted = btLeadAccepted(P, mode);
   const out = {kind: "lead", mode: mode,
                unit: mode === "IMP" ? "IMP" : "לקיחות", accepted: accepted};
   if (accepted.includes(card)) { out.score = 100; return out; }
   const rows = v.table || [];
   const row = rows.find(r => r.card === card);
   if (!row) { out.score = ERROR_MIN; out.fallback = true; return out; }
-  const useImp = mode === "IMP" && row.exp_imps !== undefined;
-  // the mode's leading metric at DISPLAY precision (2 decimals) — the tie key
-  const keyOf = useImp
-    ? r => (r.exp_imps === undefined ? null : Math.round(+r.exp_imps * 100))
-    : r => (r.avg_def_tricks === undefined ? null
-                                           : Math.round(+r.avg_def_tricks * 100));
+  const impOf = r => (r.exp_imps === undefined || r.exp_imps === null)
+    ? null : Math.round(+r.exp_imps * 100);
+  const trickOf = r => (r.avg_def_tricks === undefined ? null
+                        : Math.round(+r.avg_def_tricks * 100));
+  const useImp = mode === "IMP" && impOf(row) !== null;
+  // the tie key at DISPLAY precision (2 decimals): the mode's leading metric,
+  // plus — in MP — the score domain, which the trick average cannot see
+  const scored = !useImp && rows.some(r => impOf(r) !== null);
+  const keyOf = useImp ? impOf
+    : r => (trickOf(r) === null ? null
+            : (scored ? trickOf(r) + ":" + impOf(r) : String(trickOf(r))));
   const myKey = keyOf(row);
   if (useImp) {
     let best = -Infinity;
@@ -891,15 +951,31 @@ function btScoreLead(P, card, mode) {
                            // exp_imps: it is graded (and labeled) in tricks
     // round the trick gap to the same precision as the rank grouping, so a
     // tie-group shares one cost (and thus one base)
-    out.cost = Math.max(0, -Math.round((+row.vs_best || 0) * 100) / 100);
+    out.trickCost = Math.max(0, -Math.round((+row.vs_best || 0) * 100) / 100);
+    out.cost = out.trickCost;
     out.tau = SCORE_TAU.leadMP;
+    // ...then charge the score-domain gap instead when THAT is the bigger
+    // deviation, converted to the trick scale by the two modes' taus. Both
+    // ends are rounded metrics, so a tie-group still shares one cost.
+    let ref = null;
+    for (const r of rows)
+      if (accepted.includes(r.card)) {
+        const k = impOf(r);
+        if (k !== null && (ref === null || k > ref)) ref = k;
+      }
+    if (ref !== null && impOf(row) !== null) {
+      out.impCost = Math.max(0, (ref - impOf(row)) / 100);
+      const asTricks = Math.round(out.impCost * IMP_TO_TRICKS * 100) / 100;
+      if (asTricks > out.cost) { out.cost = asTricks; out.costSource = "score"; }
+    }
     const vals = [];
     for (const r of rows) {
       const q = keyOf(r);
-      if (q !== null && !vals.includes(q)) vals.push(q);
+      if (q !== null && !vals.some(g => g.key === q))
+        vals.push({key: q, t: trickOf(r), i: impOf(r) === null ? 0 : impOf(r)});
     }
-    vals.sort((a, b) => b - a);
-    const idx = vals.indexOf(myKey);
+    vals.sort((a, b) => b.t - a.t || b.i - a.i);
+    const idx = vals.findIndex(g => g.key === myKey);
     out.base = btCurve(out.cost, out.tau);
     if (vals.length > 1 && idx >= 0) {
       out.rank = idx + 1; out.groups = vals.length;
@@ -1002,8 +1078,15 @@ function btScoreChipHtml(score, small) {
 function btScoreExplain(parts) {
   if (!parts || parts.score === 100 || parts.dead || parts.fallback) return "";
   const bits = [];
-  let gap = "פער " + (+parts.cost).toFixed(parts.unit === "IMP" ? 1 : 2) +
-            " " + parts.unit + " מהמיטבי";
+  let gap;
+  if (parts.costSource === "score")
+    // the trick average did not separate the leads but the result did: say so,
+    // or the line would read "פער 0.00 לקיחות" under a sub-100 score
+    gap = "פער " + (+parts.impCost).toFixed(2) + " IMP בתוצאה (" +
+          (+parts.trickCost).toFixed(2) + " לקיחות)";
+  else
+    gap = "פער " + (+parts.cost).toFixed(parts.unit === "IMP" ? 1 : 2) +
+          " " + parts.unit + " מהמיטבי";
   if (parts.ci) gap += " (±" + (+parts.ci).toFixed(1) + " — חויב " +
                        (+parts.cEff).toFixed(1) + ")";
   bits.push(gap);
@@ -3364,11 +3447,10 @@ function hasImpMetrics(p) {
   const t = (p.verdict && p.verdict.table) || [];
   return t.length > 0 && t[0].exp_imps !== undefined;
 }
+/* one definition of "accepted", shared with the scorer and the grader, so the
+   cards painted green are exactly the ones that score 100 (_SCORE_JS) */
 function acceptedFor(p, mode) {
-  const bm = p.verdict && p.verdict.by_mode;
-  if (bm && bm[mode] && bm[mode].accepted && bm[mode].accepted.length)
-    return bm[mode].accepted;
-  return (p.verdict && p.verdict.accepted) || [];
+  return btLeadAccepted(p, mode);
 }
 function recommendedFor(p, mode) {
   const bm = p.verdict && p.verdict.by_mode;
