@@ -400,11 +400,19 @@ function gradeLead(P, card, mode) {
   const v = P.verdict;
   const trainingMode = mode === "IMP" ? "IMP" : "MP";
   const bm = (v.by_mode && v.by_mode[trainingMode]) || null;
-  const accepted = (bm && bm.accepted && bm.accepted.length)
+  const stored = (bm && bm.accepted && bm.accepted.length)
     ? bm.accepted : (v.accepted || []);
+  // btLeadAccepted is the scorer's own definition of the accepted set (it
+  // applies the MP score-domain tie test), so `correct` and `score` agree
+  const accepted = (typeof window !== "undefined" && window.btLeadAccepted)
+    ? window.btLeadAccepted(P, trainingMode) : stored;
   const correct = accepted.includes(card);
   const row = (v.table || []).find((r) => r.card === card);
   const rankKey = trainingMode === "IMP" ? "rank_imp" : "rank_mp";
+  // panel score (0-100); see gradeBidding for the window-boundary note
+  const parts = (typeof window !== "undefined" && window.btScoreLead)
+    ? window.btScoreLead(P, card, trainingMode) : null;
+  const score = parts ? parts.score : (correct ? 100 : 0);
   let gradedCost = 0;
   if (row && !correct) {
     if (trainingMode === "IMP" && row.exp_imps !== undefined) {
@@ -412,15 +420,16 @@ function gradeLead(P, card, mode) {
       const best = (v.table || []).find((r) => accepted.includes(r.card));
       if (best && best.exp_imps !== undefined)
         gradedCost = Math.max(0, +best.exp_imps - +row.exp_imps);
+    } else if (parts && parts.cost !== undefined) {
+      gradedCost = parts.cost;   // the gap the scorer charged, in tricks —
+                                 // the trick gap, or the bigger score-domain
+                                 // one put on the trick scale (_SCORE_JS)
     } else if (row.vs_best !== undefined) {
       gradedCost = Math.max(0, -(+row.vs_best)); // def. tricks below best
     }
   }
   const primaryValue = row
     ? (trainingMode === "IMP" ? row.exp_imps : row.avg_def_tricks) : null;
-  // panel score (0-100); see gradeBidding for the window-boundary note
-  const score = (typeof window !== "undefined" && window.btScoreLead)
-    ? window.btScoreLead(P, card, trainingMode).score : (correct ? 100 : 0);
   return { ...meta(P), answer: card, chosenCall: card, correct, score,
            trainingMode,
            rankingMetric: trainingMode === "IMP" ? "exp_imps"

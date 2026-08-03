@@ -82,6 +82,87 @@ score = clamp( 95 / (1 + (c_eff / tau)^1.6) + leniency , 1, 94 )
   wide — in a matchpoint field it still beats most of the room.
 * No CI haircut (per-card CIs are not published; ties already collapse
   into the accepted set at forge time via TIE_EPS).
+* **The score-domain test** (below) — the average trick count alone never
+  certifies a tie, and never sets the charged gap on its own.
+
+### The MP score-domain test
+
+The average number of defensive tricks cannot see WHERE those tricks
+fall. Two leads can average the same number and still produce very
+different results: one takes its tricks while the contract is going down,
+the other only after it is home. So an average-trick tie is not by itself
+proof that two leads are interchangeable — and grading it as one handed
+100 to a materially worse lead:
+
+> `lead1-19fa8ed5599` (3NT-E, MP): ♥K averages 3.480 defensive tricks
+> against a spade spot's 3.482 — a 0.002 "tie", well inside TIE_EPS —
+> yet beats the contract on 28% of the layouts instead of 37%, averages
+> 37 duplicate points less, and is **0.90 IMP** behind on the same
+> evidence. It scored 100; it now scores 75.
+
+Every mode-aware lead record already carries the score domain per card
+(`exp_imps`, against the board's own Butler datum), so MP consults it:
+
+* **Accepted (100)** = tied on the trick average **and** within
+  `TIE_EPS_MP_SCORE` (0.05 IMP — the IMP mode's own "indistinguishable"
+  line, reused rather than reinvented) of the MP **recommendation** in the
+  score domain. The recommendation is the anchor, so it is always in its
+  own accepted set, and a lead that is *better* than it in the score
+  domain is never dropped for being different.
+* **Interchangeable** — the tie key behind the rank blend and the field
+  leniency group — is equality on **both** metrics at display precision.
+  The tie invariant below is unchanged in spirit and gains its converse:
+  what the engine *can* distinguish, the score must not merge.
+* **The charged gap** is the worse of the two yardsticks: the trick gap,
+  and the score-domain gap put on the trick scale by the two modes' taus
+  (`x 0.6/1.75`). Otherwise a lead that costs most of an IMP would be
+  charged 0.00 tricks. When the score domain is the binding one, the
+  Hebrew breakdown line says so (`פער 0.90 IMP בתוצאה (0.00 לקיחות)`)
+  rather than claiming a trick gap that isn't there.
+
+IMP mode already ranks and grades in the score domain, so none of this
+touches it — measured over the whole published pool, not one IMP-mode
+score moves.
+
+One policy, three call sites, all reading the same stored aggregates:
+`scoring/lead_metrics.mp_score_domain_tie` (forge-time accepted set, and
+the `trainer pool backfill-mp-ties` migration), and `btLeadAccepted`
+(`_SCORE_JS`), which every client path — the scorer, `gradeLead`, the lead
+page's green cards — now shares, so `correct` can never disagree with
+`score`.
+
+Measured effect on the published pool (2794 lead problems, all 13 cards
+each, MP mode):
+
+| | before | after |
+|---|---|---|
+| cards accepted (score 100) | 7123 | 6168 (-955, in 453 problems) |
+| mean score, all cards | 65.2 | 61.7 |
+| mean score, non-accepted | 56.7 | 53.9 |
+| field-weighted¹ share scoring >= 65 | 72.9% | 67.7% |
+| field-weighted¹ share scoring < 40 | 5.1% | 7.8% |
+
+¹ weighted by BEN's opening-lead policy — i.e. over the leads a human
+plausibly makes, which is the population the 50-85 calibration target
+talks about.
+
+**Production run (2026-08-03).** `trainer pool backfill-mp-ties` dropped
+955 leads from the MP accepted set of 453 of the 2794 published lead
+problems (4493 docs); a second run reports 0, and the Python migration and
+the client's `btLeadAccepted` agree on all 2794 records. `trainer pool
+regrade-attempts` then rewrote 37 of 380 stored attempts (314 already
+current, 29 on deleted problems left as-is), and likewise re-reports 0.
+The reference board `lead1-19fa8ed5599` now accepts only the five spade
+spots; ♥K/♥Q/♥J score 75 with the breakdown line
+`פער 0.90 IMP בתוצאה (0.00 לקיחות) · מדורגת 2 מתוך 6 · +3 הקלת שדה`.
+
+Deliberately NOT migrated: each affected board's stored `difficulty` /
+`quality.trap`, which the narrowed accepted set would also move (BEN's
+favourite is now outside the answer on some of them, i.e. a trap). That is
+a property of the PROBLEM, not of the answer, it feeds the index and the
+user's difficulty filters, and re-levelling the pool is its own change.
+New boards get it right at forge time. `explanations.cards` is likewise
+left alone — producer-side data the client never reads.
 
 ### Opening leads, IMP mode (unit: IMPs)
 

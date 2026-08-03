@@ -220,6 +220,112 @@ def test_lead_tied_cards_score_identically():
     assert out["s_imp"][0] != out["h_imp"][0]
 
 
+# The reported false tie (problem lead1-19fa8ed5599, MP mode, 3NT-E): the ♥K
+# averages 3.480 defensive tricks against a spade spot's 3.482 — inside the
+# 0.05 tie epsilon — yet beats the contract on 28% of the layouts instead of
+# 37%, which is 0.90 IMP on the same evidence. Graded on the trick average
+# alone it scored 100.
+LEAD_FALSE_TIE = {
+    "kind": "lead",
+    "training": {"target_mode": "MP"},
+    "verdict": {
+        "accepted": ["S7", "S6", "S2", "HK", "HQ", "HJ"],
+        "by_mode": {
+            "MP": {"recommended": "S7",
+                   "accepted": ["S7", "S6", "S2", "HK", "HQ", "HJ"]},
+            "IMP": {"recommended": "S7", "accepted": ["S7", "S6", "S2"]},
+        },
+        "table": [
+            {"card": "S7", "avg_def_tricks": 3.482, "vs_best": 0.0,
+             "exp_imps": 0.88, "set_prob": 0.367, "ben_softmax": 0.397},
+            {"card": "S6", "avg_def_tricks": 3.482, "vs_best": 0.0,
+             "exp_imps": 0.88, "set_prob": 0.367, "ben_softmax": 0.397},
+            {"card": "S2", "avg_def_tricks": 3.482, "vs_best": 0.0,
+             "exp_imps": 0.88, "set_prob": 0.367, "ben_softmax": 0.397},
+            {"card": "HK", "avg_def_tricks": 3.480, "vs_best": -0.002,
+             "exp_imps": -0.02, "set_prob": 0.283, "ben_softmax": 0.428},
+            {"card": "HQ", "avg_def_tricks": 3.480, "vs_best": -0.002,
+             "exp_imps": -0.02, "set_prob": 0.283, "ben_softmax": 0.003},
+            {"card": "HJ", "avg_def_tricks": 3.480, "vs_best": -0.002,
+             "exp_imps": -0.02, "set_prob": 0.283, "ben_softmax": 0.001},
+            {"card": "D7", "avg_def_tricks": 3.130, "vs_best": -0.353,
+             "exp_imps": -0.58, "set_prob": 0.253, "ben_softmax": 0.067},
+            {"card": "H5", "avg_def_tricks": 2.853, "vs_best": -0.63,
+             "exp_imps": -1.25, "set_prob": 0.208, "ben_softmax": 0.015},
+        ],
+    },
+}
+
+
+@needs_node
+def test_mp_tie_must_hold_in_the_score_domain():
+    """An average-trick tie that costs real result is not a tie: the lead
+    leaves the accepted set and is graded on what it actually costs."""
+    script = (_SCORE_JS +
+              f"\nconst T = {json.dumps(LEAD_FALSE_TIE)};" +
+              "\nconst s = c => btScoreLead(T, c, 'MP');" +
+              "\nconsole.log(JSON.stringify({"
+              "acc_mp: btLeadAccepted(T, 'MP'),"
+              "acc_imp: btLeadAccepted(T, 'IMP'),"
+              "hk: s('HK'), hq: s('HQ'), s7: s('S7'), d7: s('D7'),"
+              "line: btScoreExplain(s('HK'))}));\n")
+    fd, path = tempfile.mkstemp(suffix=".js")
+    try:
+        os.write(fd, script.encode("utf-8"))
+        os.close(fd)
+        res = subprocess.run(["node", path], capture_output=True, text=True)
+        assert res.returncode == 0, res.stderr
+        out = json.loads(res.stdout.strip().splitlines()[-1])
+    finally:
+        os.unlink(path)
+    # the hearts are out of the accepted set; the recommendation and the
+    # spades that really do tie it are not
+    assert out["acc_mp"] == ["S7", "S6", "S2"]
+    assert out["acc_imp"] == ["S7", "S6", "S2"]   # score-domain mode: as stored
+    assert out["s7"]["score"] == 100
+    # a real deviation, not a rounding nudge off 100, and not a blunder either
+    assert 60 <= out["hk"]["score"] <= 85
+    # ...and still worse than the honest tie, better than the clear error
+    assert out["s7"]["score"] > out["hk"]["score"] > out["d7"]["score"]
+    # the tie invariant survives: ♥K/♥Q/♥J are one idea and one score
+    assert out["hk"]["score"] == out["hq"]["score"]
+    # the charged gap is the score-domain one (the trick gap is ~0), and the
+    # breakdown line says so rather than claiming a 0.00-trick deviation
+    assert out["hk"]["costSource"] == "score"
+    assert out["hk"]["cost"] > 0.25 and out["hk"]["trickCost"] == 0.0
+    assert "0.90 IMP" in out["line"]
+    # field leniency comes from the ♥ group alone (0.43), never the spades'
+    assert out["hk"]["policy"] < 0.5
+
+
+def test_mp_score_domain_tie_agrees_with_the_forge():
+    """btLeadAccepted (client) and mp_score_domain_tie (forge + migration)
+    are one policy: they must narrow the same set the same way."""
+    from bridge_trainer.pool.firestore_store import mp_score_tie_update
+    from bridge_trainer.scoring.lead_metrics import mp_score_domain_tie
+
+    v = LEAD_FALSE_TIE["verdict"]
+    imps = {r["card"]: r["exp_imps"] for r in v["table"]}
+    assert mp_score_domain_tie(v["by_mode"]["MP"]["accepted"], "S7", imps) \
+        == ["S7", "S6", "S2"]
+    # a lead BETTER than the recommendation in the score domain is not demoted
+    assert mp_score_domain_tie(["S7", "HK"], "S7", {"S7": 0.1, "HK": 0.9}) \
+        == ["S7", "HK"]
+    # ...nor is one the record carries no score-domain evidence for
+    assert mp_score_domain_tie(["S7", "HK"], "S7", {"S7": 0.9}) == ["S7", "HK"]
+    # the migration payload moves every "accepted in MP" field together
+    up = mp_score_tie_update({"id": "x", **LEAD_FALSE_TIE})
+    assert up["verdict"]["by_mode"]["MP"]["accepted"] == ["S7", "S6", "S2"]
+    assert up["verdict"]["accepted"] == ["S7", "S6", "S2"]   # MP-forged board
+    flags = {r["card"]: r["recommended_mp"] for r in up["verdict"]["table"]}
+    assert flags == {"S7": True, "S6": True, "S2": True, "HK": False,
+                     "HQ": False, "HJ": False, "D7": False, "H5": False}
+    # idempotent: the migrated record is already compliant
+    migrated = {"id": "x", **LEAD_FALSE_TIE,
+                "verdict": {**v, **up["verdict"]}}
+    assert mp_score_tie_update(migrated) is None
+
+
 @needs_node
 def test_attempt_fallback_matches_semantics():
     rows = run_js([

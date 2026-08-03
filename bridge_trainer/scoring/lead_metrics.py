@@ -67,6 +67,23 @@ LEAD_IMP_BASELINE = {
 TIE_EPS_MP = 0.05    # defensive tricks (matches lead_verdict.TIE_EPS)
 TIE_EPS_IMP = 0.05   # IMPs
 
+# MP's leading metric — the average number of defensive tricks — cannot see
+# WHERE those tricks fall. Two leads can average the same number and still
+# produce very different results: one takes its tricks while the contract is
+# going down, the other only after it is home. So an average-trick tie alone
+# does not make two leads interchangeable, and grading it as one hands 100 to
+# a materially worse lead (lead1-19fa8ed5599: ♥K averages 3.480 tricks against
+# a spade spot's 3.482 — a 0.002 "tie" — yet beats 3NT on 28% of the layouts
+# instead of 37%, and is 0.90 IMP behind on the same evidence).
+#
+# The score domain is the arbiter, and every mode-aware record already carries
+# it per card, so an MP tie must ALSO hold there: within TIE_EPS_MP_SCORE of
+# the recommendation's expected IMP value. That is the IMP mode's own
+# "indistinguishable" line, reused rather than reinvented — what the IMP grader
+# can separate, the MP grader must not call identical. IMP mode already ranks
+# in the score domain, so none of this touches it. See docs/scoring_scale.md.
+TIE_EPS_MP_SCORE = TIE_EPS_IMP   # IMPs of score-domain slack inside an MP tie
+
 SUITS = "SHDC"
 _RANK_ORDER = "AKQJT98765432"
 
@@ -196,14 +213,49 @@ def rank_leads(metrics: dict, mode: str) -> list[str]:
     return sorted(metrics, key=key)
 
 
+def mp_score_domain_tie(tied: list, recommended: str, exp_imps: dict) -> list:
+    """Narrow an MP average-trick tie to the leads that also tie in the SCORE
+    domain (see TIE_EPS_MP_SCORE): those within ``TIE_EPS_MP_SCORE`` IMPs of
+    the recommendation. Input order is preserved.
+
+    *recommended* is the MP ranking's top card and is the anchor, so it is
+    always in its own accepted set, and a lead that is BETTER than it in the
+    score domain is never dropped for being different. A card with no
+    score-domain value (legacy tricks-only evidence) is kept — the policy
+    needs evidence to demote, never assumes it.
+
+    Pure, and deliberately expressed over plain aggregates rather than the
+    metrics dict: the Firestore migration and the client's ``btLeadAccepted``
+    (webapp ``_SCORE_JS``) apply the very same rule to a stored record's
+    table."""
+    ref = exp_imps.get(recommended)
+    if ref is None or not tied:
+        return list(tied)
+
+    def keeps(card: str) -> bool:
+        v = exp_imps.get(card)
+        return card == recommended or v is None or v >= ref - TIE_EPS_MP_SCORE
+
+    return [c for c in tied if keeps(c)]
+
+
 def accepted_set(metrics: dict, mode: str) -> list[str]:
     """Cards tied for best under the mode's objective (within the mode's
-    tie epsilon), in ranking order."""
+    tie epsilon), in ranking order.
+
+    In MP the tie must hold in the score domain too (mp_score_domain_tie):
+    equal average tricks that cash out to a materially worse result is not a
+    tie, and must not be graded 100."""
     ranking = rank_leads(metrics, mode)
     primary = RANKING_METRICS[mode]
     eps = TIE_EPS_MP if mode == MODE_MP else TIE_EPS_IMP
     best = metrics[ranking[0]][primary]
-    return [c for c in ranking if metrics[c][primary] >= best - eps]
+    tied = [c for c in ranking if metrics[c][primary] >= best - eps]
+    if mode != MODE_MP:
+        return tied
+    # ranking[0] is always in `tied` (zero gap), so it is the anchor
+    return mp_score_domain_tie(
+        tied, ranking[0], {c: metrics[c].get("exp_imps") for c in tied})
 
 
 def mode_rankings(metrics: dict) -> dict:
