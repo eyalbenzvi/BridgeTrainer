@@ -676,31 +676,46 @@ def mp_score_tie_update(rec: dict) -> dict | None:
     materially different results, so the leads more than
     ``TIE_EPS_MP_SCORE`` IMPs behind the MP recommendation leave the accepted
     set (scoring.lead_metrics.mp_score_domain_tie) and are graded on the
-    curve instead of being handed 100. Everything the client reads as "this
-    lead is accepted in MP" moves together: ``verdict.by_mode.MP.accepted``,
-    the per-row ``recommended_mp`` flags in ``verdict.table`` and
-    ``candidates``, and — for a board FORGED for MP, where the two are the
-    same set — ``verdict.accepted``.
+    curve instead of being handed 100 — while the set stays closed upward in
+    the trick average, so no lead is demoted over one it BEATS on MP's own
+    objective. Everything the client reads as "this lead is accepted in MP"
+    moves together: ``verdict.by_mode.MP.accepted``, the per-row
+    ``recommended_mp`` flags in ``verdict.table`` and ``candidates``, and —
+    for a board FORGED for MP, where the two are the same set —
+    ``verdict.accepted``.
+
+    The candidate set is the stored one UNIONED with the record's own trick
+    tie (``mp_trick_tie`` over ``verdict.table``), so a record the earlier,
+    non-monotone policy narrowed too far is repaired here rather than left
+    stuck at its migrated set.
 
     Recomputed from the record's OWN stored aggregates, which is exactly what
     the client scores from (``btLeadAccepted``), so a migrated document and
     the page agree by construction. Pure: no Firestore, no re-simulation.
     Arrays are returned whole because a merge write replaces them wholesale.
     """
-    from ..scoring.lead_metrics import mp_score_domain_tie, target_mode_of
+    from ..scoring.lead_metrics import (card_sort_key, mp_score_domain_tie,
+                                        mp_trick_tie, target_mode_of)
 
     if rec.get("kind") != "lead":
         return None
     v = rec.get("verdict") or {}
-    table = v.get("table") or []
+    table = [r for r in (v.get("table") or []) if r.get("card")]
     mp = (v.get("by_mode") or {}).get("MP") or {}
     stored = list(mp.get("accepted") or v.get("accepted") or [])
-    if len(stored) < 2 or not table:
+    if not table:
         return None
-    imps = {r.get("card"): r.get("exp_imps") for r in table if r.get("card")}
-    kept = mp_score_domain_tie(stored, mp.get("recommended") or stored[0],
-                               imps)
-    if len(kept) == len(stored):
+    imps = {r["card"]: r.get("exp_imps") for r in table}
+    tricks = {r["card"]: r.get("avg_def_tricks") for r in table
+              if r.get("avg_def_tricks") is not None}
+    # candidates: what is stored, plus every lead tied with the best trick
+    # average, in table (best-first) order for the ones the record dropped
+    tied = list(stored) + [c for c in mp_trick_tie(tricks) if c not in stored]
+    if len(tied) < 2:
+        return None
+    kept = mp_score_domain_tie(tied, mp.get("recommended") or tied[0], imps,
+                               tricks or None)
+    if set(kept) == set(stored):
         return None
     keep = set(kept)
 
@@ -709,9 +724,10 @@ def mp_score_tie_update(rec: dict) -> dict | None:
 
     verdict = {"by_mode": {"MP": {"accepted": kept}}, "table": reflag(table)}
     if target_mode_of(rec) == "MP" and v.get("accepted"):
-        # an MP board's verdict.accepted IS its MP accepted set (audit F12);
-        # filter in place so its own suit-then-rank order survives
-        verdict["accepted"] = [c for c in v["accepted"] if c in keep]
+        # an MP board's verdict.accepted IS its MP accepted set (audit F12),
+        # and carries its own suit-then-rank order — which card_sort_key
+        # reproduces, so a re-admitted lead lands where the forge would put it
+        verdict["accepted"] = sorted(keep, key=card_sort_key)
     payload = {"verdict": verdict}
     if rec.get("candidates"):
         payload["candidates"] = reflag(rec["candidates"])
@@ -723,19 +739,21 @@ def backfill_mp_score_ties(key_path: str | None = None,
     """Migration: apply the MP score-domain tie policy to every published
     lead problem (see ``mp_score_tie_update``), so a lead that only ties the
     recommendation on average tricks — while costing real result — stops
-    being graded 100.
+    being graded 100, and no lead is left demoted over one it BEATS on the
+    trick average (the monotonicity repair, which RE-ADMITS leads the earlier
+    non-monotone narrowing dropped).
 
     Bidding docs and lead docs whose MP tie already holds in the score domain
     are read but never written. The index carries no verdict data, so it is
     untouched. Run ``regrade_attempts`` afterwards to bring stored history
     onto the new grades.
 
-    Returns {leads, updated, demoted, total}. ``dry_run`` reports without
-    writing."""
+    Returns {leads, updated, demoted, readmitted, total}. ``dry_run`` reports
+    without writing."""
     remote = FirestorePool(key_path)
     records = remote.stream_records(
         fields=["kind", "verdict", "candidates", "training", "generator"])
-    updated = leads = demoted = 0
+    updated = leads = demoted = readmitted = 0
     for rec in records:
         if rec.get("kind") != "lead":
             continue
@@ -744,17 +762,18 @@ def backfill_mp_score_ties(key_path: str | None = None,
         if payload is None:
             continue
         updated += 1
-        before = ((rec.get("verdict") or {}).get("by_mode") or {}
-                  ).get("MP") or {}
-        demoted += len(before.get("accepted")
-                       or (rec.get("verdict") or {}).get("accepted") or []) \
-            - len(payload["verdict"]["by_mode"]["MP"]["accepted"])
+        v = rec.get("verdict") or {}
+        before = set((v.get("by_mode") or {}).get("MP", {}).get("accepted")
+                     or v.get("accepted") or [])
+        after = set(payload["verdict"]["by_mode"]["MP"]["accepted"])
+        demoted += len(before - after)
+        readmitted += len(after - before)
         if not dry_run:
             _retry_transient(lambda rid=rec["id"], p=payload:
                              remote._col.document(rid).set(
                                  _firestore_safe(p), merge=True))
     return {"leads": leads, "updated": updated, "demoted": demoted,
-            "total": len(records)}
+            "readmitted": readmitted, "total": len(records)}
 
 
 def forcing_pass_offenders(records: list[dict]) -> dict:

@@ -84,6 +84,20 @@ TIE_EPS_IMP = 0.05   # IMPs
 # in the score domain, so none of this touches it. See docs/scoring_scale.md.
 TIE_EPS_MP_SCORE = TIE_EPS_IMP   # IMPs of score-domain slack inside an MP tie
 
+# ...but that veto is a per-card threshold measured against ONE anchor, and on
+# its own it can cut a lead out of the MIDDLE of the trick order — inverting
+# the very metric MP ranks by. lead1-19fb5723ed9 (3NT-W, MP): ♥3 averages
+# 3.208 defensive tricks and was dropped for trailing the ♥5 anchor by 0.07
+# IMP, while ♥J (3.180 tricks) and ♦A (3.185) stayed accepted; ♥3 scored 94,
+# ♥J 100 — a lead graded BELOW one it beats on the mode's own objective.
+#
+# So the accepted set is CLOSED UPWARD in expected defensive tricks: the score
+# domain may still trim a trick tie, but only from its BOTTOM, never out of its
+# middle (mp_monotone_close). The veto keeps its motivating case — on
+# lead1-19fa8ed5599 the demoted hearts ARE the trick-order tail — and MP
+# regains the invariant its name promises: more expected tricks never scores
+# less.
+
 SUITS = "SHDC"
 _RANK_ORDER = "AKQJT98765432"
 
@@ -192,6 +206,13 @@ def _card_order(card: str) -> tuple[int, int]:
     return SUITS.index(card[0]), _RANK_ORDER.index(card[1])
 
 
+# The order a stored accepted set is written in: the same suit-then-rank order
+# the forge produces (lead_verdict.judge_lead_values sorts on the leader's
+# hand, and lead_posterior.legal_leads builds it suit-then-rank), so a
+# migration that RE-ADMITS a lead can put it back where the forge would.
+card_sort_key = _card_order
+
+
 def rank_leads(metrics: dict, mode: str) -> list[str]:
     """Cards best-first under the mode's objective, with DETERMINISTIC
     tie-breakers.
@@ -213,7 +234,43 @@ def rank_leads(metrics: dict, mode: str) -> list[str]:
     return sorted(metrics, key=key)
 
 
-def mp_score_domain_tie(tied: list, recommended: str, exp_imps: dict) -> list:
+def mp_trick_tie(exp_tricks: dict) -> list:
+    """The cards tied for best on MP's own objective: every lead within
+    ``TIE_EPS_MP`` expected defensive tricks of the maximum. Input order is
+    preserved. This is the candidate set the score-domain veto trims."""
+    if not exp_tricks:
+        return []
+    best = max(exp_tricks.values())
+    return [c for c, v in exp_tricks.items() if v >= best - TIE_EPS_MP]
+
+
+def mp_monotone_close(tied: list, kept: list, exp_tricks: dict) -> list:
+    """Close *kept* upward in expected defensive tricks over *tied*: re-admit
+    every tied lead that is STRICTLY better on MP's ranking metric than the
+    worst lead still accepted. Input order is preserved.
+
+    This is what keeps the score-domain veto from inverting MP's own ranking
+    (see TIE_EPS_MP_SCORE): the veto may trim the tail of the trick order, but
+    a lead can never be demoted while a lead it BEATS on the trick average
+    stays accepted.
+
+    Strictly better, not "at least as good": leads on the SAME average are
+    exactly the tie the score domain is there to split, and re-admitting them
+    would undo the veto in its own motivating case (equal averages, opposite
+    results). Missing trick evidence is never used to demote."""
+    keep = set(kept)
+    have = [exp_tricks.get(c) for c in kept]
+    have = [t for t in have if t is not None]
+    if not have:
+        return [c for c in tied if c in keep]
+    floor = min(have)
+    return [c for c in tied
+            if c in keep or (exp_tricks.get(c) is not None
+                             and exp_tricks[c] > floor)]
+
+
+def mp_score_domain_tie(tied: list, recommended: str, exp_imps: dict,
+                        exp_tricks: dict | None = None) -> list:
     """Narrow an MP average-trick tie to the leads that also tie in the SCORE
     domain (see TIE_EPS_MP_SCORE): those within ``TIE_EPS_MP_SCORE`` IMPs of
     the recommendation. Input order is preserved.
@@ -223,6 +280,13 @@ def mp_score_domain_tie(tied: list, recommended: str, exp_imps: dict) -> list:
     score domain is never dropped for being different. A card with no
     score-domain value (legacy tricks-only evidence) is kept — the policy
     needs evidence to demote, never assumes it.
+
+    *exp_tricks* (card -> expected defensive tricks) enables the monotonicity
+    guard: the narrowed set is closed upward in MP's ranking metric, so the
+    veto can only cut the tail of the trick order (``mp_monotone_close``).
+    Callers that have the trick averages — the forge, the Firestore migration
+    and the client — all pass it; it stays optional for legacy tricks-only
+    call sites, where the veto is inert anyway.
 
     Pure, and deliberately expressed over plain aggregates rather than the
     metrics dict: the Firestore migration and the client's ``btLeadAccepted``
@@ -236,7 +300,10 @@ def mp_score_domain_tie(tied: list, recommended: str, exp_imps: dict) -> list:
         v = exp_imps.get(card)
         return card == recommended or v is None or v >= ref - TIE_EPS_MP_SCORE
 
-    return [c for c in tied if keeps(c)]
+    kept = [c for c in tied if keeps(c)]
+    if exp_tricks is None or len(kept) == len(tied):
+        return kept
+    return mp_monotone_close(tied, kept, exp_tricks)
 
 
 def accepted_set(metrics: dict, mode: str) -> list[str]:
@@ -245,7 +312,8 @@ def accepted_set(metrics: dict, mode: str) -> list[str]:
 
     In MP the tie must hold in the score domain too (mp_score_domain_tie):
     equal average tricks that cash out to a materially worse result is not a
-    tie, and must not be graded 100."""
+    tie, and must not be graded 100 — but that narrowing stays closed upward
+    in the trick average, so it never demotes a lead over one it beats."""
     ranking = rank_leads(metrics, mode)
     primary = RANKING_METRICS[mode]
     eps = TIE_EPS_MP if mode == MODE_MP else TIE_EPS_IMP
@@ -255,7 +323,8 @@ def accepted_set(metrics: dict, mode: str) -> list[str]:
         return tied
     # ranking[0] is always in `tied` (zero gap), so it is the anchor
     return mp_score_domain_tie(
-        tied, ranking[0], {c: metrics[c].get("exp_imps") for c in tied})
+        tied, ranking[0], {c: metrics[c].get("exp_imps") for c in tied},
+        {c: metrics[c].get("exp_def_tricks") for c in tied})
 
 
 def mode_rankings(metrics: dict) -> dict:

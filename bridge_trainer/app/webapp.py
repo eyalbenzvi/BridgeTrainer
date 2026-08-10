@@ -861,17 +861,39 @@ function btScoreBidding(P, action) {
        a lead that costs most of an IMP is never charged 0.00 tricks.
    IMP mode already ranks and grades in the score domain, so none of this
    changes it. See docs/scoring_scale.md and scoring/lead_metrics.py, which
-   applies the identical rule at forge time. */
+   applies the identical rule at forge time.
+
+   MONOTONICITY. MP's objective is the trick average, so pulling a second
+   yardstick in must never invert it: in MP a lead with MORE expected
+   defensive tricks can never score less than one with fewer. Left unguarded
+   both mechanisms above break that promise, because exp_imps is not itself
+   monotone in the trick average (lead1-19fb5723ed9, 3NT-W: ♥3 averages 3.208
+   tricks and scored 94 — dropped from the accepted set for trailing the ♥5
+   anchor by 0.07 IMP — while ♥J at 3.180 tricks scored 100; ♠3 at 3.067
+   scored 66 against ♣J's 63 at 3.095). So both ends are clamped to the trick
+   order:
+     * the accepted set is closed UPWARD in tricks — the score domain may trim
+       the tail of a trick tie, never its middle (lead_metrics
+       .mp_monotone_close);
+     * every other lead keeps its own measured grade but is CAPPED at the
+       grade of each lead that beats it on the trick average (`capped`). */
 const LEAD_TIE_IMP = 0.05;    // score-domain tie epsilon, in IMPs
                               // (== lead_metrics.TIE_EPS_MP_SCORE)
+const LEAD_TIE_TRICKS = 0.05; // trick-tie epsilon (== lead_metrics.TIE_EPS_MP)
 const IMP_TO_TRICKS = SCORE_TAU.leadMP / SCORE_TAU.leadIMP;
 /* The accepted (score-100) leads of a mode, as the POLICY defines them: the
-   stored set, narrowed in MP by the score-domain tie test. Published records
-   are migrated to the narrowed set, so this is normally the identity; it
-   exists so scoring, grading and the "עדיף היה" line share ONE definition and
-   `correct` can never disagree with `score`. Tolerant of every stored shape
-   (accepted as a string, no by_mode); legacy tricks-only records — no
-   exp_imps to judge by — keep their stored set untouched. */
+   stored set, narrowed in MP by the score-domain tie test and then closed
+   upward in the trick average. Published records are migrated to the same
+   set, so this is normally the identity; it exists so scoring, grading and
+   the "עדיף היה" line share ONE definition and `correct` can never disagree
+   with `score`. Tolerant of every stored shape (accepted as a string, no
+   by_mode); legacy tricks-only records — no exp_imps to judge by — keep their
+   stored set untouched.
+
+   The candidate set is the stored one UNIONED with the record's own trick tie
+   (every lead within LEAD_TIE_TRICKS of the best average), so a record the
+   earlier non-monotone narrowing cut too far reads correctly here even before
+   `trainer pool backfill-mp-ties` repairs the document. */
 function btLeadAccepted(P, mode) {
   mode = mode === "IMP" ? "IMP" : "MP";
   const v = (P && P.verdict) || {};
@@ -879,21 +901,41 @@ function btLeadAccepted(P, mode) {
   let acc = (bm && bm.accepted && bm.accepted.length) ? bm.accepted
                                                       : v.accepted;
   acc = (typeof acc === "string" ? [acc] : (acc || [])).filter(Boolean);
-  if (mode !== "MP" || acc.length < 2) return acc;
+  if (mode !== "MP") return acc;
   const rows = v.table || [];
-  const impOf = c => {
+  const numOf = (c, k) => {
     const r = rows.find(x => x.card === c);
-    return r && r.exp_imps !== undefined && r.exp_imps !== null
-      ? +r.exp_imps : null;
+    return r && r[k] !== undefined && r[k] !== null ? +r[k] : null;
   };
-  const anchor = (bm && bm.recommended) || acc[0];
+  const impOf = c => numOf(c, "exp_imps");
+  const trickOf = c => numOf(c, "avg_def_tricks");
+  const tricks = rows.map(r => r.card).filter(c => trickOf(c) !== null);
+  const tied = acc.slice();
+  if (tricks.length) {
+    const bestT = Math.max.apply(null, tricks.map(trickOf));
+    for (const c of tricks)
+      if (trickOf(c) >= bestT - LEAD_TIE_TRICKS && !tied.includes(c))
+        tied.push(c);
+  }
+  if (tied.length < 2) return acc;
+  const anchor = (bm && bm.recommended) || acc[0] || tied[0];
   const ref = impOf(anchor);
   if (ref === null) return acc;
   // the anchor is the recommendation: it is always accepted, and a lead that
   // is BETTER than it in the score domain is never dropped for being different
-  const kept = acc.filter(c => c === anchor ||
-                               (impOf(c) === null ? true
-                                                  : impOf(c) >= ref - LEAD_TIE_IMP));
+  let kept = tied.filter(c => c === anchor ||
+                              (impOf(c) === null ? true
+                                                 : impOf(c) >= ref - LEAD_TIE_IMP));
+  if (!kept.length) return acc;
+  // ...then closed upward in the trick average: the score domain may trim the
+  // TAIL of the tie, never demote a lead over one it BEATS on MP's own metric.
+  // Strictly better, not "at least as good": leads on the SAME average are
+  // exactly the tie the score domain is there to split.
+  const floor = Math.min.apply(null, kept.map(trickOf)
+                                         .filter(t => t !== null));
+  if (isFinite(floor))
+    kept = tied.filter(c => kept.indexOf(c) >= 0 ||
+                            (trickOf(c) !== null && trickOf(c) > floor));
   return kept.length ? kept : acc;
 }
 /* leads: MP grades tricks below best BLENDED with the matchpoint rank
@@ -928,6 +970,13 @@ function btScoreLead(P, card, mode) {
     ? null : Math.round(+r.exp_imps * 100);
   const trickOf = r => (r.avg_def_tricks === undefined ? null
                         : Math.round(+r.avg_def_tricks * 100));
+  // MP's objective at FULL stored precision. The tie key below deliberately
+  // rounds (interchangeable leads must share a score); the monotonicity guard
+  // must not, or two leads the table itself prints apart — 5.803 vs 5.795 —
+  // could still be graded out of order.
+  const rawTrickOf = r => (r.avg_def_tricks === undefined
+                           || r.avg_def_tricks === null)
+    ? null : +r.avg_def_tricks;
   const useImp = mode === "IMP" && impOf(row) !== null;
   // the tie key at DISPLAY precision (2 decimals): the mode's leading metric,
   // plus — in MP — the score domain, which the trick average cannot see
@@ -949,25 +998,41 @@ function btScoreLead(P, card, mode) {
   } else {
     out.unit = "לקיחות";   // also the IMP-mode fallback for a row with no
                            // exp_imps: it is graded (and labeled) in tricks
-    // round the trick gap to the same precision as the rank grouping, so a
-    // tie-group shares one cost (and thus one base)
-    out.trickCost = Math.max(0, -Math.round((+row.vs_best || 0) * 100) / 100);
-    out.cost = out.trickCost;
     out.tau = SCORE_TAU.leadMP;
-    // ...then charge the score-domain gap instead when THAT is the bigger
-    // deviation, converted to the trick scale by the two modes' taus. Both
-    // ends are rounded metrics, so a tie-group still shares one cost.
     let ref = null;
     for (const r of rows)
       if (accepted.includes(r.card)) {
         const k = impOf(r);
         if (k !== null && (ref === null || k > ref)) ref = k;
       }
-    if (ref !== null && impOf(row) !== null) {
-      out.impCost = Math.max(0, (ref - impOf(row)) / 100);
-      const asTricks = Math.round(out.impCost * IMP_TO_TRICKS * 100) / 100;
-      if (asTricks > out.cost) { out.cost = asTricks; out.costSource = "score"; }
+    // one row's OWN charge: the trick gap, rounded to the same precision as
+    // the rank grouping so a tie-group shares one cost (and thus one base),
+    // or the score-domain gap when THAT is the bigger deviation, converted to
+    // the trick scale by the two modes' taus. Both ends are rounded metrics,
+    // so a tie-group still shares one cost.
+    //
+    // The trick gap is measured off avg_def_tricks — the tie key's OWN source
+    // — not off the separately-rounded vs_best, which rounds to a different
+    // 2nd decimal for leads whose averages round the same (1.302 / 1.298 both
+    // print 1.30 yet gave 0.25 / 0.26) and split interchangeable leads by a
+    // point. vs_best remains the fallback for a row with no average stored.
+    let bestTrick = null;
+    for (const r of rows) {
+      const t = trickOf(r);
+      if (t !== null && (bestTrick === null || t > bestTrick)) bestTrick = t;
     }
+    const rawCost = r => {
+      const o = {trick: (bestTrick !== null && trickOf(r) !== null)
+        ? Math.max(0, (bestTrick - trickOf(r)) / 100)
+        : Math.max(0, -Math.round((+r.vs_best || 0) * 100) / 100)};
+      o.cost = o.trick;
+      if (ref !== null && impOf(r) !== null) {
+        o.imp = Math.max(0, (ref - impOf(r)) / 100);
+        const asTricks = Math.round(o.imp * IMP_TO_TRICKS * 100) / 100;
+        if (asTricks > o.cost) { o.cost = asTricks; o.source = "score"; }
+      }
+      return o;
+    };
     const vals = [];
     for (const r of rows) {
       const q = keyOf(r);
@@ -975,13 +1040,53 @@ function btScoreLead(P, card, mode) {
         vals.push({key: q, t: trickOf(r), i: impOf(r) === null ? 0 : impOf(r)});
     }
     vals.sort((a, b) => b.t - a.t || b.i - a.i);
-    const idx = vals.findIndex(g => g.key === myKey);
-    out.base = btCurve(out.cost, out.tau);
-    if (vals.length > 1 && idx >= 0) {
-      out.rank = idx + 1; out.groups = vals.length;
-      const rankScore = SCORE_CAP * (vals.length - 1 - idx) / (vals.length - 1);
-      out.base = (1 - MP_RANK_WEIGHT) * out.base + MP_RANK_WEIGHT * rankScore;
-    }
+    // ONE row's whole grade, before the monotonicity ceiling below.
+    const gradeOf = r => {
+      const p = {tau: SCORE_TAU.leadMP}, mine = rawCost(r);
+      p.trickCost = mine.trick;
+      if (mine.imp !== undefined) p.impCost = mine.imp;
+      p.cost = mine.cost;
+      if (mine.source) p.costSource = mine.source;
+      p.base = btCurve(p.cost, p.tau);
+      const k = keyOf(r);
+      const idx = vals.findIndex(g => g.key === k);
+      if (vals.length > 1 && idx >= 0) {
+        p.rank = idx + 1; p.groups = vals.length;
+        const rankScore = SCORE_CAP * (vals.length - 1 - idx) / (vals.length - 1);
+        p.base = (1 - MP_RANK_WEIGHT) * p.base + MP_RANK_WEIGHT * rankScore;
+      }
+      // field leniency: the tie-group's TOTAL policy weight, so
+      // interchangeable cards never split (see the tie invariant above)
+      p.policy = 0;
+      for (const o of rows) if (keyOf(o) === k) p.policy += +o.ben_softmax || 0;
+      p.leniency = SCORE_LENIENCY * p.policy;
+      p.score = Math.round(btClamp(p.base + p.leniency, 1, SCORE_MAX_NONBEST));
+      return p;
+    };
+    const p = gradeOf(row);
+    for (const k in p) out[k] = p[k];
+    // The monotonicity ceiling — MP's promise, enforced. Every input above
+    // can invert the trick order on its own: the charged gap is the worse of
+    // two yardsticks and exp_imps is not monotone in the trick average, the
+    // matchpoint rank orders tie-GROUPS (rounded metrics, score domain
+    // second), and field leniency follows BEN. So each lead keeps its own
+    // measured grade — nothing is re-charged for another lead's deficit —
+    // but is capped at the grade of every lead that BEATS it on the trick
+    // average. That is the minimum that makes the mode coherent, and it is
+    // enough: cap(b) <= raw(a) and cap(b) <= cap(a) whenever a beats b.
+    //
+    // Accepted leads score 100 and are exactly the top of the trick order
+    // (the accepted set is closed upward), so they never cap anything. Leads
+    // with an EQUAL average never cap each other: that is the tie the score
+    // domain is allowed to split, and interchangeable leads share a grade, so
+    // they stay level either way.
+    if (rawTrickOf(row) !== null)
+      for (const r of rows) {
+        if (rawTrickOf(r) === null || rawTrickOf(r) <= rawTrickOf(row)) continue;
+        const s = accepted.includes(r.card) ? 100 : gradeOf(r).score;
+        if (s < out.score) { out.score = s; out.capped = true; }
+      }
+    return out;
   }
   // field leniency: the tie-group's TOTAL policy weight, so interchangeable
   // cards never split (see the tie invariant above)
@@ -1098,6 +1203,11 @@ function btScoreExplain(parts) {
   if (parts.leniency >= 0.5)
     bits.push("+" + Math.round(parts.leniency) + " הקלת שדה (המנוע נתן לבחירתך " +
               Math.round(parts.policy * 100) + "%)");
+  // the MP monotonicity ceiling bound: say so, or the parts above would not
+  // add up to the number shown
+  if (parts.capped)
+    bits.push("תקרה " + parts.score +
+              " — במצ'פוינטס אין ציון מעל הובלה שנותנת יותר לקיחות");
   return "מרכיבי הציון: " + bits.join(" · ");
 }
 /* ---- small pure display/data helpers (shared, DOM-free) --------------- */
