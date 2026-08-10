@@ -304,7 +304,9 @@ def cmd_pool_backfill_mp_ties(args: argparse.Namespace) -> int:
     from ..pool.firestore_store import backfill_mp_score_ties
     summary = backfill_mp_score_ties(key_path=args.key, dry_run=args.dry_run)
     verb = "would drop" if args.dry_run else "dropped"
-    print(f"{verb} {summary['demoted']} lead(s) from the MP accepted set of "
+    verb2 = "would re-admit" if args.dry_run else "re-admitted"
+    print(f"{verb} {summary['demoted']} lead(s) from — and {verb2} "
+          f"{summary['readmitted']} lead(s) to — the MP accepted set of "
           f"{summary['updated']} of {summary['leads']} lead problems "
           f"({summary['total']} docs total); run `trainer pool "
           f"regrade-attempts` next to bring history onto the new grades")

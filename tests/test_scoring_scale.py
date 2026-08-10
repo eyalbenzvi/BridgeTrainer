@@ -326,6 +326,148 @@ def test_mp_score_domain_tie_agrees_with_the_forge():
     assert mp_score_tie_update(migrated) is None
 
 
+# The reported inversion (problem lead1-19fb5723ed9, MP mode, 3NT-W), as
+# published: ♥3 averages 3.208 defensive tricks — SECOND best on the board and
+# ahead of ♦A (3.185) and ♥J (3.180) — yet the score-domain veto dropped it
+# from the accepted set for trailing the ♥5 anchor by 0.07 IMP, while those two
+# stayed in. ♥3 scored 94, ♥J 100: in MP, a lead graded below one it BEATS on
+# the mode's own objective. Two more of the same on the same board: ♠3 (3.067)
+# scored 66 against ♣J's 63 at 3.095, and ♦Q (2.967) 56 against ♣7's 53 at
+# 3.038. `accepted` here is the already-migrated set, so the fixture also
+# covers the repair path.
+LEAD_MP_INVERSION = {
+    "kind": "lead",
+    "training": {"target_mode": "MP"},
+    "verdict": {
+        "accepted": ["HJ", "H9", "H5", "DA"],
+        "by_mode": {
+            "MP": {"recommended": "H5", "accepted": ["H5", "H9", "DA", "HJ"]},
+            "IMP": {"recommended": "DA", "accepted": ["DA"]},
+        },
+        "table": [
+            {"card": "H5", "avg_def_tricks": 3.212, "vs_best": 0.0,
+             "exp_imps": 0.57, "ben_softmax": 0.477},
+            {"card": "H3", "avg_def_tricks": 3.208, "vs_best": -0.005,
+             "exp_imps": 0.50, "ben_softmax": 0.477},
+            {"card": "H9", "avg_def_tricks": 3.197, "vs_best": -0.015,
+             "exp_imps": 0.54, "ben_softmax": 0.023},
+            {"card": "DA", "avg_def_tricks": 3.185, "vs_best": -0.027,
+             "exp_imps": 0.66, "ben_softmax": 0.120},
+            {"card": "HJ", "avg_def_tricks": 3.180, "vs_best": -0.032,
+             "exp_imps": 0.56, "ben_softmax": 0.024},
+            {"card": "CJ", "avg_def_tricks": 3.095, "vs_best": -0.117,
+             "exp_imps": -0.29, "ben_softmax": 0.052},
+            {"card": "S3", "avg_def_tricks": 3.067, "vs_best": -0.145,
+             "exp_imps": -0.06, "ben_softmax": 0.215},
+            {"card": "S9", "avg_def_tricks": 3.040, "vs_best": -0.172,
+             "exp_imps": -0.13, "ben_softmax": 0.003},
+            {"card": "C7", "avg_def_tricks": 3.038, "vs_best": -0.175,
+             "exp_imps": -0.32, "ben_softmax": 0.012},
+            {"card": "DQ", "avg_def_tricks": 2.967, "vs_best": -0.245,
+             "exp_imps": -0.02, "ben_softmax": 0.019},
+            {"card": "D4", "avg_def_tricks": 2.812, "vs_best": -0.400,
+             "exp_imps": -1.27, "ben_softmax": 0.051},
+            {"card": "SK", "avg_def_tricks": 2.465, "vs_best": -0.748,
+             "exp_imps": -1.43, "ben_softmax": 0.001},
+        ],
+    },
+}
+
+
+@needs_node
+def test_mp_score_never_falls_below_a_worse_trick_average():
+    """MP ranks by expected defensive tricks, so the panel score must be
+    monotone in it: more tricks never scores less. The score domain may still
+    split what the trick average cannot, but it may not invert it."""
+    script = (_SCORE_JS +
+              f"\nconst T = {json.dumps(LEAD_MP_INVERSION)};" +
+              "\nconst rows = T.verdict.table.map(r => ({card: r.card,"
+              " t: r.avg_def_tricks,"
+              " score: btScoreLead(T, r.card, 'MP').score,"
+              " capped: !!btScoreLead(T, r.card, 'MP').capped}));"
+              "\nconsole.log(JSON.stringify({rows: rows,"
+              " acc: btLeadAccepted(T, 'MP'),"
+              " acc_imp: btLeadAccepted(T, 'IMP'),"
+              " line: btScoreExplain(btScoreLead(T, 'S3', 'MP'))}));\n")
+    fd, path = tempfile.mkstemp(suffix=".js")
+    try:
+        os.write(fd, script.encode("utf-8"))
+        os.close(fd)
+        res = subprocess.run(["node", path], capture_output=True, text=True)
+        assert res.returncode == 0, res.stderr
+        out = json.loads(res.stdout.strip().splitlines()[-1])
+    finally:
+        os.unlink(path)
+    rows = out["rows"]
+    by_card = {r["card"]: r for r in rows}
+    # THE invariant, over every pair on the board
+    for a in rows:
+        for b in rows:
+            if a["t"] > b["t"]:
+                assert a["score"] >= b["score"], (a, b)
+    # the reported pair specifically: ♥3 is back in the accepted set (it beats
+    # two leads that were never out of it), so both are 100
+    assert "H3" in out["acc"]
+    assert by_card["H3"]["score"] == 100 == by_card["HJ"]["score"]
+    # the IMP mode ranks in the score domain and is untouched
+    assert out["acc_imp"] == ["DA"]
+    # the other two inversions are gone by the ceiling, which says so in the
+    # breakdown line rather than letting the parts fail to add up
+    assert by_card["S3"]["capped"] and by_card["DQ"]["capped"]
+    assert "תקרה" in out["line"]
+    # the ceiling only clamps — it never lifts a lead to the accepted grade
+    assert max(r["score"] for r in rows if r["card"] not in out["acc"]) < 100
+
+
+def test_mp_accepted_set_is_closed_upward_in_tricks():
+    """The forge, the migration and the client share one policy: the score
+    domain may trim the TAIL of a trick tie, never its middle."""
+    from bridge_trainer.pool.firestore_store import mp_score_tie_update
+    from bridge_trainer.scoring.lead_metrics import (mp_monotone_close,
+                                                     mp_score_domain_tie,
+                                                     mp_trick_tie)
+
+    v = LEAD_MP_INVERSION["verdict"]
+    imps = {r["card"]: r["exp_imps"] for r in v["table"]}
+    tricks = {r["card"]: r["avg_def_tricks"] for r in v["table"]}
+    tied = mp_trick_tie(tricks)
+    assert tied == ["H5", "H3", "H9", "DA", "HJ"]
+    # without the trick evidence the veto still cuts ♥3 out of the middle...
+    assert mp_score_domain_tie(tied, "H5", imps) == ["H5", "H9", "DA", "HJ"]
+    # ...with it, ♥3 is re-admitted: it beats every lead that stayed
+    assert mp_score_domain_tie(tied, "H5", imps, tricks) == tied
+    # the closure is what does it, and it only ever re-admits
+    assert mp_monotone_close(tied, ["H5", "HJ"], tricks) == tied
+    assert mp_monotone_close(tied, ["H5"], tricks) == ["H5"]
+    # STRICTLY better, never merely equal: leads on the SAME average are the
+    # tie the score domain exists to split, so the veto's own motivating case
+    # (equal averages, opposite results) survives the closure
+    equal = {"SA": 4.0, "HK": 4.0}
+    assert mp_monotone_close(["SA", "HK"], ["SA"], equal) == ["SA"]
+    assert mp_score_domain_tie(["SA", "HK"], "SA", {"SA": 0.9, "HK": -0.9},
+                               equal) == ["SA"]
+
+    # the same policy on the reference board still demotes: there the hearts
+    # ARE the tail of the trick order, so nothing is re-admitted
+    fv = LEAD_FALSE_TIE["verdict"]
+    f_imps = {r["card"]: r["exp_imps"] for r in fv["table"]}
+    f_tricks = {r["card"]: r["avg_def_tricks"] for r in fv["table"]}
+    assert mp_score_domain_tie(fv["by_mode"]["MP"]["accepted"], "S7", f_imps,
+                               f_tricks) == ["S7", "S6", "S2"]
+
+    # the migration repairs a record the earlier, non-monotone policy already
+    # narrowed — it reads the record's own trick tie, not just its stored set
+    up = mp_score_tie_update({"id": "x", **LEAD_MP_INVERSION})
+    assert set(up["verdict"]["by_mode"]["MP"]["accepted"]) == set(tied)
+    assert up["verdict"]["accepted"] == ["HJ", "H9", "H5", "H3", "DA"]
+    flags = {r["card"]: r["recommended_mp"] for r in up["verdict"]["table"]}
+    assert flags["H3"] is True and flags["CJ"] is False
+    # ...and is idempotent once applied
+    fixed = {"id": "x", **LEAD_MP_INVERSION,
+             "verdict": {**v, **up["verdict"]}}
+    assert mp_score_tie_update(fixed) is None
+
+
 @needs_node
 def test_attempt_fallback_matches_semantics():
     rows = run_js([

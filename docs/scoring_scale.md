@@ -84,6 +84,8 @@ score = clamp( 95 / (1 + (c_eff / tau)^1.6) + leniency , 1, 94 )
   into the accepted set at forge time via TIE_EPS).
 * **The score-domain test** (below) — the average trick count alone never
   certifies a tie, and never sets the charged gap on its own.
+* **The monotonicity ceiling** (below) — but it never inverts the trick
+  average either: more expected tricks never scores less.
 
 ### The MP score-domain test
 
@@ -163,6 +165,86 @@ a property of the PROBLEM, not of the answer, it feeds the index and the
 user's difficulty filters, and re-levelling the pool is its own change.
 New boards get it right at forge time. `explanations.cards` is likewise
 left alone — producer-side data the client never reads.
+
+### The MP monotonicity invariant
+
+MP's stated objective is the expected number of defensive tricks, so the
+panel score must be **monotone** in it: a lead that averages more
+defensive tricks can never score less than one that averages fewer. Every
+mechanism above can break that on its own, because `exp_imps` is not
+monotone in the trick average:
+
+* the **accepted set** — the score-domain veto is a per-card threshold
+  measured against the recommendation, so it could cut a lead out of the
+  *middle* of the trick order;
+* the **charged gap** — the worse of two yardsticks, one of which is the
+  score domain;
+* the **matchpoint rank** — it orders tie GROUPS, whose secondary key is
+  the score domain;
+* **field leniency** — it follows BEN, not the trick average.
+
+> `lead1-19fb5723ed9` (3NT-W, MP): ♥3 averages 3.208 defensive tricks —
+> second best on the board, ahead of ♦A (3.185) and ♥J (3.180) — yet was
+> dropped from the accepted set for trailing the ♥5 anchor by 0.07 IMP
+> while those two stayed in. It scored **94** against ♥J's **100**. Two
+> more on the same board: ♠3 (3.067) scored 66 against ♣J's 63 at 3.095,
+> and ♦Q (2.967) 56 against ♣7's 53 at 3.038.
+
+Two clamps, applied to the trick order at full stored precision (the tie
+key rounds to 2 decimals; the guard must not, or leads the table itself
+prints apart could still be graded out of order):
+
+* **The accepted set is closed upward in tricks.** The score-domain veto
+  may trim the *tail* of a trick tie, never its middle: any lead it drops
+  is re-admitted if it is **strictly better** on the trick average than the
+  worst lead still accepted (`lead_metrics.mp_monotone_close`, mirrored by
+  `btLeadAccepted`). Strictly better, not "at least as good" — leads on the
+  *same* average are exactly the tie the score domain exists to split, and
+  re-admitting them would undo the veto in its own motivating case (equal
+  averages, opposite results). So the veto keeps that case — on
+  `lead1-19fa8ed5599` the demoted hearts *are* the trick-order tail — and
+  the accepted set becomes a prefix of the trick ranking by construction.
+* **Every other lead is capped at the grade of each lead that beats it on
+  the trick average** (`parts.capped`, and the breakdown line says so, or
+  the parts would not add up to the number shown). Each lead keeps its own
+  measured grade — nothing is re-charged for another lead's deficit —
+  which is the minimum that makes the mode coherent, and it is enough:
+  `cap(b) <= raw(a)` and `cap(b) <= cap(a)` whenever `a` beats `b`. Leads
+  with an *equal* average never cap each other: that is the tie the score
+  domain is allowed to split.
+
+Accepted leads score 100 and, since the set is a prefix, are exactly the
+top of the trick order, so they never cap anything.
+
+While fixing this, the MP trick gap was also moved off `vs_best` onto
+`avg_def_tricks` — the tie key's own source. The two round to different
+second decimals for leads whose averages round the same (1.302 / 1.298
+both print 1.30 but charged 0.25 / 0.26), which split interchangeable
+leads by a point in violation of the tie invariant below. `vs_best`
+remains the fallback for a row with no average stored.
+
+Measured over the published pool (3674 lead problems, all cards, MP mode):
+
+| | before | after |
+|---|---|---|
+| boards with an inverted pair | 951 | **0** |
+| inverted card pairs | 3129 | **0** |
+| tie-invariant splits | 57 | 9¹ |
+| cards re-admitted to the accepted set | — | 99 (53 boards) |
+| cards demoted from it | — | 0 |
+| mean score, all cards | 60.28 | 60.07 |
+
+Nothing is demoted: the closure only ever re-admits, and the ceiling only
+clamps leads that are already below the accepted set. The Python policy
+(`mp_score_tie_update`, which the migration runs) and the client's
+`btLeadAccepted` agree on all 3674 records.
+
+¹ the remainder are honest full-precision distinctions: two leads print
+the same rounded average (2.580 / 2.578) while the stored evidence
+separates them, and something between them grades lower.
+
+IMP mode ranks and grades in the score domain, where its own ranking
+metric is the one being clamped, so none of this touches it.
 
 ### Opening leads, IMP mode (unit: IMPs)
 

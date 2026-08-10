@@ -225,14 +225,17 @@ def _mp_score_domain_narrow(le: LeadEvaluation, best_cards: list,
     """Drop from an MP trick-tie the cards that do NOT tie in the score
     domain (scoring.lead_metrics.mp_score_domain_tie). Equal average tricks
     can still cash out to a materially worse result, and grading that as a
-    tie hands 100 to the worse lead."""
+    tie hands 100 to the worse lead — but only the TAIL of the trick order
+    can go, so the narrowing never demotes a lead over one it beats on
+    tricks (mp_monotone_close)."""
     from ..scoring.lead_metrics import (compute_lead_metrics,
                                         mp_score_domain_tie, rank_leads)
     metrics = compute_lead_metrics(le.def_tricks, le.contract, vul)
     # the anchor is the MP ranking's top card, which is always in the tie
     return mp_score_domain_tie(
         best_cards, rank_leads(metrics, "MP")[0],
-        {c: metrics[c]["exp_imps"] for c in metrics})
+        {c: metrics[c]["exp_imps"] for c in metrics},
+        {c: metrics[c]["exp_def_tricks"] for c in metrics})
 
 
 def judge_lead_values(le: LeadEvaluation, values: dict, scale: ModeScale,
