@@ -73,10 +73,6 @@ label { margin-inline-end:6px; }
 .ovr { border:1px dashed var(--line); border-radius:8px; padding:8px;
   margin:6px 0; }
 .ovr summary { cursor:pointer; }
-.dp-list label { display:inline-flex; align-items:center; gap:4px;
-  border:1px solid var(--line); border-radius:8px; padding:4px 10px;
-  margin:3px; cursor:pointer; }
-.dp-list input:checked + span { font-weight:700; color:var(--accent); }
 #status { color:#fff; margin:8px 4px; min-height:22px; }
 iframe.report { width:100%; height:75vh; border:1px solid var(--line);
   border-radius:10px; background:#fff; }
@@ -133,12 +129,15 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
 </div>
 
 <div class="card" id="step-auction">
-<h2>3. המכרז בפועל</h2>
+<h2>3. המכרז — עד תורך</h2>
+<p style="color:var(--muted);font-size:13px">
+הזן את ההכרזות מתחילת המכרז ו<b>עצור כשמגיע תורך</b> — את ההכרזה שעליה
+תישאל אל תזין (היא מסומנת ?), ואין להזין פאסים בסופו.</p>
 <div class="auction-strip" id="strip"></div>
 <div id="turnline"></div>
 <div class="bbox" id="bbox"></div>
 <div class="bcalls">
-  <button id="btn-p">פס</button><button id="btn-x">דאבל</button>
+  <button id="btn-p">פאס</button><button id="btn-x">דאבל</button>
   <button id="btn-xx">רידאבל</button><button id="btn-undo">↩ בטל</button>
 </div>
 <div class="note" id="auction-note" hidden></div>
@@ -150,12 +149,6 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
 כברירת מחדל כל הכרזה מתפרשת לפי השיטה. פתח הכרזה כדי לדרוס את
 פרשנותה (הסכם מיוחד): טווח נק', אורכי סדרות, והערה חופשית.</p>
 <div id="ovr-list"><span style="color:var(--muted)">הזן מכרז תחילה.</span></div>
-</div>
-
-<div class="card" id="step-dp">
-<h2>5. נקודות החלטה לניתוח</h2>
-<div class="dp-list" id="dp-list"><span style="color:var(--muted)">
-בחר לאחר השלמת המכרז (אפשר יותר מאחת).</span></div>
 </div>
 
 <div style="text-align:center">
@@ -188,12 +181,15 @@ document.getElementById("go").onclick = async () => {
   const us = "NS".includes(UI.heroSeat()) ? "NS" : "EW";
   const vul = {none: "None", both: "Both",
                us: us, them: us === "NS" ? "EW" : "NS"}[vulSel];
+  // stem-only flow: the analyzed call is the NEXT one after the entered
+  // auction (decision_index == auction length)
+  const auction = UI.auction();
   const body = {
     dealer: UI.dealer(), vul, my_seat: UI.heroSeat(),
-    my_hand: UI.handPBN(), auction: UI.auction(),
+    my_hand: UI.handPBN(), auction,
     system: document.getElementById("system").value,
     scoring: document.getElementById("scoring").value,
-    decision_indices: UI.decisionPoints(),
+    decision_indices: [auction.length],
     overrides: UI.overrides(),
     narration: document.getElementById("narration").value,
   };
@@ -217,8 +213,9 @@ function showResults(reports) {
   tabs.innerHTML = "";
   reports.forEach((rep, k) => {
     const b = document.createElement("button");
-    b.innerHTML = `נקודת החלטה ${rep.decision_index + 1} ` +
-      `(${UI.tokHtml(rep.actual)})`;
+    b.innerHTML = rep.actual
+      ? `נקודת החלטה ${rep.decision_index + 1} (${UI.tokHtml(rep.actual)})`
+      : `הכרזה ${rep.decision_index + 1} — מה להכריז?`;
     b.onclick = () => activate(k);
     tabs.appendChild(b);
   });

@@ -43,8 +43,12 @@ class AnalysisRequest:
     vul: str                    # None/NS/EW/Both
     my_seat: str
     my_hand: str                # PBN suit-dot form
-    auction: list[str]          # the real full auction, from the dealer
-    decision_index: int         # index of the hero call under analysis
+    auction: list[str]          # calls from the dealer, up to the decision
+    # index of the analyzed call. The primary mode is decision_index ==
+    # len(auction): the auction STOPS at the hero's turn and the question is
+    # "what should I bid now?" (the actual choice is unknown). The legacy
+    # mode (< len(auction)) analyzes a call inside a full recorded auction.
+    decision_index: int
     system: str = "two_over_one"
     scoring: str = "IMP"        # or "MP"
     candidates: list[str] | None = None   # None -> auto-suggest
@@ -65,6 +69,11 @@ class RepresentativeDeal:
     score_top: float
     score_alt: float
     weight: float
+    # the projected continuation (realistic policy) after each action, as
+    # (seat, call) pairs — the report shows HOW the auction was assumed to
+    # continue, not just where it ended
+    cont_top: list = field(default_factory=list)
+    cont_alt: list = field(default_factory=list)
 
 
 @dataclass
@@ -84,7 +93,7 @@ class PolicyOutcome:
 class AnalysisResult:
     request: AnalysisRequest
     stem: list[str]
-    actual_call: str
+    actual_call: str | None     # None in stem-only mode (choice unknown)
     candidates: list[str]
     meanings: list                       # CallMeaning for the full auction
     transparency_notes: list[str]
@@ -125,7 +134,8 @@ def suggest_candidates(req: AnalysisRequest) -> list[str]:
         shcp[s] += p
         hcp += p
 
-    out = [req.auction[req.decision_index]]
+    out = ([req.auction[req.decision_index]]
+           if req.decision_index < len(req.auction) else [])
     if state.is_legal("P"):
         out.append("P")
     if state.is_legal("X") and hcp >= 8:
@@ -179,13 +189,16 @@ def run_analysis(req: AnalysisRequest, progress=None) -> AnalysisResult:
     t0 = time.perf_counter()
     _validate(req)
     stem = req.auction[:req.decision_index]
-    actual = req.auction[req.decision_index]
+    actual = (req.auction[req.decision_index]
+              if req.decision_index < len(req.auction) else None)
 
     candidates = req.candidates or suggest_candidates(req)
-    if actual not in candidates:
+    if actual is not None and actual not in candidates:
         candidates = [actual] + candidates
     state = replay(req.dealer, stem)
     candidates = [c for c in candidates if state.is_legal(c)]
+    if not candidates:
+        raise ValueError("no legal candidate actions at the decision point")
 
     # constraints come from the STEM only — the hero cannot condition the
     # world on calls made after the decision; the full auction is still
@@ -287,7 +300,7 @@ def run_analysis(req: AnalysisRequest, progress=None) -> AnalysisResult:
     mean, half, _ = weighted_ci(diff, weights, ci_widen)
 
     reps = _representatives(deals, weights, realistic, contracts_acc,
-                            raw_acc, recommended)
+                            raw_acc, recommended, engine)
     in_dd_fog = (realistic.raw.candidates[0].action
                  != realistic.corrected.candidates[0].action)
 
@@ -315,9 +328,20 @@ def _validate(req: AnalysisRequest) -> None:
         raise ValueError(f"bad vulnerability {req.vul!r}")
     if req.scoring not in ("IMP", "MP"):
         raise ValueError(f"bad scoring mode {req.scoring!r}")
-    replay(req.dealer, req.auction)   # raises AuctionStateError if illegal
-    if not (0 <= req.decision_index < len(req.auction)):
+    state = replay(req.dealer, req.auction)  # AuctionStateError if illegal
+    if not (0 <= req.decision_index <= len(req.auction)):
         raise ValueError("decision_index out of range")
+    if req.decision_index == len(req.auction):
+        # stem-only mode: the auction stops at the hero's turn
+        if state.finished:
+            raise AuctionStateError(
+                "the auction is already over — enter it only up to your "
+                "turn (no trailing passes)")
+        if state.turn != req.my_seat:
+            raise AuctionStateError(
+                f"it is {state.turn}'s turn after the entered auction, "
+                f"not {req.my_seat}'s")
+        return
     seats = _seats_of(req)
     if seats[req.decision_index] != req.my_seat:
         raise AuctionStateError(
@@ -415,8 +439,23 @@ def _freq_table(items: list[str], weights: np.ndarray,
     return [(k, round(share, 4)) for k, share in rows]
 
 
+def _continuation_pairs(engine, deal, candidate: str) -> list:
+    """(seat, call) pairs of the realistic continuation after `candidate`,
+    passes trimmed off the tail — how the report shows the assumed auction."""
+    _, calls = engine.project_with_calls(deal, candidate, "realistic")
+    state = replay(engine.dealer, engine.stem_tokens).apply(candidate)
+    pairs = []
+    for tok in calls:
+        pairs.append([state.turn, tok])
+        state = state.apply(tok)
+    while pairs and pairs[-1][1] == "P":
+        pairs.pop()
+    return pairs
+
+
 def _representatives(deals, weights, realistic, contracts_acc, raw_acc,
-                     recommended, big_loss=-5.0) -> list[RepresentativeDeal]:
+                     recommended, engine,
+                     big_loss=-5.0) -> list[RepresentativeDeal]:
     """3-5 concrete deals for the recommended action (spec 3.5): typical
     (nearest the median swing), best case, characteristic failure (~p10),
     and a disaster if one occurs with real frequency."""
@@ -451,7 +490,9 @@ def _representatives(deals, weights, realistic, contracts_acc, raw_acc,
             contract_top=contracts_acc["realistic"][recommended][i],
             contract_alt=contracts_acc["realistic"][alt][i],
             score_top=float(raw_top[i]), score_alt=float(raw_alt[i]),
-            weight=float(weights[i])))
+            weight=float(weights[i]),
+            cont_top=_continuation_pairs(engine, deals[i].deal, recommended),
+            cont_alt=_continuation_pairs(engine, deals[i].deal, alt)))
     return out
 
 

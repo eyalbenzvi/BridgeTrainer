@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ניתוח הכרזה — BridgeTrainer</title>
+<style>
+:root {
+  --felt: #2E6B4F; --card: #ffffff; --fg: #1C2B24; --muted: #5C6B62;
+  --line: #D9E0DA; --accent: #2B6CB0; --accent-tint: #2B6CB014;
+  --he-red: #C8102E; --win: #1A7A43; --loss: #C8102E;
+  --gold-bg: #FdF6E3; --rec-bg: #E6F4EA;
+  --warn-bg: #FDF3DF; --warn-fg: #7A5312; --warn-line: #E3C87F;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: "Segoe UI", "Heebo", "Assistant", Arial, "Noto Sans Hebrew",
+               sans-serif;
+  direction: rtl; max-width: 860px; margin: 0 auto; padding: 20px;
+  background: #F2F6F3; color: var(--fg); font-size: 15px; line-height: 1.65;
+}
+h1 { font-size: 24px; margin: 0 0 4px; }
+h2 { font-size: 18px; margin: 26px 0 8px; border-bottom: 2px solid var(--felt);
+     padding-bottom: 4px; }
+h3 { font-size: 15px; margin: 16px 0 6px; }
+.subtitle { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+.card { background: var(--card); border-radius: 12px; padding: 16px 20px;
+        margin: 12px 0; box-shadow: 0 1px 3px #0002; }
+.red { color: var(--he-red); }
+.ltr { direction: ltr; unicode-bidi: isolate; }
+.hand .cards { letter-spacing: 1px; font-weight: 600; margin-inline: 2px; }
+.tablewrap { overflow-x: auto; max-width: 100%; }
+table { border-collapse: collapse; width: 100%; margin: 10px 0;
+        font-size: 13.5px; }
+th, td { border: 1px solid var(--line); padding: 5px 8px;
+         text-align: right; }
+th { background: var(--accent-tint); font-weight: 600; }
+td.num, th.num { text-align: center; direction: ltr; }
+tr.rec { background: var(--rec-bg); font-weight: 600; }
+tr.actual td:first-child::after { content: " ★"; color: var(--accent); }
+.auction-grid { direction: ltr; }
+.auction-grid th { text-align: center; }
+.auction-grid td { text-align: center; min-width: 64px; }
+.auction-grid td.decision { outline: 2px solid var(--accent);
+                            background: var(--accent-tint); font-weight: 700; }
+.deal-diagram { direction: ltr; display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px;
+  max-width: 560px; margin: 8px auto; font-size: 13px; }
+.deal-diagram .seatbox { border: 1px solid var(--line); border-radius: 8px;
+  padding: 6px 8px; background: #fff; overflow-wrap: anywhere; }
+.deal-diagram .seatname { font-size: 11px; color: var(--muted); }
+.deal-diagram .mid { display: flex; align-items: center; justify-content:
+  center; background: var(--felt); color: #fff; border-radius: 8px;
+  font-size: 12px; text-align: center; padding: 4px; }
+.note { background: var(--warn-bg); color: var(--warn-fg);
+        border: 1px solid var(--warn-line); border-radius: 8px;
+        padding: 8px 12px; margin: 8px 0; font-size: 13.5px; }
+.badge { display: inline-block; border-radius: 999px; padding: 1px 10px;
+         font-size: 12px; font-weight: 600; }
+.badge.stable { background: var(--rec-bg); color: var(--win); }
+.badge.fragile { background: var(--warn-bg); color: var(--warn-fg); }
+.small { font-size: 12.5px; color: var(--muted); }
+.freq-bar { background: var(--accent-tint); height: 10px; border-radius: 5px;
+            display: inline-block; vertical-align: middle; }
+@media print {
+  body { background: #fff; padding: 0; font-size: 12px; }
+  .card { box-shadow: none; border: 1px solid var(--line);
+          break-inside: avoid; }
+  h2 { break-after: avoid; }
+  /* tables must FIT the page — smaller type and padding, wrappable cells */
+  table { font-size: 10.5px; }
+  th, td { padding: 3px 5px; }
+  .tablewrap { overflow-x: visible; }
+  .deal-diagram { font-size: 11px; }
+}
+</style></head><body>
+<h1>דוח ניתוח הכרזה</h1>
+<div class="subtitle">BridgeTrainer · מפגשי (IMP) ·
+שיטה: 2/1 Game Force ·
+ללא פגיעות · מחלק: מזרח ·
+מנסח: תבניות (ללא LLM)</div>
+<h2>1. תיאור המצב וקריאת המכרז</h2><div class="card">
+<p>אתה יושב בדרום, המחלק מזרח, ללא פגיעות, שיטת ההכרזה 2/1 Game Force, סוג התחרות: מפגשי (IMP). בידך <span class="hand ltr"><span>♠</span><span class="cards">A2</span> <span class="red">♥</span><span class="cards">AK3</span> <span class="red">♦</span><span class="cards">AKQT8</span> <span>♣</span><span class="cards">A32</span></span> (24 נק').</p>
+<p>קריאת המכרז עד נקודת ההחלטה: <span class="ltr">4<span>♠</span></span> של מזרח — פתיחת מנע 4♠: סדרה שמינייה, 5–10 נק'.</p>
+<p>חשוב לזכור שגם פאס נושא מידע: טווחי הנקודות והאורכים של כל המושבים החבויים נגזרו מכל ההכרזות שקדמו להחלטה, כולל הפסים.</p>
+<div class="tablewrap"><table class="auction-grid"><tr><th>מערב</th><th>צפון</th><th>מזרח</th><th>דרום (אתה)</th></tr><tr><td></td><td></td><td title="פתיחת מנע 4♠: סדרה שמינייה, 5–10 נק&#x27;"><span class="ltr">4<span>♠</span></span></td><td class="decision" title="ההכרזה המנותחת">?</td></tr></table></div><p class="small">ריחוף/מגע על הכרזה מציג את פרשנותה. ההכרזה המנותחת מסומנת במסגרת.</p><details><summary>משמעויות ההכרזות, אחת-אחת</summary><ul><li>מזרח: <span class="ltr">4<span>♠</span></span> — פתיחת מנע 4♠: סדרה שמינייה, 5–10 נק'</li></ul></details>
+</div>
+<h2>2. הפעולות המועמדות — ניתוח</h2>
+<div class="card"><h3>דאבל — הפעולה המומלצת</h3>
+<p>מול החלופה הקשה ביותר שלו (<span class="ltr">5<span class="red">♦</span></span>) הפעולה מרוויחה בממוצע +4.60 IMP (רווח סמך ±0.55). היא זוכה ב-77% מהחלוקות, מפסידה ב-16%, ושוויון ב-7%. פרופיל הרווח נוטה לזכיות גדולות: ב-46% מהחלוקות הרווח הוא 5+ IMP. החוזים השכיחים בהמשך (מדיניות ריאלית): <span class="ltr">4<span>♠</span></span>&#8288;X <small>(מזרח)</small> (83%), <span class="ltr">5<span class="red">♥</span></span> <small>(צפון)</small> (9%), <span class="ltr">5<span>♣</span></span> <small>(צפון)</small> (6%). תגובות השותף מתפזרות: פאס (83%), <span class="ltr">5<span class="red">♥</span></span> (9%), <span class="ltr">5<span>♣</span></span> (6%).</p>
+</div>
+<div class="card"><h3><span class="ltr">5<span class="red">♦</span></span></h3>
+<p>מול דאבל הפעולה מפסידה בממוצע 4.60 IMP (רווח סמך ±0.55). היא זוכה ב-16% מהחלוקות, מפסידה ב-77%, ושוויון ב-7%. שימו לב לזנב הסיכון: ב-46% מהחלוקות ההפסד חד (5+ IMP) — הפעולה תנודתית, והמחיר כשהיא נכשלת גבוה. החוזים השכיחים בהמשך (מדיניות ריאלית): <span class="ltr">5<span class="red">♦</span></span> <small>(דרום)</small> (100%).</p>
+</div>
+<div class="card"><h3>פאס</h3>
+<p>מול דאבל הפעולה מפסידה בממוצע 8.30 IMP (רווח סמך ±0.31). היא זוכה ב-1% מהחלוקות, מפסידה ב-99%, ושוויון ב-0%. שימו לב לזנב הסיכון: ב-95% מהחלוקות ההפסד חד (5+ IMP) — הפעולה תנודתית, והמחיר כשהיא נכשלת גבוה. החוזים השכיחים בהמשך (מדיניות ריאלית): <span class="ltr">4<span>♠</span></span> <small>(מזרח)</small> (100%).</p>
+</div>
+<h2>3. טבלת תוצאות הסימולציה</h2><div class="card">
+<div class="tablewrap"><table><tr><th class='num'>פעולה</th><th class='num'>IMP ממוצע</th><th class='num'>רווח סמך</th><th class='num'>DD גולמי</th><th class='num'>% זכייה</th><th class='num'>% הפסד</th><th class='num'>חציון</th></tr><tr class="rec"><td class="num">דאבל <small>מול <span class="ltr">5<span class="red">♦</span></span></small></td><td class="num">+4.60</td><td class="num">±0.55</td><td class="num">+4.77</td><td class="num">77%</td><td class="num">16%</td><td class="num">+7.0</td></tr><tr><td class="num"><span class="ltr">5<span class="red">♦</span></span> <small>מול דאבל</small></td><td class="num">-4.60</td><td class="num">±0.55</td><td class="num">-4.77</td><td class="num">16%</td><td class="num">77%</td><td class="num">-7.0</td></tr><tr><td class="num">פאס <small>מול דאבל</small></td><td class="num">-8.30</td><td class="num">±0.31</td><td class="num">-8.54</td><td class="num">1%</td><td class="num">99%</td><td class="num">-8.0</td></tr></table></div>
+<p class="small">מדגם בפועל: 500 חלוקות (מדגם אפקטיבי ESS: 419.6); הדגימה נעצרה מוקדם — ההפרש בין שתי הפעולות המובילות הוכרע סטטיסטית. עמודת ה-IMP מחושבת מול החלופה הקשה ביותר של כל פעולה, לאחר כיול single-dummy; עמודת DD גולמי מוצגת לצידה (INV5).</p>
+<h3>יציבות בין מדיניות ההמשך</h3>
+<p><span class="badge fragile">רגיש להנחות</span> המסקנה רגישה להנחות ההמשך — הפעולה המובילה מתחלפת בין המדיניות (שמרנית: X; ריאלית: X; חסם עליון (רואה קלפים): P). ההנחה הקובעת היא מדיניות ההמשך של השותף והיריבים (ראו analysis/policies.yaml).</p>
+<div class="tablewrap"><table><tr><th>מדיניות המשך</th><th>תיאור</th><th class='num'>הפעולה המובילה</th></tr><tr><td>שמרנית</td><td>שותף ויריבים זהירים: מזמינים גבוה, מתחרים מעט, מכפילים רק עם סטאק מובהק</td><td class='num'>דאבל</td></tr><tr><td>ריאלית</td><td>סטנדרט תחרותי מקובל: הזמנות רגילות, תחרות על חלקיים, הכפלות עונשין שקולות</td><td class='num'>דאבל</td></tr><tr><td>חסם עליון (רואה קלפים)</td><td>כל צד בוחר את החלופה הטובה לו לפי דאבל-דאמי — גבול עליון, לא תחזית</td><td class='num'>פאס</td></tr></table></div>
+</div>
+<h2>4. טבלאות תדירויות מפתח</h2><div class="card">
+<h3>תגובת השותף הראשונה (מדיניות ריאלית)</h3>
+<div class="tablewrap"><table><tr><th>הפעולה</th><th>תגובות השותף (שכיחות)</th></tr><tr><td>פאס</td><td>פאס <span class="freq-bar" style="width:120px"></span> <span class="ltr">100%</span></td></tr><tr><td>דאבל</td><td>פאס <span class="freq-bar" style="width:99px"></span> <span class="ltr">83%</span> &nbsp; <span class="ltr">5<span class="red">♥</span></span> <span class="freq-bar" style="width:11px"></span> <span class="ltr">9%</span> &nbsp; <span class="ltr">5<span>♣</span></span> <span class="freq-bar" style="width:6px"></span> <span class="ltr">6%</span> &nbsp; <span class="ltr">5<span class="red">♦</span></span> <span class="freq-bar" style="width:3px"></span> <span class="ltr">2%</span></td></tr><tr><td><span class="ltr">5<span class="red">♦</span></span></td><td>פאס <span class="freq-bar" style="width:120px"></span> <span class="ltr">100%</span></td></tr></table></div>
+<h3>החוזים הסופיים השכיחים</h3>
+<div class="tablewrap"><table><tr><th>הפעולה</th><th>חוזים סופיים (מדיניות ריאלית)</th></tr><tr><td>דאבל</td><td><span class="ltr">4<span>♠</span></span>&#8288;X <small>(מזרח)</small> <span class='ltr'>83%</span> &nbsp;·&nbsp; <span class="ltr">5<span class="red">♥</span></span> <small>(צפון)</small> <span class='ltr'>9%</span> &nbsp;·&nbsp; <span class="ltr">5<span>♣</span></span> <small>(צפון)</small> <span class='ltr'>6%</span> &nbsp;·&nbsp; <span class="ltr">5<span class="red">♦</span></span> <small>(צפון)</small> <span class='ltr'>2%</span></td></tr><tr><td><span class="ltr">5<span class="red">♦</span></span></td><td><span class="ltr">5<span class="red">♦</span></span> <small>(דרום)</small> <span class='ltr'>100%</span></td></tr><tr><td>פאס</td><td><span class="ltr">4<span>♠</span></span> <small>(מזרח)</small> <span class='ltr'>100%</span></td></tr></table></div>
+</div>
+<h2>5. חלוקות מייצגות מהסימולציה</h2>
+<div class="card">
+<h3>תרחיש טיפוסי (חציון)</h3>
+<div class="deal-diagram"><div></div><div class="seatbox"><div class="seatname">צפון</div><span class="hand ltr"><span>♠</span><span class="cards">8</span> <span class="red">♥</span><span class="cards">654</span> <span class="red">♦</span><span class="cards">7532</span> <span>♣</span><span class="cards">J9764</span></span></div><div></div><div class="seatbox"><div class="seatname">מערב</div><span class="hand ltr"><span>♠</span><span class="cards">943</span> <span class="red">♥</span><span class="cards">9872</span> <span class="red">♦</span><span class="cards">J</span> <span>♣</span><span class="cards">KQT85</span></span></div><div class="mid">♠♥♦♣</div><div class="seatbox"><div class="seatname">מזרח</div><span class="hand ltr"><span>♠</span><span class="cards">KQJT765</span> <span class="red">♥</span><span class="cards">QJT</span> <span class="red">♦</span><span class="cards">964</span> <span>♣</span><span class="cards">—</span></span></div><div></div><div class="seatbox"><div class="seatname">דרום (אתה)</div><span class="hand ltr"><span>♠</span><span class="cards">A2</span> <span class="red">♥</span><span class="cards">AK3</span> <span class="red">♦</span><span class="cards">AKQT8</span> <span>♣</span><span class="cards">A32</span></span></div><div></div></div>
+<p>דאבל מוביל ל-<span class="ltr">4<span>♠</span></span>&#8288;X <small>(מזרח)</small> (ציון +300); <span class="ltr">5<span class="red">♦</span></span> מוביל ל-<span class="ltr">5<span class="red">♦</span></span> <small>(דרום)</small> (ציון -50). הפרש: <b class="ltr">+7 IMP</b> לטובת דאבל.</p>
+<p class="small">המשך משוער אחרי דאבל: שלושה פאסים — ההכרזה נשארת.</p>
+<p class="small">המשך משוער אחרי <span class="ltr">5<span class="red">♦</span></span>: שלושה פאסים — ההכרזה נשארת.</p>
+</div>
+<div class="card">
+<h3>תרחיש מוצלח (אחוזון 97)</h3>
+<div class="deal-diagram"><div></div><div class="seatbox"><div class="seatname">צפון</div><span class="hand ltr"><span>♠</span><span class="cards">K974</span> <span class="red">♥</span><span class="cards">QT42</span> <span class="red">♦</span><span class="cards">64</span> <span>♣</span><span class="cards">864</span></span></div><div></div><div class="seatbox"><div class="seatname">מערב</div><span class="hand ltr"><span>♠</span><span class="cards">—</span> <span class="red">♥</span><span class="cards">876</span> <span class="red">♦</span><span class="cards">J953</span> <span>♣</span><span class="cards">KQJT97</span></span></div><div class="mid">♠♥♦♣</div><div class="seatbox"><div class="seatname">מזרח</div><span class="hand ltr"><span>♠</span><span class="cards">QJT8653</span> <span class="red">♥</span><span class="cards">J95</span> <span class="red">♦</span><span class="cards">72</span> <span>♣</span><span class="cards">5</span></span></div><div></div><div class="seatbox"><div class="seatname">דרום (אתה)</div><span class="hand ltr"><span>♠</span><span class="cards">A2</span> <span class="red">♥</span><span class="cards">AK3</span> <span class="red">♦</span><span class="cards">AKQT8</span> <span>♣</span><span class="cards">A32</span></span></div><div></div></div>
+<p>דאבל מוביל ל-<span class="ltr">4<span>♠</span></span>&#8288;X <small>(מזרח)</small> (ציון +1400); <span class="ltr">5<span class="red">♦</span></span> מוביל ל-<span class="ltr">5<span class="red">♦</span></span> <small>(דרום)</small> (ציון +400). הפרש: <b class="ltr">+14 IMP</b> לטובת דאבל.</p>
+<p class="small">המשך משוער אחרי דאבל: שלושה פאסים — ההכרזה נשארת.</p>
+<p class="small">המשך משוער אחרי <span class="ltr">5<span class="red">♦</span></span>: שלושה פאסים — ההכרזה נשארת.</p>
+</div>
+<div class="card">
+<h3>תרחיש כישלון אופייני (אחוזון 10)</h3>
+<div class="deal-diagram"><div></div><div class="seatbox"><div class="seatname">צפון</div><span class="hand ltr"><span>♠</span><span class="cards">9</span> <span class="red">♥</span><span class="cards">6542</span> <span class="red">♦</span><span class="cards">9652</span> <span>♣</span><span class="cards">K987</span></span></div><div></div><div class="seatbox"><div class="seatname">מערב</div><span class="hand ltr"><span>♠</span><span class="cards">865</span> <span class="red">♥</span><span class="cards">JT9</span> <span class="red">♦</span><span class="cards">J743</span> <span>♣</span><span class="cards">J64</span></span></div><div class="mid">♠♥♦♣</div><div class="seatbox"><div class="seatname">מזרח</div><span class="hand ltr"><span>♠</span><span class="cards">KQJT743</span> <span class="red">♥</span><span class="cards">Q87</span> <span class="red">♦</span><span class="cards">—</span> <span>♣</span><span class="cards">QT5</span></span></div><div></div><div class="seatbox"><div class="seatname">דרום (אתה)</div><span class="hand ltr"><span>♠</span><span class="cards">A2</span> <span class="red">♥</span><span class="cards">AK3</span> <span class="red">♦</span><span class="cards">AKQT8</span> <span>♣</span><span class="cards">A32</span></span></div><div></div></div>
+<p>דאבל מוביל ל-<span class="ltr">4<span>♠</span></span>&#8288;X <small>(מזרח)</small> (ציון +300); <span class="ltr">5<span class="red">♦</span></span> מוביל ל-<span class="ltr">5<span class="red">♦</span></span> <small>(דרום)</small> (ציון +400). הפרש: <b class="ltr">-2 IMP</b> לטובת <span class="ltr">5<span class="red">♦</span></span>.</p>
+<p class="small">המשך משוער אחרי דאבל: שלושה פאסים — ההכרזה נשארת.</p>
+<p class="small">המשך משוער אחרי <span class="ltr">5<span class="red">♦</span></span>: שלושה פאסים — ההכרזה נשארת.</p>
+</div>
+<div class="card">
+<h3>תרחיש אסון (הגרוע במדגם)</h3>
+<div class="deal-diagram"><div></div><div class="seatbox"><div class="seatname">צפון</div><span class="hand ltr"><span>♠</span><span class="cards">9</span> <span class="red">♥</span><span class="cards">QT964</span> <span class="red">♦</span><span class="cards">5432</span> <span>♣</span><span class="cards">J74</span></span></div><div></div><div class="seatbox"><div class="seatname">מערב</div><span class="hand ltr"><span>♠</span><span class="cards">T87</span> <span class="red">♥</span><span class="cards">J8752</span> <span class="red">♦</span><span class="cards">976</span> <span>♣</span><span class="cards">QT</span></span></div><div class="mid">♠♥♦♣</div><div class="seatbox"><div class="seatname">מזרח</div><span class="hand ltr"><span>♠</span><span class="cards">KQJ6543</span> <span class="red">♥</span><span class="cards">—</span> <span class="red">♦</span><span class="cards">J</span> <span>♣</span><span class="cards">K9865</span></span></div><div></div><div class="seatbox"><div class="seatname">דרום (אתה)</div><span class="hand ltr"><span>♠</span><span class="cards">A2</span> <span class="red">♥</span><span class="cards">AK3</span> <span class="red">♦</span><span class="cards">AKQT8</span> <span>♣</span><span class="cards">A32</span></span></div><div></div></div>
+<p>דאבל מוביל ל-<span class="ltr">4<span>♠</span></span>&#8288;X <small>(מזרח)</small> (ציון -590); <span class="ltr">5<span class="red">♦</span></span> מוביל ל-<span class="ltr">5<span class="red">♦</span></span> <small>(דרום)</small> (ציון +400). הפרש: <b class="ltr">-13 IMP</b> לטובת <span class="ltr">5<span class="red">♦</span></span>.</p>
+<p class="small">המשך משוער אחרי דאבל: שלושה פאסים — ההכרזה נשארת.</p>
+<p class="small">המשך משוער אחרי <span class="ltr">5<span class="red">♦</span></span>: שלושה פאסים — ההכרזה נשארת.</p>
+</div>
+<h2>6. סייגים על הסימולציה</h2><div class="card"><ul>
+<li>גודל מדגם: 500 חלוקות (ESS 419.6), שיעור קבלה בדגימה 0.500%. רווח הסמך של ההפרש המוביל: ±0.55 IMP (95%).</li>
+<li>תוצאות דאבל-דאמי מחמיאות לכרוז (במיוחד ב-NT); הציונים המוצגים עברו כיול single-dummy סימטרי לפי טבלה נערכת (bridge_trainer/dd/correction_table.yaml), ושתי הרמות — גולמי ומכויל — מוצגות בטבלת התוצאות.</li>
+<li>המשכי המכרז חושבו תחת שלוש מדיניות (שמרנית / ריאלית / חסם עליון רואה-קלפים); כל הפרמטרים ב-analysis/policies.yaml. בכל המדיניות היריבים מכפילים עונשין חוזה בגובה 4+ עם סטאק בשליט.</li>
+<li>ריצה דטרמיניסטית: seed 7; זמן חישוב 11.2 שניות.</li>
+</ul></div>
+<h2>7. מסקנה</h2><div class="card">
+<p>השורה התחתונה: דאבל היא הפעולה המומלצת — +4.60 IMP (רווח סמך ±0.55) מול החלופה הקרובה ביותר (<span class="ltr">5<span class="red">♦</span></span>).</p>
+<p>המסקנה רגישה להנחות ההמשך — הפעולה המובילה מתחלפת בין המדיניות (שמרנית: X; ריאלית: X; חסם עליון (רואה קלפים): P). ההנחה הקובעת היא מדיניות ההמשך של השותף והיריבים (ראו analysis/policies.yaml).</p>
+</div>
+<p class="small">הדוח הופק על ידי מנוע הניתוח של BridgeTrainer: כל המספרים חושבו בסימולציה מקומית (דאבל-דאמי + כיול), ללא מודל שפה בשכבת החישוב.</p>
+</body></html>

@@ -5,9 +5,14 @@
 //
 // The host page provides the skeleton elements by id (picker, quick,
 // quickfill, clearhand, handsum, seat, dealer, strip, turnline, bbox,
-// btn-p/btn-x/btn-xx/btn-undo, auction-note, ovr-list, dp-list) and calls
+// btn-p/btn-x/btn-xx/btn-undo, auction-note, ovr-list) and calls
 // BTAnalyzeUI.init({onChange}). Auction legality mirrors
 // validate/auction_state.py (bid ordering, X/XX rules, three passes end).
+//
+// INPUT MODEL (user-requested): the auction is entered UP TO the hero's
+// turn and STOPS there — the analyzed call itself is never entered and
+// there are no trailing passes. ready() is true exactly when the hand is
+// complete and it is the hero's turn in an unfinished auction.
 "use strict";
 (function () {
   const SUITS = ["S", "H", "D", "C"];
@@ -20,7 +25,6 @@
   const sel = new Set();
   let auction = [];
   const overrides = {};          // index -> {hcp?, suits, note}
-  const decisionPoints = new Set();
   let onChange = () => {};
   const $ = (id) => document.getElementById(id);
 
@@ -155,7 +159,7 @@
       }
   }
   function tokHtml(tok) {
-    if (tok === "P") return "פס";
+    if (tok === "P") return "פאס";
     if (tok === "X" || tok === "XX") return tok;
     const dn = tok.slice(1);
     if (dn === "NT") return tok;
@@ -164,6 +168,7 @@
   }
   function refreshAuction() {
     const st = replayState();
+    const heroTurn = !st.finished && st.turn === heroSeat();
     const strip = $("strip");
     strip.innerHTML = SEATS.map((s) =>
       `<div class="hdr">${SEAT_HE[s]}${s === heroSeat() ? " (אתה)" : ""}</div>`
@@ -172,22 +177,28 @@
     for (let i = 0; i < pad; i++) strip.innerHTML += "<div></div>";
     auction.forEach((tok, i) => {
       const hero = seatOf(i) === heroSeat();
-      const dp = decisionPoints.has(i);
-      strip.innerHTML += `<div class="cell${hero ? " hero" : ""}` +
-        `${dp ? " dp" : ""}">${tokHtml(tok)}</div>`;
+      strip.innerHTML += `<div class="cell${hero ? " hero" : ""}">` +
+        tokHtml(tok) + "</div>";
     });
+    if (heroTurn) {
+      // the decision cell: the analyzed call, never entered by the user
+      strip.innerHTML += '<div class="cell hero dp">?</div>';
+    }
     const tl = $("turnline");
     const note = $("auction-note");
     if (st.finished) {
       tl.innerHTML = "";
       note.hidden = false;
-      note.textContent = auction.length >= 4 && st.level === 0
-        ? "המכרז הסתיים: כולם פסו (אין משחק)."
-        : "המכרז הושלם (שלושה פסים רצופים) — בחר נקודות החלטה למטה.";
+      note.textContent = "המכרז שהוזן כבר הסתיים — יש לעצור בתורך, לפני " +
+        "ההכרזה שעליה תישאל. בטל את ההכרזות האחרונות (↩).";
+    } else if (heroTurn) {
+      note.hidden = false;
+      note.textContent = "תורך! ההכרזה הבאה (?) היא שתנותח — אל תזין " +
+        'אותה. אפשר ללחוץ "נתח".';
+      tl.innerHTML = "";
     } else {
       note.hidden = true;
-      tl.innerHTML = "תור: <b>" + SEAT_HE[st.turn] +
-        (st.turn === heroSeat() ? " (אתה)" : "") + "</b>";
+      tl.innerHTML = "תור: <b>" + SEAT_HE[st.turn] + "</b>";
     }
     document.querySelectorAll("#bbox button").forEach((b) => {
       b.disabled = !isLegal(b.dataset.tok);
@@ -196,15 +207,9 @@
     $("btn-x").disabled = !isLegal("X");
     $("btn-xx").disabled = !isLegal("XX");
     $("btn-undo").disabled = auction.length === 0;
-    // drop decision points / overrides that fell off the end after an undo
-    for (const i of [...decisionPoints]) {
-      if (i >= auction.length || seatOf(i) !== heroSeat())
-        decisionPoints.delete(i);
-    }
     for (const k of Object.keys(overrides))
       if (+k >= auction.length) delete overrides[k];
     refreshOverrides();
-    refreshDecisionPoints(st);
     onChange();
   }
 
@@ -281,35 +286,6 @@
       }));
   }
 
-  /* ---------- decision points ---------- */
-  function refreshDecisionPoints(st) {
-    const root = $("dp-list");
-    if (!root) return;
-    const heroIdx = auction.map((t, i) => i)
-      .filter((i) => seatOf(i) === heroSeat());
-    if (!st.finished || !heroIdx.length) {
-      root.innerHTML = '<span style="color:var(--muted)">בחר לאחר ' +
-        'השלמת המכרז (אפשר יותר מאחת).</span>';
-      decisionPoints.clear();
-      return;
-    }
-    root.innerHTML = "";
-    for (const i of heroIdx) {
-      const l = document.createElement("label");
-      l.innerHTML = `<input type="checkbox" data-i="${i}"` +
-        `${decisionPoints.has(i) ? " checked" : ""}>` +
-        `<span>הכרזה ${i + 1}: ${tokHtml(auction[i])}</span>`;
-      root.appendChild(l);
-    }
-    root.querySelectorAll("input").forEach((c) =>
-      (c.onchange = () => {
-        const i = +c.dataset.i;
-        if (c.checked) decisionPoints.add(i);
-        else decisionPoints.delete(i);
-        refreshAuction();
-      }));
-  }
-
   /* ---------- public API ---------- */
   window.BTAnalyzeUI = {
     init(opts) {
@@ -330,14 +306,13 @@
     handPBN,
     auction: () => auction.slice(),
     replayState,
-    decisionPoints: () => [...decisionPoints].sort((a, b) => a - b),
     overrides: () => JSON.parse(JSON.stringify(overrides)),
     dealer,
     heroSeat,
     tokHtml,
     ready() {
-      return sel.size === 13 && replayState().finished &&
-        decisionPoints.size > 0;
+      const st = replayState();
+      return sel.size === 13 && !st.finished && st.turn === heroSeat();
     },
   };
 })();

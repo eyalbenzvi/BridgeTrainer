@@ -18,8 +18,14 @@ policies:
       penalty_pass_trumps: 5      # trumps needed to convert X for penalties
       penalty_pass_trump_hcp: 4
       nt_bid_pts: 14              # bid NT (with a stopper) instead of a suit
-      pull_high_double_max_hcp: 6 # pull partner's high-level X only this weak
+      # pulling partner's high-level X: shortness in their suit AND a long
+      # suit AND weak defense (all three must hold)
+      pull_high_double_max_hcp: 7
       pull_high_double_suit_len: 7
+      pull_enemy_max_len: 1
+      # partner correcting to his own long suit when he has no fit
+      new_suit_min_len: 6
+      new_suit_pts: 9
       # enemy competition over our contract
       compete_min_fit: 9          # combined enemy trumps to compete
       compete_pts: 19             # combined enemy HCP to compete
@@ -46,8 +52,11 @@ policies:
       penalty_pass_trumps: 5
       penalty_pass_trump_hcp: 3
       nt_bid_pts: 13
-      pull_high_double_max_hcp: 7
+      pull_high_double_max_hcp: 9
       pull_high_double_suit_len: 6
+      pull_enemy_max_len: 1
+      new_suit_min_len: 6
+      new_suit_pts: 8
       compete_min_fit: 8
       compete_pts: 17
       compete_max_level: 4

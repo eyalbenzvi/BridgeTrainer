@@ -257,11 +257,22 @@ class ContinuationEngine:
         game = GAME_LEVEL[d]
         if standing.level >= game:
             return "P"
-        # only support PARTNER's bid — a seat never raises its own call
+        # only act over PARTNER's bid — a seat never raises its own call
         # without partner having acted (that would invent values twice)
         if state.last_bid_seat != partner_of(seat):
             return "P"
         if v.length[d] < int(p["min_fit_to_raise"]):
+            # no fit: a long playable suit + values still keeps the seat
+            # bidding (correcting to its own suit) — every hand continues
+            # the auction, it never just freezes on partner's spot
+            best = v.best_suit()
+            if best != d \
+                    and v.length[best] >= int(p["new_suit_min_len"]) \
+                    and v.hcp >= int(p["new_suit_pts"]):
+                lvl = _min_level(state, best)
+                tok = f"{lvl}{best}"
+                if lvl <= GAME_LEVEL[best] and state.is_legal(tok):
+                    return tok
             return "P"
         support = v.support_pts(d)
         # partner's invite standing below game: accept on values
@@ -285,14 +296,23 @@ class ContinuationEngine:
         standing = state.standing_contract()
         enemy = standing.denom
         if standing.level >= 4:
-            # high-level X is penalty-oriented: pull only with a freak hand
-            if (v.hcp <= int(p["pull_high_double_max_hcp"])):
-                best = v.best_suit()
-                if v.length[best] >= int(p["pull_high_double_suit_len"]):
-                    lvl = _min_level(state, best)
-                    tok = f"{lvl}{best}"
-                    if lvl <= 5 and state.is_legal(tok):
-                        return tok
+            # A high-level X is penalty-oriented, but partner is NOT forced
+            # to sit: with shortness in their suit (few defensive tricks), a
+            # long suit of his own and little defensive strength, pulling is
+            # the percentage action. All three gates are policy parameters.
+            best = v.best_suit()
+            short_in_enemy = (enemy != "NT" and
+                              v.length[enemy] <= int(p["pull_enemy_max_len"]))
+            long_suit = (v.length[best] >=
+                         int(p["pull_high_double_suit_len"])
+                         or (enemy != "NT" and v.length[enemy] == 0
+                             and v.length[best] >= 5))
+            weak_defense = v.hcp <= int(p["pull_high_double_max_hcp"])
+            if short_in_enemy and long_suit and weak_defense:
+                lvl = _min_level(state, best)
+                tok = f"{lvl}{best}"
+                if lvl <= 5 and state.is_legal(tok):
+                    return tok
             return "P"
         # penalty pass: trump stack behind the bidder
         if enemy != "NT" \
