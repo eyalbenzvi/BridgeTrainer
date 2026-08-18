@@ -1,0 +1,6 @@
+# Cloud Functions runtime deps. The analysis engine itself is installed
+# straight from this public repo's main branch — redeploy the function
+# (deploy-functions workflow) to pick up engine changes.
+firebase-functions>=0.4
+firebase-admin>=6
+bridge-trainer @ git+https://github.com/eyalbenzvi/BridgeTrainer.git@main

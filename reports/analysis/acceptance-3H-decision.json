@@ -1,0 +1,592 @@
+{
+ "meta": {
+  "dealer": "E",
+  "dealer_he": "מזרח",
+  "my_seat": "S",
+  "my_seat_he": "דרום",
+  "vul": "Both",
+  "vul_he": "שני הצדדים פגיעים",
+  "system": "two_over_one",
+  "scoring": "IMP",
+  "scoring_he": "מפגשי (IMP)",
+  "seed": 2026,
+  "n_deals": 500,
+  "ess": 276.7,
+  "acceptance_rate": 0.005,
+  "stopped_early": true,
+  "shortfall": 0,
+  "ci_widen": 1.0,
+  "elapsed_s": 32.7,
+  "in_dd_fog": false
+ },
+ "hand": {
+  "pbn": "AQ2.KJ3.KQ54.A32",
+  "hcp": 19
+ },
+ "auction": [
+  {
+   "index": 0,
+   "seat": "E",
+   "seat_he": "מזרח",
+   "token": "3H",
+   "he": "פתיחת מנע 3♥: סדרה שביעייה, 5–9 נק'",
+   "note": "",
+   "is_fallback": false,
+   "is_override": false,
+   "is_decision": false,
+   "is_hero_side": false
+  },
+  {
+   "index": 1,
+   "seat": "S",
+   "seat_he": "דרום",
+   "token": "3NT",
+   "he": "NT ישיר מעל התערבות/מנע: יד מאוזנת חזקה עם עוצר בסדרת היריב",
+   "note": "",
+   "is_fallback": false,
+   "is_override": false,
+   "is_decision": true,
+   "is_hero_side": true
+  },
+  {
+   "index": 2,
+   "seat": "W",
+   "seat_he": "מערב",
+   "token": "P",
+   "he": "פס על מנע השותף: אין עניין במשחק מלא (עד 13–14 נק')",
+   "note": "",
+   "is_fallback": false,
+   "is_override": false,
+   "is_decision": false,
+   "is_hero_side": false
+  },
+  {
+   "index": 3,
+   "seat": "N",
+   "seat_he": "צפון",
+   "token": "P",
+   "he": "פס מעל הכרזה גבוהה: אין פעולה ברורה (המידע מוגבל)",
+   "note": "",
+   "is_fallback": false,
+   "is_override": false,
+   "is_decision": false,
+   "is_hero_side": true
+  },
+  {
+   "index": 4,
+   "seat": "E",
+   "seat_he": "מזרח",
+   "token": "P",
+   "he": "פס לאחר שהיד כבר הוגבלה: ללא מידע חדש מהותי",
+   "note": "",
+   "is_fallback": false,
+   "is_override": false,
+   "is_decision": false,
+   "is_hero_side": false
+  }
+ ],
+ "decision": {
+  "index": 1,
+  "actual": "3NT",
+  "seat_of_decision": "S"
+ },
+ "candidates": [
+  "3NT",
+  "X",
+  "P"
+ ],
+ "policies": {
+  "conservative": {
+   "he": "שמרנית",
+   "he_desc": "שותף ויריבים זהירים: מזמינים גבוה, מתחרים מעט, מכפילים רק עם סטאק מובהק",
+   "rows": [
+    {
+     "action": "3NT",
+     "ev_imp": 4.68,
+     "ev_imp_raw": 4.39,
+     "ci": 0.72,
+     "vs": "P",
+     "p_gain": 0.7346,
+     "p_loss": 0.2212,
+     "p_push": 0.0442,
+     "p_big_gain": 0.6638,
+     "p_big_loss": 0.1204,
+     "median_imp": 6.0,
+     "mp_pct": 84.2,
+     "top_contracts": [
+      [
+       "3NTS",
+       1.0
+      ]
+     ]
+    },
+    {
+     "action": "P",
+     "ev_imp": -4.68,
+     "ev_imp_raw": -4.39,
+     "ci": 0.72,
+     "vs": "3NT",
+     "p_gain": 0.2212,
+     "p_loss": 0.7346,
+     "p_push": 0.0442,
+     "p_big_gain": 0.1204,
+     "p_big_loss": 0.6638,
+     "median_imp": -6.0,
+     "mp_pct": 43.0,
+     "top_contracts": [
+      [
+       "3HE",
+       0.9009
+      ],
+      [
+       "4SN",
+       0.084
+      ],
+      [
+       "4HE",
+       0.015
+      ]
+     ]
+    },
+    {
+     "action": "X",
+     "ev_imp": -6.04,
+     "ev_imp_raw": -5.74,
+     "ci": 0.69,
+     "vs": "3NT",
+     "p_gain": 0.0627,
+     "p_loss": 0.8214,
+     "p_push": 0.1159,
+     "p_big_gain": 0.0379,
+     "p_big_loss": 0.4984,
+     "median_imp": -4.0,
+     "mp_pct": 22.9,
+     "top_contracts": [
+      [
+       "5CN",
+       0.3858
+      ],
+      [
+       "4SN",
+       0.3016
+      ],
+      [
+       "5DN",
+       0.2913
+      ],
+      [
+       "4HE",
+       0.015
+      ],
+      [
+       "3NTN",
+       0.0063
+      ]
+     ]
+    }
+   ],
+   "top_action": "3NT",
+   "toss_up": false,
+   "toss_up_with": []
+  },
+  "realistic": {
+   "he": "ריאלית",
+   "he_desc": "סטנדרט תחרותי מקובל: הזמנות רגילות, תחרות על חלקיים, הכפלות עונשין שקולות",
+   "rows": [
+    {
+     "action": "3NT",
+     "ev_imp": 5.06,
+     "ev_imp_raw": 4.76,
+     "ci": 0.71,
+     "vs": "P",
+     "p_gain": 0.7735,
+     "p_loss": 0.084,
+     "p_push": 0.1424,
+     "p_big_gain": 0.4414,
+     "p_big_loss": 0.0612,
+     "median_imp": 3.0,
+     "mp_pct": 88.2,
+     "top_contracts": [
+      [
+       "3NTS",
+       0.9507
+      ],
+      [
+       "4HE",
+       0.0327
+      ],
+      [
+       "4SN",
+       0.0096
+      ],
+      [
+       "4SW",
+       0.0042
+      ],
+      [
+       "4SNx",
+       0.0023
+      ],
+      [
+       "5DN",
+       0.0005
+      ]
+     ]
+    },
+    {
+     "action": "P",
+     "ev_imp": -5.06,
+     "ev_imp_raw": -4.76,
+     "ci": 0.71,
+     "vs": "3NT",
+     "p_gain": 0.084,
+     "p_loss": 0.7735,
+     "p_push": 0.1424,
+     "p_big_gain": 0.0612,
+     "p_big_loss": 0.4414,
+     "median_imp": -3.0,
+     "mp_pct": 33.4,
+     "top_contracts": [
+      [
+       "5DN",
+       0.3932
+      ],
+      [
+       "4SN",
+       0.2623
+      ],
+      [
+       "5CN",
+       0.1927
+      ],
+      [
+       "3HE",
+       0.0949
+      ],
+      [
+       "4HE",
+       0.0404
+      ],
+      [
+       "5HE",
+       0.0101
+      ]
+     ]
+    },
+    {
+     "action": "X",
+     "ev_imp": -5.77,
+     "ev_imp_raw": -5.47,
+     "ci": 0.7,
+     "vs": "3NT",
+     "p_gain": 0.0605,
+     "p_loss": 0.7884,
+     "p_push": 0.1511,
+     "p_big_gain": 0.0376,
+     "p_big_loss": 0.4718,
+     "median_imp": -3.0,
+     "mp_pct": 28.4,
+     "top_contracts": [
+      [
+       "5CN",
+       0.3603
+      ],
+      [
+       "4SN",
+       0.303
+      ],
+      [
+       "5DN",
+       0.2752
+      ],
+      [
+       "4HE",
+       0.0428
+      ],
+      [
+       "3NTN",
+       0.007
+      ],
+      [
+       "5HE",
+       0.0052
+      ]
+     ]
+    }
+   ],
+   "top_action": "3NT",
+   "toss_up": false,
+   "toss_up_with": []
+  },
+  "omniscient": {
+   "he": "חסם עליון (רואה קלפים)",
+   "he_desc": "כל צד בוחר את החלופה הטובה לו לפי דאבל-דאמי — גבול עליון, לא תחזית",
+   "rows": [
+    {
+     "action": "P",
+     "ev_imp": 0.32,
+     "ev_imp_raw": 0.35,
+     "ci": 0.19,
+     "vs": "X",
+     "p_gain": 0.0505,
+     "p_loss": 0.0185,
+     "p_push": 0.931,
+     "p_big_gain": 0.0271,
+     "p_big_loss": 0.0,
+     "median_imp": 0.0,
+     "mp_pct": 64.3,
+     "top_contracts": [
+      [
+       "3HEx",
+       0.5342
+      ],
+      [
+       "3NTN",
+       0.1614
+      ],
+      [
+       "4HEx",
+       0.0426
+      ],
+      [
+       "3HE",
+       0.0336
+      ],
+      [
+       "4NTN",
+       0.0327
+      ],
+      [
+       "4SN",
+       0.0299
+      ]
+     ]
+    },
+    {
+     "action": "X",
+     "ev_imp": -0.32,
+     "ev_imp_raw": -0.35,
+     "ci": 0.19,
+     "vs": "P",
+     "p_gain": 0.0185,
+     "p_loss": 0.0505,
+     "p_push": 0.931,
+     "p_big_gain": 0.0,
+     "p_big_loss": 0.0271,
+     "median_imp": 0.0,
+     "mp_pct": 61.9,
+     "top_contracts": [
+      [
+       "3HEx",
+       0.5745
+      ],
+      [
+       "3NTN",
+       0.1614
+      ],
+      [
+       "4HEx",
+       0.0351
+      ],
+      [
+       "4NTN",
+       0.0327
+      ],
+      [
+       "4SN",
+       0.0299
+      ],
+      [
+       "3SWx",
+       0.0269
+      ]
+     ]
+    },
+    {
+     "action": "3NT",
+     "ev_imp": -4.34,
+     "ev_imp_raw": -4.92,
+     "ci": 0.56,
+     "vs": "P",
+     "p_gain": 0.0585,
+     "p_loss": 0.6105,
+     "p_push": 0.331,
+     "p_big_gain": 0.0045,
+     "p_big_loss": 0.3631,
+     "median_imp": -4.0,
+     "mp_pct": 23.8,
+     "top_contracts": [
+      [
+       "3NTS",
+       0.5796
+      ],
+      [
+       "3NTSx",
+       0.1592
+      ],
+      [
+       "4SN",
+       0.0498
+      ],
+      [
+       "4NTS",
+       0.047
+      ],
+      [
+       "4HEx",
+       0.043
+      ],
+      [
+       "4CNx",
+       0.0168
+      ]
+     ]
+    }
+   ],
+   "top_action": "P",
+   "toss_up": true,
+   "toss_up_with": [
+    "X"
+   ]
+  }
+ },
+ "recommended": "3NT",
+ "actual_was_recommended": true,
+ "stability": {
+  "stable": false,
+  "note": "המסקנה רגישה להנחות ההמשך — הפעולה המובילה מתחלפת בין המדיניות (שמרנית: 3NT; ריאלית: 3NT; חסם עליון (רואה קלפים): P). ההנחה הקובעת היא מדיניות ההמשך של השותף והיריבים (ראו analysis/policies.yaml)."
+ },
+ "top_pair": {
+  "a": "3NT",
+  "b": "P",
+  "mean_imp": 5.06,
+  "ci": 0.71
+ },
+ "partner_responses": {
+  "3NT": [
+   [
+    "P",
+    0.9876
+   ],
+   [
+    "4S",
+    0.0119
+   ],
+   [
+    "4D",
+    0.0005
+   ]
+  ],
+  "X": [
+   [
+    "4C",
+    0.2415
+   ],
+   [
+    "3S",
+    0.2312
+   ],
+   [
+    "4D",
+    0.1891
+   ],
+   [
+    "5C",
+    0.1391
+   ],
+   [
+    "5D",
+    0.0998
+   ],
+   [
+    "4S",
+    0.0781
+   ]
+  ],
+  "P": [
+   [
+    "4D",
+    0.4255
+   ],
+   [
+    "3S",
+    0.2569
+   ],
+   [
+    "4C",
+    0.2007
+   ],
+   [
+    "P",
+    0.1092
+   ],
+   [
+    "4S",
+    0.0077
+   ]
+  ]
+ },
+ "representative": [
+  {
+   "kind": "typical",
+   "hands": {
+    "N": "J97.Q.AT9632.J94",
+    "E": "86.T986542..KQ75",
+    "S": "AQ2.KJ3.KQ54.A32",
+    "W": "KT543.A7.J87.T86"
+   },
+   "imp_swing": 3.0,
+   "contract_top": "3NTS",
+   "contract_alt": "5DN",
+   "score_top": 630.0,
+   "score_alt": 600.0,
+   "weight": 1.0
+  },
+  {
+   "kind": "best",
+   "hands": {
+    "N": "T9.952.763.KJ975",
+    "E": "K4.AQT876.J98.T8",
+    "S": "AQ2.KJ3.KQ54.A32",
+    "W": "J87653.4.AT2.Q64"
+   },
+   "imp_swing": 13.0,
+   "contract_top": "3NTS",
+   "contract_alt": "5CN",
+   "score_top": 630.0,
+   "score_alt": -200.0,
+   "weight": 0.075
+  },
+  {
+   "kind": "failure",
+   "hands": {
+    "N": "KJ964.Q8.A82.874",
+    "E": "T8.AT7642.T.KJT9",
+    "S": "AQ2.KJ3.KQ54.A32",
+    "W": "753.95.J9763.Q65"
+   },
+   "imp_swing": -1.0,
+   "contract_top": "3NTS",
+   "contract_alt": "4SN",
+   "score_top": 600.0,
+   "score_alt": 620.0,
+   "weight": 0.25
+  },
+  {
+   "kind": "disaster",
+   "hands": {
+    "N": "JT9864.Q8.JT82.7",
+    "E": "K3.AT7654.73.KT6",
+    "S": "AQ2.KJ3.KQ54.A32",
+    "W": "75.92.A96.QJ9854"
+   },
+   "imp_swing": -14.0,
+   "contract_top": "3NTS",
+   "contract_alt": "4SN",
+   "score_top": -300.0,
+   "score_alt": 650.0,
+   "weight": 0.075
+  }
+ ],
+ "transparency_notes": []
+}

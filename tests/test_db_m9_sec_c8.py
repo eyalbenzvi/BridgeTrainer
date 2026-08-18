@@ -5,6 +5,7 @@ pinned with source assertions + a node syntax check on the dashboard JS.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -178,10 +179,15 @@ def test_dashboard_shows_only_what_is_stored():
 
 
 def test_the_client_cannot_rewrite_a_stored_grade():
-    # the only writes bt-firebase.js makes to an attempt are the answer itself
-    # and the re-answer counter; nothing rewrites a grade behind the user
+    # the only writes bt-firebase.js makes to an ATTEMPT are the answer itself
+    # and the re-answer counter; nothing rewrites a grade behind the user.
+    # (the 4th setDoc files an analysis REQUEST — a different collection,
+    # rules-validated, and it never touches attempts/grades)
     assert "reScore" not in _FB
-    assert _FB.count("setDoc(") == 3          # create, pending flush, re-answer
+    assert _FB.count("setDoc(") == 4  # create, pending flush, re-answer, analysis req
+    attempts_writes = re.findall(r"setDoc\((?:ref|doc\(db, \"users\"[^)]*\))",
+                                 _FB)
+    assert len(attempts_writes) == 3   # the attempt-doc writes stay exactly 3
 
 
 def test_unsynced_answers_are_declared_not_presented_as_settled():

@@ -1,0 +1,64 @@
+name: Deploy analysis function
+
+# One-click deploy of the Cloud Function (functions/main.py) that computes
+# analysis requests the moment they are filed (~30-90s), replacing the
+# 5-minute Actions cron as the PRIMARY path (the cron stays as fallback +
+# janitor). Manual dispatch only — deploying compute is an owner decision.
+#
+# Prerequisites (one-time, see DECISIONS.md §8):
+#   * the Firebase project is on the Blaze plan (billing enabled);
+#   * the FIREBASE_SERVICE_ACCOUNT secret's service account has permission
+#     to deploy (simplest: the Editor role on the project in IAM).
+#
+# The Firebase CLI discovers Python functions by importing functions/main.py
+# inside functions/venv, so the venv is prepared here first; the actual
+# runtime build (pip install of the engine from this repo@main) happens in
+# Cloud Build on Google's side.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-functions
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Write the service-account key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not set"
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa-key.json"
+
+      - name: Prepare the functions venv (CLI discovery)
+        run: |
+          cd functions
+          python -m venv venv
+          ./venv/bin/pip install -q --upgrade pip
+          ./venv/bin/pip install -q -r requirements.txt
+
+      - name: Deploy
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa-key.json
+        run: |
+          npx --yes firebase-tools@latest deploy --only functions \
+            --project bridgetrainer-3c759 --non-interactive --force
+
+      - name: Drop the key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/sa-key.json"

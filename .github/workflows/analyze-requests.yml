@@ -1,0 +1,89 @@
+name: Analyze requests
+
+# Processes the bidding-analysis queue the web app files into Firestore
+# (analyze.html -> analysis_requests). Each pending request is claimed with
+# a status CAS, simulated (constrained dealing + double-dummy + policy
+# ensemble), and the finished Hebrew report is written back to
+# analysis_reports where the page — already watching via onSnapshot —
+# shows it live. See DECISIONS.md §7 (cloud path).
+#
+# Once the Cloud Function (functions/main.py, deploy-functions.yml) is
+# deployed it becomes the PRIMARY compute path (fires on doc creation,
+# ~30-90s); this cron then serves as fallback + janitor: it heals requests
+# stuck in "running" after a crash and processes anything the function
+# missed. The CAS claim makes the two paths safely concurrent. After the
+# function proves itself, this cron can be relaxed (e.g. */30) — see
+# DECISIONS.md §8.
+#
+# Cost discipline (public repo, but runners are a shared resource): the
+# 5-minute cron first runs a CHEAP gate — firebase-admin only, count
+# pending — and skips the heavy install (endplay/numpy + the package)
+# whenever the queue is empty, which is most ticks.
+#
+# NOTE this repo's logs are public: the worker logs ids/counts/timings
+# only, never hands, auctions or report content.
+#
+# Needs the FIREBASE_SERVICE_ACCOUNT secret (same one the forge/publish
+# workflows use).
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: analyze-requests
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Write the service-account key
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::error::FIREBASE_SERVICE_ACCOUNT is not set"
+            exit 1
+          fi
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > sa-key.json
+
+      # Cheap gate: only firebase-admin, no numpy/endplay/package install.
+      - name: Count pending requests
+        id: gate
+        run: |
+          pip install -q firebase-admin
+          python scripts/analysis_queue_gate.py --key sa-key.json
+
+      - name: Install the engine
+        if: steps.gate.outputs.pending != '0'
+        run: pip install -e ".[firestore]"
+
+      - name: Process the queue
+        if: steps.gate.outputs.pending != '0'
+        run: |
+          trainer analyze-worker --key sa-key.json --max 6 \
+            --run-id "${GITHUB_RUN_ID}" | tee worker.log
+
+      - name: Job summary
+        if: always()
+        run: |
+          {
+            echo "## Analyze requests"
+            echo
+            echo '```'
+            grep '^\[worker\]' worker.log 2>/dev/null \
+              || echo "queue empty — heavy steps skipped"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Drop the key
+        if: always()
+        run: rm -f sa-key.json

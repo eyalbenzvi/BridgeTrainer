@@ -6,15 +6,22 @@ would have chosen a different call, so it gets weight 0.
 """
 from __future__ import annotations
 
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
-from ..dealing.features import SUIT_NAMES, SeatFeatures
+if TYPE_CHECKING:
+    from ..dealing.features import SeatFeatures
 
-Predicate = Callable[[SeatFeatures], np.ndarray]
+Predicate = Callable[["SeatFeatures"], np.ndarray]
 
 PREDICATES: dict[str, Predicate] = {}
+
+# Imported AFTER the registry exists: dealing.rejection imports PREDICATES
+# back from here, so entering this module through the semantics package
+# (semantics -> engine -> predicates -> dealing -> rejection) must find the
+# name already bound or the cycle raises ImportError.
+from ..dealing.features import SUIT_NAMES  # noqa: E402
 
 
 def predicate(name: str):
