@@ -49,11 +49,17 @@ def _server_ts():
 
 
 def _run_transaction(txn, body):
+    # dispatch on the TRANSACTION TYPE, not on package availability: the
+    # test fakes must run bare even when firebase-admin happens to be
+    # installed in the environment
     try:
-        from firebase_admin import firestore
-        return firestore.transactional(body)(txn)
-    except ImportError:                      # fake transaction in tests
-        return body(txn)
+        from google.cloud.firestore_v1.transaction import Transaction
+        if isinstance(txn, Transaction):
+            from firebase_admin import firestore
+            return firestore.transactional(body)(txn)
+    except ImportError:
+        pass
+    return body(txn)                         # fake transaction in tests
 
 
 def claim(db, ref, run_id: str) -> bool:
@@ -134,12 +140,88 @@ def _short_error(exc: Exception) -> str:
     return msg[:400]
 
 
+def _process_claimed(db, ref, data: dict,
+                     narration_available: bool, log=print) -> bool:
+    """Run one ALREADY-CLAIMED request end-to-end; True on success. Every
+    failure lands as status=error. Logs never contain hands/auctions/report
+    content — Actions logs are public."""
+    uid = data.get("uid", "")
+    t0 = time.time()
+    try:
+        if over_daily_limit(db, uid):
+            raise RuntimeError(
+                f"חריגה מהמכסה היומית ({DAILY_LIMIT} ניתוחים ביום)")
+        summary, html, facts_json = process_request(
+            data.get("req") or {}, narration_available)
+        db.collection(REPORTS).document(ref.id).set({
+            "uid": uid, "html": html, "facts": facts_json,
+            "createdAt": _server_ts(),
+        })
+        ref.update({"status": "done", "summary": summary,
+                    "finishedAt": _server_ts()})
+        log(f"[worker] {ref.id[:10]} done "
+            f"({summary['n_deals']} deals, {time.time() - t0:.0f}s)")
+        return True
+    except Exception as exc:
+        ref.update({"status": "error", "error": _short_error(exc),
+                    "finishedAt": _server_ts()})
+        log(f"[worker] {ref.id[:10]} error "
+            f"({type(exc).__name__}, {time.time() - t0:.0f}s)")
+        traceback.print_exc()
+        return False
+
+
+def handle_request(db, ref, run_id: str,
+                   narration_available: bool = False, log=print) -> str:
+    """Claim + process ONE request — the Cloud Functions trigger entry
+    point (functions/main.py). Returns 'done' / 'error' / 'skipped'.
+
+    Firestore events are at-least-once, and the Actions fallback polls the
+    same queue, so the CAS claim is what makes double delivery harmless."""
+    if not claim(db, ref, run_id):
+        log(f"[worker] {ref.id[:10]} skipped (already claimed)")
+        return "skipped"
+    data = ref.get().to_dict() or {}
+    ok = _process_claimed(db, ref, data, narration_available, log)
+    return "done" if ok else "error"
+
+
+STALE_RUNNING_S = 30 * 60
+
+
+def reset_stale_running(db, log=print, max_age_s: int = STALE_RUNNING_S,
+                        now: float | None = None) -> int:
+    """Crash recovery: a worker that died mid-run leaves its request stuck
+    on "running" — and its creation event is already consumed, so nothing
+    would ever retry it. The Actions fallback calls this each pass and
+    returns stale docs to "pending" for the next processor."""
+    now = now or time.time()
+    n = 0
+    for snap in db.collection(REQUESTS).where(
+            "status", "==", "running").stream():
+        data = snap.to_dict() or {}
+        started = data.get("startedAt")
+        try:
+            started_s = (started.timestamp()
+                         if hasattr(started, "timestamp")
+                         else float(started or 0))
+        except (TypeError, ValueError):    # e.g. a sentinel in fakes
+            started_s = now
+
+        if now - started_s > max_age_s:
+            snap.reference.update({"status": "pending"})
+            n += 1
+            log(f"[worker] {snap.id[:10]} reset stale running -> pending")
+    return n
+
+
 def run_queue(db, run_id: str = "local", max_requests: int = 6,
               narration_available: bool = False, log=print) -> dict:
     """Process up to max_requests pending docs, oldest first.
 
     Returns {"processed": n, "done": n, "errors": n, "skipped": n}.
     """
+    reset_stale_running(db, log)
     snaps = list(db.collection(REQUESTS)
                  .where("status", "==", "pending").limit(25).stream())
     snaps.sort(key=lambda s: _created_seconds(s.to_dict() or {}))
@@ -153,32 +235,9 @@ def run_queue(db, run_id: str = "local", max_requests: int = 6,
             stats["skipped"] += 1
             continue
         stats["processed"] += 1
-        data = snap.to_dict() or {}
-        uid = data.get("uid", "")
-        t0 = time.time()
-        try:
-            if over_daily_limit(db, uid):
-                raise RuntimeError(
-                    f"חריגה מהמכסה היומית ({DAILY_LIMIT} ניתוחים ביום)")
-            summary, html, facts_json = process_request(
-                data.get("req") or {}, narration_available)
-            db.collection(REPORTS).document(snap.id).set({
-                "uid": uid, "html": html, "facts": facts_json,
-                "createdAt": _server_ts(),
-            })
-            ref.update({"status": "done", "summary": summary,
-                        "finishedAt": _server_ts()})
-            stats["done"] += 1
-            # public logs: id + timing only, never content
-            log(f"[worker] {snap.id[:10]} done "
-                f"({summary['n_deals']} deals, {time.time() - t0:.0f}s)")
-        except Exception as exc:
-            stats["errors"] += 1
-            ref.update({"status": "error", "error": _short_error(exc),
-                        "finishedAt": _server_ts()})
-            log(f"[worker] {snap.id[:10]} error "
-                f"({type(exc).__name__}, {time.time() - t0:.0f}s)")
-            traceback.print_exc()
+        ok = _process_claimed(db, ref, snap.to_dict() or {},
+                              narration_available, log)
+        stats["done" if ok else "errors"] += 1
     log(f"[worker] queue pass: {stats}")
     return stats
 

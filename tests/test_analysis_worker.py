@@ -183,6 +183,33 @@ def test_daily_limit_blocks_flooding():
     assert all("מכסה" in d["error"] for d in errs)
 
 
+def test_handle_request_trigger_entry_point():
+    """The Cloud Functions path: claim + process a single doc."""
+    from bridge_trainer.analysis.worker import handle_request
+    db = make_db()
+    ref = db.collection("analysis_requests").document("req0")
+    assert handle_request(db, ref, run_id="fn1", log=lambda *_: None) == "done"
+    assert ref.get().to_dict()["status"] == "done"
+    assert "req0" in db.collection("analysis_reports")._docs
+    # at-least-once event delivery: a second invocation is a harmless skip
+    assert handle_request(db, ref, run_id="fn2",
+                          log=lambda *_: None) == "skipped"
+
+
+def test_stale_running_docs_are_reset():
+    from bridge_trainer.analysis.worker import reset_stale_running
+    db = make_db(n_requests=2)
+    docs = db.collection("analysis_requests")._docs
+    docs["req0"].update({"status": "running",
+                         "startedAt": time.time() - 3600})   # stale
+    docs["req1"].update({"status": "running",
+                         "startedAt": time.time() - 60})     # fresh
+    n = reset_stale_running(db, log=lambda *_: None)
+    assert n == 1
+    assert docs["req0"]["status"] == "pending"
+    assert docs["req1"]["status"] == "running"
+
+
 def test_worker_logs_never_contain_the_hand():
     db = make_db()
     lines = []

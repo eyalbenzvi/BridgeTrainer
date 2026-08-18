@@ -7,6 +7,14 @@ name: Analyze requests
 # analysis_reports where the page — already watching via onSnapshot —
 # shows it live. See DECISIONS.md §7 (cloud path).
 #
+# Once the Cloud Function (functions/main.py, deploy-functions.yml) is
+# deployed it becomes the PRIMARY compute path (fires on doc creation,
+# ~30-90s); this cron then serves as fallback + janitor: it heals requests
+# stuck in "running" after a crash and processes anything the function
+# missed. The CAS claim makes the two paths safely concurrent. After the
+# function proves itself, this cron can be relaxed (e.g. */30) — see
+# DECISIONS.md §8.
+#
 # Cost discipline (public repo, but runners are a shared resource): the
 # 5-minute cron first runs a CHEAP gate — firebase-admin only, count
 # pending — and skips the heavy install (endplay/numpy + the package)

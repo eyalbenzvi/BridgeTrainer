@@ -1,0 +1,10 @@
+{
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "analysis",
+      "runtime": "python311",
+      "ignore": ["venv", "__pycache__", "*.pyc"]
+    }
+  ]
+}
