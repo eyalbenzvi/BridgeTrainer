@@ -25,7 +25,7 @@ from pathlib import Path
 
 from .llm_narrator import llm_narrate
 from .pdf import export_pdf
-from .pipeline import AnalysisRequest, run_analysis
+from .pipeline import AnalysisRequest
 from .report import build_facts, facts_to_json, narrate_all, render_report
 from .webui import analyze_page
 
@@ -38,22 +38,21 @@ def analyze_decision_points(payload: dict, reports_dir: Path) -> list[dict]:
     indices = (payload.get("decision_indices")
                or [payload.get("decision_index",
                                len(payload.get("auction", [])))])
-    overrides = {int(k): v for k, v in (payload.get("overrides") or {}).items()}
     narration = payload.get("narration", "template")
+    from .worker import resolve_engine
+    engine = resolve_engine()
     out = []
     for idx in indices:
         req = AnalysisRequest(
             dealer=payload["dealer"], vul=payload["vul"],
             my_seat=payload["my_seat"], my_hand=payload["my_hand"],
             auction=list(payload["auction"]), decision_index=int(idx),
-            system=payload.get("system", "two_over_one"),
             scoring=payload.get("scoring", "IMP"),
             candidates=payload.get("candidates"),
-            overrides=overrides,
             seed=int(payload.get("seed", 1)),
             max_deals=int(payload.get("max_deals", 2000)),
         )
-        result = run_analysis(req)
+        result = engine(req)
         facts = build_facts(result)
         prose = llm_narrate(facts) if narration == "llm" else narrate_all(facts)
         html_doc = render_report(facts, prose)
@@ -142,8 +141,10 @@ class _Handler(BaseHTTPRequestHandler):
 
 def serve(port: int = 8765, reports_dir: str | Path = "reports/analysis",
           open_browser: bool = True) -> ThreadingHTTPServer:
+    # resolve NOW: loading the Ben engine chdir()s into its checkout, which
+    # would silently retarget a relative reports_dir
     handler = type("Handler", (_Handler,),
-                   {"reports_dir": Path(reports_dir)})
+                   {"reports_dir": Path(reports_dir).resolve()})
     httpd = ThreadingHTTPServer(("127.0.0.1", port), handler)
     print(f"analysis UI: http://127.0.0.1:{port}/  (Ctrl-C to stop)")
     if open_browser:

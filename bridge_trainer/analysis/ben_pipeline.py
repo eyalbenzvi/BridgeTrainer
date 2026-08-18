@@ -1,0 +1,312 @@
+"""Ben-based analysis pipeline: ONE bridge brain for everything.
+
+Per the owner's direction (DECISIONS.md §10): the hand-written system
+tables, the rejection sampler's auction constraints and the heuristic
+continuation agents are all replaced by the Ben engine (BEN-21GF) — the
+same neural bidder that generates this project's practice problems:
+
+  * layout sampling: Ben samples the hidden hands consistent with the
+    auction AS BEN UNDERSTANDS IT (bot.sample_hands_for_auction);
+  * candidates: Ben's own policy distribution at the decision point;
+  * continuations: Ben bids ALL FOUR seats to completion on every sampled
+    layout for every candidate (bidding_rollout) — real auctions, not
+    heuristics;
+  * scoring: double-dummy on each rollout's final contract, hero-positive
+    duplicate scores, all candidates paired on identical layouts (INV1).
+
+The statistics/report layers are reused unchanged: per-sample scores feed
+scoring.comparison.compare_candidates, and the report renders from the
+same facts structure (single policy entry keyed "realistic", labeled Ben).
+
+Honesty notes surfaced in the report:
+  * Ben's sampler `quality` (0..1) measures how consistent the sampled
+    worlds are with the entered auction under Ben's system — a LOW value
+    means the auction contains calls Ben's system reads differently
+    (special agreements, off-system style) and the analysis is degraded;
+  * scores are raw double-dummy at the rollout contract (no single-dummy
+    smear on this path);
+  * Ben's own choice at the decision point is printed as an anchor.
+
+Requires the external Ben checkout (BEN_HOME; scripts/setup_ben.sh).
+"""
+from __future__ import annotations
+
+import os
+import time
+from collections import Counter
+
+import numpy as np
+
+from ..domain.auction import SEATS, partner_of
+from ..scoring.comparison import compare_candidates
+from ..scoring.stats import weighted_ci
+from ..validate.auction_state import replay
+from .pipeline import (AnalysisRequest, AnalysisResult, PolicyOutcome,
+                       RepresentativeDeal, TOSS_UP_PRECISION_IMPS,
+                       _mp_percent, _validate)
+from .systems.interpreter import CallMeaning
+
+BLOCK_SAMPLES = 200
+MAX_SAMPLES = 600
+MENU_P_FLOOR = 0.02      # forge's P_OPTION: policy mass that earns a seat
+MENU_MAX = 6
+QUALITY_WARN = 0.8       # sampler-quality thresholds for report warnings
+QUALITY_BAD = 0.5
+BEN_POLICY_KEY = "realistic"   # facts slot the report treats as primary
+
+_ENGINE = None
+
+
+def ben_available() -> bool:
+    home = os.environ.get("BEN_HOME", os.path.expanduser("~/ben"))
+    return os.path.isdir(os.path.join(home, "src"))
+
+
+def _engine():
+    global _ENGINE
+    if _ENGINE is None:
+        from ..engine.ben import get_engine
+        _ENGINE = get_engine()
+    return _ENGINE
+
+
+def _vul_tuple(vul: str) -> tuple:
+    return (vul in ("NS", "Both"), vul in ("EW", "Both"))
+
+
+def _contract_display(ben_contract: str) -> str:
+    """Ben 'get_contract' format ('4SXE', '3NN', 'PASS') -> my display
+    format ('4SEx', '3NTN', 'Pass-out')."""
+    if ben_contract in ("PASS", None, ""):
+        return "Pass-out"
+    level, strain = ben_contract[0], ben_contract[1]
+    declarer = ben_contract[-1]
+    doubled = "X" in ben_contract[2:-1]   # '', 'X' or 'XX' between them
+    denom = "NT" if strain == "N" else strain
+    return f"{level}{denom}{declarer}{'x' if doubled else ''}"
+
+
+def _auction_tokens(auction_str: str) -> list[str]:
+    return auction_str.split()
+
+
+def _first_partner_call(tokens: list[str], dealer_i: int, stem_len: int,
+                        partner_seat: str) -> str:
+    for idx in range(stem_len + 1, len(tokens)):
+        if SEATS[(dealer_i + idx) % 4] == partner_seat:
+            return tokens[idx]
+    return "—"
+
+
+def _continuation_pairs(tokens: list[str], dealer_i: int,
+                        stem_len: int) -> list:
+    pairs = [[SEATS[(dealer_i + i) % 4], tokens[i]]
+             for i in range(stem_len + 1, len(tokens))]
+    while pairs and pairs[-1][1] == "P":
+        pairs.pop()
+    return pairs
+
+
+def _freqs(items: list[str], top_k: int = 6) -> list:
+    n = len(items) or 1
+    return [(tok, round(c / n, 4))
+            for tok, c in Counter(items).most_common(top_k)]
+
+
+def _concat_batches(a, b):
+    """Two Evaluations of the SAME candidates on DIFFERENT sample batches,
+    concatenated row-wise (adaptive sampling across fresh Ben draws)."""
+    from ..engine.ben import Evaluation
+    assert list(a.bids) == list(b.bids)
+    n = a.n_samples + b.n_samples
+    return Evaluation(
+        bids=list(a.bids),
+        ev={c: np.concatenate([np.asarray(a.ev[c]), np.asarray(b.ev[c])])
+            for c in a.bids},
+        contracts={c: list(a.contracts[c]) + list(b.contracts[c])
+                   for c in a.bids},
+        auctions={c: list(a.auctions[c]) + list(b.auctions[c])
+                  for c in a.bids},
+        n_samples=n,
+        quality=(a.quality * a.n_samples + b.quality * b.n_samples) / n,
+        sample_deals=list(a.sample_deals) + list(b.sample_deals))
+
+
+def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
+    """The Ben-powered analysis. Same request/result surface as the legacy
+    pipeline; `system`/`overrides` fields are accepted and ignored (the
+    owner removed those inputs — Ben's system defines the meanings)."""
+    t0 = time.perf_counter()
+    _validate(req)
+    if not ben_available():
+        raise RuntimeError(
+            "Ben engine not installed (BEN_HOME) — run scripts/setup_ben.sh")
+    engine = _engine()
+
+    stem = req.auction[:req.decision_index]
+    actual = (req.auction[req.decision_index]
+              if req.decision_index < len(req.auction) else None)
+    dealer_i = SEATS.index(req.dealer)
+    hero_i = SEATS.index(req.my_seat)
+    pard = partner_of(req.my_seat)
+    bot = engine.bot(req.my_hand, hero_i, dealer_i, _vul_tuple(req.vul))
+
+    # -- candidates: Ben's own policy at the decision point ---------------
+    policy = engine.policy_full(bot, dealer_i, stem)
+    ben_top = policy[0].bid if policy else "P"
+    ben_top_p = float(policy[0].p) if policy else 0.0
+    if req.candidates:
+        candidates = list(req.candidates)
+    else:
+        candidates = [it.bid for it in policy
+                      if it.p >= MENU_P_FLOOR][:MENU_MAX]
+        if len(candidates) < 2:
+            for extra in ("P", "X"):
+                st = replay(req.dealer, stem)
+                if extra not in candidates and st.is_legal(extra):
+                    candidates.append(extra)
+                if len(candidates) >= 2:
+                    break
+    if actual is not None and actual not in candidates:
+        candidates = [actual] + candidates
+    state = replay(req.dealer, stem)
+    candidates = [c for c in candidates if state.is_legal(c)]
+    if not candidates:
+        raise ValueError("no legal candidate actions at the decision point")
+
+    # -- adaptive evaluation: concatenated Ben batches until the CI settles
+    # (engine.merge_evaluations merges CANDIDATES on one sample set; here we
+    # concatenate fresh sample BATCHES of the same candidates instead)
+    dd_memo: dict = {}
+    merged = None
+    stopped_early = False
+    while merged is None or merged.n_samples < MAX_SAMPLES:
+        np.random.seed(req.seed + 7919 * (0 if merged is None
+                                          else merged.n_samples))
+        batch = engine.evaluate(bot, dealer_i, stem, candidates,
+                                n_samples=BLOCK_SAMPLES, dd_memo=dd_memo)
+        merged = batch if merged is None else _concat_batches(merged, batch)
+        if progress:
+            progress(merged.n_samples, MAX_SAMPLES)
+        if merged.n_samples >= 2 * BLOCK_SAMPLES or merged.n_samples >= 300:
+            weights = np.ones(merged.n_samples)
+            cmp_probe = compare_candidates(
+                {c: merged.ev[c] for c in candidates}, weights)
+            top = cmp_probe.candidates[0]
+            diff = cmp_probe.imp_matrix[(top.action, top.best_alternative)]
+            mean, half, _ = weighted_ci(diff, weights)
+            if mean > half or half <= TOSS_UP_PRECISION_IMPS:
+                stopped_early = merged.n_samples < MAX_SAMPLES
+                break
+
+    n = merged.n_samples
+    weights = np.ones(n)
+    scores = {c: np.asarray(merged.ev[c], dtype=float) for c in candidates}
+    cmp_res = compare_candidates(scores, weights)
+    mp_pct = _mp_percent(scores, weights)
+
+    stem_len = len(stem)
+    contract_freqs, resp_freqs, cont_tokens = {}, {}, {}
+    for c in candidates:
+        contract_freqs[c] = _freqs(
+            [_contract_display(x) for x in merged.contracts[c]])
+        toks = [_auction_tokens(a) for a in merged.auctions[c]]
+        cont_tokens[c] = toks
+        resp_freqs[c] = _freqs(
+            [_first_partner_call(t, dealer_i, stem_len, pard) for t in toks])
+
+    top_action = (max(mp_pct, key=mp_pct.get) if req.scoring == "MP"
+                  else cmp_res.candidates[0].action)
+    outcome = PolicyOutcome(
+        policy=BEN_POLICY_KEY,
+        he=f"מנוע Ben ‏({engine.model_id})",
+        he_desc="דגימה, הכרזות המשך של כל ארבעת המושבים וניקוד — כולם "
+                "על ידי מנוע ההכרזות הנוירוני של הפרויקט",
+        raw=cmp_res, corrected=cmp_res, mp_pct=mp_pct,
+        contract_freqs=contract_freqs, partner_response_freqs=resp_freqs,
+        top_action=top_action)
+
+    # -- report metadata ----------------------------------------------------
+    consistency = float(merged.quality)
+    notes = [f"המשכי המכרז והדגימה: מנוע Ben ‏({engine.model_id}). "
+             f"בנקודת ההחלטה Ben עצמו היה מכריז "
+             f"{ben_top} (הסתברות {ben_top_p * 100:.0f}%)."]
+    if consistency < QUALITY_BAD:
+        notes.append(
+            f"אזהרה: עקביות המכרז עם שיטת המנוע נמוכה מאוד "
+            f"({consistency * 100:.0f}%) — המכרז כנראה מכיל הכרזות שהמנוע "
+            f"מפרש אחרת מההסכמים שלך; אמינות הניתוח מוגבלת.")
+    elif consistency < QUALITY_WARN:
+        notes.append(
+            f"שים לב: עקביות המכרז עם שיטת המנוע חלקית "
+            f"({consistency * 100:.0f}%) — ייתכן שחלק מההכרזות מתפרשות "
+            f"אצל המנוע אחרת מכוונתך.")
+    stability_note = (
+        f"עקביות המכרז עם שיטת המנוע: {consistency * 100:.0f}%. "
+        "ההמשכים בכל חלוקה הוכרזו על ידי Ben עבור כל ארבעת המושבים עד "
+        "סוף המכרז — ללא חוקים ידניים.")
+
+    meanings = [CallMeaning(index=i, seat=SEATS[(dealer_i + i) % 4],
+                            token=tok, key="ben", he="", constraints=None)
+                for i, tok in enumerate(req.auction)]
+
+    top = cmp_res.candidates[0]
+    second = top.best_alternative
+    diff = cmp_res.imp_matrix[(top.action, second)]
+    mean, half, ess = weighted_ci(diff, weights)
+
+    reps = _representatives_ben(req, merged, cmp_res, dealer_i, stem_len,
+                                cont_tokens)
+
+    return AnalysisResult(
+        request=req, stem=stem, actual_call=actual, candidates=candidates,
+        meanings=meanings, transparency_notes=notes,
+        policies={BEN_POLICY_KEY: outcome},
+        stable=consistency >= QUALITY_WARN, stability_note=stability_note,
+        recommended=top_action, n_deals=n, ess=float(ess or n),
+        acceptance_rate=consistency, shortfall=0, ci_widen=1.0,
+        stopped_early=stopped_early, top_pair=(top.action, second),
+        top_pair_mean_imp=mean, top_pair_ci=half,
+        representative=reps, elapsed_s=time.perf_counter() - t0,
+        seed=req.seed, in_dd_fog=False)
+
+
+def _representatives_ben(req, merged, cmp_res, dealer_i, stem_len,
+                         cont_tokens, big_loss=-5.0) -> list:
+    """Typical / best / failure / disaster layouts with Ben's actual
+    rollout continuation for each (spec 3.5)."""
+    top = cmp_res.candidates[0]
+    rec, alt = top.action, top.best_alternative
+    diff = cmp_res.imp_matrix[(rec, alt)]
+    n = min(len(diff), len(merged.sample_deals))
+    order = np.argsort(diff[:n])
+
+    def q_index(q: float) -> int:
+        return int(order[min(n - 1, max(0, round(q * (n - 1))))])
+
+    picks = [("typical", q_index(0.5)), ("best", q_index(0.97)),
+             ("failure", q_index(0.10))]
+    worst = int(order[0])
+    if diff[worst] <= big_loss:
+        picks.append(("disaster", worst))
+
+    out, seen = [], set()
+    for kind, i in picks:
+        if i in seen:
+            continue
+        seen.add(i)
+        row = merged.sample_deals[i].split()
+        hands = {s: row[j] for j, s in enumerate(SEATS)}
+        hands[req.my_seat] = req.my_hand   # Ben x-es pips; hero is known
+        out.append(RepresentativeDeal(
+            kind=kind, hands=hands, imp_swing=float(diff[i]),
+            contract_top=_contract_display(merged.contracts[rec][i]),
+            contract_alt=_contract_display(merged.contracts[alt][i]),
+            score_top=float(merged.ev[rec][i]),
+            score_alt=float(merged.ev[alt][i]),
+            weight=1.0,
+            cont_top=_continuation_pairs(cont_tokens[rec][i], dealer_i,
+                                         stem_len),
+            cont_alt=_continuation_pairs(cont_tokens[alt][i], dealer_i,
+                                         stem_len)))
+    return out

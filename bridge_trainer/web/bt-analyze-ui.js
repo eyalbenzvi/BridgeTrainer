@@ -5,7 +5,7 @@
 //
 // The host page provides the skeleton elements by id (picker, quick,
 // quickfill, clearhand, handsum, seat, dealer, strip, turnline, bbox,
-// btn-p/btn-x/btn-xx/btn-undo, auction-note, ovr-list) and calls
+// btn-p/btn-x/btn-xx/btn-undo, auction-note) and calls
 // BTAnalyzeUI.init({onChange}). Auction legality mirrors
 // validate/auction_state.py (bid ordering, X/XX rules, three passes end).
 //
@@ -24,7 +24,6 @@
 
   const sel = new Set();
   let auction = [];
-  const overrides = {};          // index -> {hcp?, suits, note}
   let onChange = () => {};
   const $ = (id) => document.getElementById(id);
 
@@ -207,83 +206,7 @@
     $("btn-x").disabled = !isLegal("X");
     $("btn-xx").disabled = !isLegal("XX");
     $("btn-undo").disabled = auction.length === 0;
-    for (const k of Object.keys(overrides))
-      if (+k >= auction.length) delete overrides[k];
-    refreshOverrides();
     onChange();
-  }
-
-  /* ---------- overrides ---------- */
-  function refreshOverrides() {
-    const root = $("ovr-list");
-    if (!root) return;
-    if (!auction.length) {
-      root.innerHTML =
-        '<span style="color:var(--muted)">הזן מכרז תחילה.</span>';
-      return;
-    }
-    root.innerHTML = "";
-    auction.forEach((tok, i) => {
-      if (tok === "P" && !(i in overrides)) return;
-      const d = document.createElement("details");
-      d.className = "ovr";
-      const has = i in overrides;
-      d.innerHTML = `<summary>הכרזה ${i + 1}: ${tokHtml(tok)} של ` +
-        `${SEAT_HE[seatOf(i)]}` +
-        (has ? ' <span class="badge">הסכם אישי</span>' : "") + `</summary>` +
-        `<div class="row"><label>נק' מ-</label>` +
-        `<input type="number" min="0" max="40" id="ov-${i}-lo">` +
-        `<label>עד</label>` +
-        `<input type="number" min="0" max="40" id="ov-${i}-hi">` +
-        SUITS.map((s) =>
-          `<label class="${s === "H" || s === "D" ? "red" : ""}">` +
-          `${GLYPH[s]}</label><input type="number" min="0" max="13" ` +
-          `id="ov-${i}-${s}-lo" placeholder="מינ'">` +
-          `<input type="number" min="0" max="13" id="ov-${i}-${s}-hi" ` +
-          `placeholder="מקס'">`).join("") +
-        `</div><div class="row"><label>הערה:</label>` +
-        `<input type="text" id="ov-${i}-note" size="34" maxlength="140" ` +
-        `placeholder="למשל: 3♣ כאן = מזמין ולא מנע"></div>` +
-        `<div class="row"><button type="button" data-save="${i}">` +
-        `שמור דריסה</button>` +
-        `<button type="button" data-clear="${i}">נקה</button></div>`;
-      root.appendChild(d);
-      if (has) {
-        const o = overrides[i];
-        if (o.hcp) {
-          d.querySelector(`#ov-${i}-lo`).value = o.hcp[0];
-          d.querySelector(`#ov-${i}-hi`).value = o.hcp[1];
-        }
-        for (const s of SUITS) if (o.suits && o.suits[s]) {
-          d.querySelector(`#ov-${i}-${s}-lo`).value = o.suits[s][0];
-          d.querySelector(`#ov-${i}-${s}-hi`).value = o.suits[s][1];
-        }
-        if (o.note) d.querySelector(`#ov-${i}-note`).value = o.note;
-      }
-    });
-    root.querySelectorAll("button[data-save]").forEach((b) =>
-      (b.onclick = () => {
-        const i = +b.dataset.save;
-        const v = (id) => $(id).value;
-        const lo = v(`ov-${i}-lo`), hi = v(`ov-${i}-hi`);
-        const o = { suits: {}, note: v(`ov-${i}-note`).trim() };
-        if (lo !== "" && hi !== "") o.hcp = [+lo, +hi];
-        for (const s of SUITS) {
-          const a = v(`ov-${i}-${s}-lo`), c = v(`ov-${i}-${s}-hi`);
-          if (a !== "" && c !== "") o.suits[s] = [+a, +c];
-        }
-        if (!o.hcp && !Object.keys(o.suits).length && !o.note)
-          delete overrides[i];
-        else overrides[i] = o;
-        refreshOverrides();
-        onChange();
-      }));
-    root.querySelectorAll("button[data-clear]").forEach((b) =>
-      (b.onclick = () => {
-        delete overrides[+b.dataset.clear];
-        refreshOverrides();
-        onChange();
-      }));
   }
 
   /* ---------- public API ---------- */
@@ -306,7 +229,6 @@
     handPBN,
     auction: () => auction.slice(),
     replayState,
-    overrides: () => JSON.parse(JSON.stringify(overrides)),
     dealer,
     heroSeat,
     tokHtml,

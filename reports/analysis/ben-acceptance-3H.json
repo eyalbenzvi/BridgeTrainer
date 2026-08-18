@@ -1,0 +1,303 @@
+{
+ "meta": {
+  "dealer": "E",
+  "dealer_he": "מזרח",
+  "my_seat": "S",
+  "my_seat_he": "דרום",
+  "vul": "Both",
+  "vul_he": "שני הצדדים פגיעים",
+  "system": "two_over_one",
+  "scoring": "IMP",
+  "scoring_he": "מפגשי (IMP)",
+  "seed": 2026,
+  "n_deals": 400,
+  "ess": 400.0,
+  "acceptance_rate": 0.915887,
+  "stopped_early": true,
+  "shortfall": 0,
+  "ci_widen": 1.0,
+  "elapsed_s": 7.5,
+  "in_dd_fog": false
+ },
+ "hand": {
+  "pbn": "AQ2.KJ3.KQ54.A32",
+  "hcp": 19
+ },
+ "auction": [
+  {
+   "index": 0,
+   "seat": "E",
+   "seat_he": "מזרח",
+   "token": "3H",
+   "he": "",
+   "note": "",
+   "is_fallback": false,
+   "is_override": false,
+   "is_decision": false,
+   "is_hero_side": false
+  }
+ ],
+ "decision": {
+  "index": 1,
+  "actual": null,
+  "seat_of_decision": "S"
+ },
+ "candidates": [
+  "3NT",
+  "X"
+ ],
+ "policies": {
+  "realistic": {
+   "he": "מנוע Ben ‏(BEN 21GF BEN-21GF-8730_2025-04-18-E30.keras)",
+   "he_desc": "דגימה, הכרזות המשך של כל ארבעת המושבים וניקוד — כולם על ידי מנוע ההכרזות הנוירוני של הפרויקט",
+   "rows": [
+    {
+     "action": "3NT",
+     "ev_imp": 6.51,
+     "ev_imp_raw": 6.51,
+     "ci": 0.6,
+     "vs": "X",
+     "p_gain": 0.735,
+     "p_loss": 0.115,
+     "p_push": 0.15,
+     "p_big_gain": 0.66,
+     "p_big_loss": 0.065,
+     "median_imp": 10.0,
+     "mp_pct": 83.5,
+     "top_contracts": [
+      [
+       "3NTS",
+       0.95
+      ],
+      [
+       "4SN",
+       0.045
+      ],
+      [
+       "4HEx",
+       0.005
+      ]
+     ]
+    },
+    {
+     "action": "X",
+     "ev_imp": -6.51,
+     "ev_imp_raw": -6.51,
+     "ci": 0.6,
+     "vs": "3NT",
+     "p_gain": 0.115,
+     "p_loss": 0.735,
+     "p_push": 0.15,
+     "p_big_gain": 0.065,
+     "p_big_loss": 0.66,
+     "median_imp": -10.0,
+     "mp_pct": 16.5,
+     "top_contracts": [
+      [
+       "3SN",
+       0.495
+      ],
+      [
+       "4CN",
+       0.185
+      ],
+      [
+       "4SN",
+       0.155
+      ],
+      [
+       "4DN",
+       0.115
+      ],
+      [
+       "5CN",
+       0.015
+      ],
+      [
+       "6CN",
+       0.01
+      ]
+     ]
+    }
+   ],
+   "top_action": "3NT",
+   "toss_up": false,
+   "toss_up_with": []
+  }
+ },
+ "recommended": "3NT",
+ "actual_was_recommended": false,
+ "stability": {
+  "stable": true,
+  "note": "עקביות המכרז עם שיטת המנוע: 92%. ההמשכים בכל חלוקה הוכרזו על ידי Ben עבור כל ארבעת המושבים עד סוף המכרז — ללא חוקים ידניים."
+ },
+ "top_pair": {
+  "a": "3NT",
+  "b": "X",
+  "mean_imp": 6.51,
+  "ci": 0.6
+ },
+ "partner_responses": {
+  "3NT": [
+   [
+    "P",
+    0.955
+   ],
+   [
+    "4S",
+    0.045
+   ]
+  ],
+  "X": [
+   [
+    "3S",
+    0.495
+   ],
+   [
+    "4C",
+    0.185
+   ],
+   [
+    "4S",
+    0.13
+   ],
+   [
+    "4D",
+    0.115
+   ],
+   [
+    "P",
+    0.045
+   ],
+   [
+    "5C",
+    0.015
+   ]
+  ]
+ },
+ "representative": [
+  {
+   "kind": "typical",
+   "hands": {
+    "N": "Txxxx.xx.Axx.KJx",
+    "E": "Jx.AQTxxxx.Jxx.x",
+    "S": "AQ2.KJ3.KQ54.A32",
+    "W": "Kxx.x.Txx.QTxxxx"
+   },
+   "imp_swing": 10.0,
+   "contract_top": "3NTS",
+   "contract_alt": "3SN",
+   "score_top": 660.0,
+   "score_alt": 170.0,
+   "weight": 1.0,
+   "cont_top": [],
+   "cont_alt": [
+    [
+     "W",
+     "P"
+    ],
+    [
+     "N",
+     "3S"
+    ]
+   ]
+  },
+  {
+   "kind": "best",
+   "hands": {
+    "N": "Txx.xx.JTxx.KJTx",
+    "E": "Kxxx.AQTxxxx.x.x",
+    "S": "AQ2.KJ3.KQ54.A32",
+    "W": "Jxx.x.Axxx.Qxxxx"
+   },
+   "imp_swing": 13.0,
+   "contract_top": "3NTS",
+   "contract_alt": "4CN",
+   "score_top": 660.0,
+   "score_alt": -200.0,
+   "weight": 1.0,
+   "cont_top": [],
+   "cont_alt": [
+    [
+     "W",
+     "P"
+    ],
+    [
+     "N",
+     "4C"
+    ]
+   ]
+  },
+  {
+   "kind": "failure",
+   "hands": {
+    "N": "JTxxxx..AJ.KTxxx",
+    "E": ".QTxxxxxx.xxx.Jx",
+    "S": "AQ2.KJ3.KQ54.A32",
+    "W": "Kxxx.Ax.Txxx.Qxx"
+   },
+   "imp_swing": -1.0,
+   "contract_top": "3NTS",
+   "contract_alt": "4SN",
+   "score_top": 660.0,
+   "score_alt": 680.0,
+   "weight": 1.0,
+   "cont_top": [],
+   "cont_alt": [
+    [
+     "W",
+     "P"
+    ],
+    [
+     "N",
+     "4S"
+    ]
+   ]
+  },
+  {
+   "kind": "disaster",
+   "hands": {
+    "N": "Kx.x.Axxxx.KQJxx",
+    "E": "Txx.AQTxxxx.xx.x",
+    "S": "AQ2.KJ3.KQ54.A32",
+    "W": "Jxxxx.xx.JT.Txxx"
+   },
+   "imp_swing": -12.0,
+   "contract_top": "3NTS",
+   "contract_alt": "6CN",
+   "score_top": 690.0,
+   "score_alt": 1370.0,
+   "weight": 1.0,
+   "cont_top": [],
+   "cont_alt": [
+    [
+     "W",
+     "P"
+    ],
+    [
+     "N",
+     "4NT"
+    ],
+    [
+     "E",
+     "P"
+    ],
+    [
+     "S",
+     "5D"
+    ],
+    [
+     "W",
+     "P"
+    ],
+    [
+     "N",
+     "6C"
+    ]
+   ]
+  }
+ ],
+ "transparency_notes": [
+  "המשכי המכרז והדגימה: מנוע Ben ‏(BEN 21GF BEN-21GF-8730_2025-04-18-E30.keras). בנקודת ההחלטה Ben עצמו היה מכריז 3NT (הסתברות 90%)."
+ ]
+}
