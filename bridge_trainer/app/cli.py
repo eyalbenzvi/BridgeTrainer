@@ -39,6 +39,19 @@ def _ask_answer(problem) -> str | None:
     return matches[0] if matches else None
 
 
+def cmd_analyze(args: argparse.Namespace) -> int:
+    from ..analysis.server import serve
+    httpd = serve(args.port, args.reports_dir,
+                  open_browser=not args.no_browser)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        httpd.server_close()
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     problem = load_problem(args.problem)
     _print_problem(problem)
@@ -429,6 +442,15 @@ def main(argv: list[str] | None = None) -> int:
                        help="generation time budget")
     run_p.add_argument("--out", default="reports")
     run_p.set_defaults(func=cmd_run)
+
+    an_p = sub.add_parser(
+        "analyze",
+        help="serve the bidding-analysis UI (hand + real auction -> "
+             "expert report) on a local port")
+    an_p.add_argument("--port", type=int, default=8765)
+    an_p.add_argument("--reports-dir", default="reports/analysis")
+    an_p.add_argument("--no-browser", action="store_true")
+    an_p.set_defaults(func=cmd_analyze)
 
     pub_p = sub.add_parser(
         "publish", help="build the static quiz site for the whole bank")
