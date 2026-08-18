@@ -31,12 +31,14 @@ def test_no_overlapping_runs():
 def test_cheap_gate_runs_before_the_heavy_install():
     names = [s.get("name") for s in STEPS]
     assert names.index("Count pending requests") < \
-        names.index("Install the engine")
+        names.index("Install the engine (Ben + repo)")
     gate = _step("Count pending requests")
     assert "firebase-admin" in gate["run"]
-    assert "endplay" not in gate["run"] and "pip install -e" not in gate["run"]
+    assert "setup_ben" not in gate["run"] and \
+        "pip install -e" not in gate["run"]
     # the heavy steps are skipped when the queue is empty
-    for heavy in ("Install the engine", "Process the queue"):
+    for heavy in ("Cache the Ben engine", "Install the engine (Ben + repo)",
+                  "Process the queue"):
         assert _step(heavy)["if"] == "steps.gate.outputs.pending != '0'"
 
 
@@ -49,7 +51,8 @@ def test_uses_the_shared_service_account_secret_and_drops_it():
 
 def test_worker_invocation_is_bounded():
     run = _step("Process the queue")["run"]
-    assert "trainer analyze-worker" in run
+    assert "analyze-worker" in run
+    assert "benv" in run              # runs under the Ben venv (py3.12+tf)
     assert "--max 6" in run
     assert WF["jobs"]["worker"]["timeout-minutes"] <= 30
 

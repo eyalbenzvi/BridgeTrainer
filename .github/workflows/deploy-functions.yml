@@ -1,41 +1,38 @@
-name: Deploy analysis function
+name: Deploy analysis engine
 
-# One-click deploy of the Cloud Function (functions/main.py) that computes
-# analysis requests the moment they are filed (~30-90s), replacing the
-# 5-minute Actions cron as the PRIMARY path (the cron stays as fallback +
-# janitor). Manual dispatch only — deploying compute is an owner decision.
+# Builds and deploys the Ben-powered analysis service to Cloud Run
+# (Dockerfile -> bridge-analysis in me-west1, collocated with Firestore),
+# wires the Eventarc trigger that fires it on every new analysis_requests
+# document, and removes the old lightweight Cloud Function it replaces.
+# Manual dispatch only — deploying compute is an owner decision.
 #
-# Prerequisites (one-time, see DECISIONS.md §8):
-#   * the Firebase project is on the Blaze plan (billing enabled);
-#   * the FIREBASE_SERVICE_ACCOUNT secret's service account has permission
-#     to deploy (simplest: the Editor role on the project in IAM).
-#
-# The Firebase CLI discovers Python functions by importing functions/main.py
-# inside functions/venv, so the venv is prepared here first; the actual
-# runtime build (pip install of the engine from this repo@main) happens in
-# Cloud Build on Google's side.
+# Prerequisites (already granted): Blaze plan; the FIREBASE_SERVICE_ACCOUNT
+# has Editor + the Eventarc/Run service-agent bindings from the first
+# function deploy. Rerun this workflow after every engine change on main —
+# the image bakes the repo code at build time.
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: deploy-functions
+  group: deploy-analysis
   cancel-in-progress: false
+
+env:
+  PROJECT: bridgetrainer-3c759
+  REGION: me-west1
+  SERVICE: bridge-analysis
+  TRIGGER: analysis-request-created
+  RUNTIME_SA: 555589350422-compute@developer.gserviceaccount.com
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
 
-      - name: Write the service-account key
+      - name: Authenticate gcloud
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
@@ -44,20 +41,43 @@ jobs:
             exit 1
           fi
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$RUNNER_TEMP/sa-key.json"
+          gcloud auth activate-service-account \
+            --key-file="$RUNNER_TEMP/sa-key.json"
+          gcloud config set project "$PROJECT"
 
-      - name: Prepare the functions venv (CLI discovery)
+      - name: Build and deploy to Cloud Run
         run: |
-          cd functions
-          python -m venv venv
-          ./venv/bin/pip install -q --upgrade pip
-          ./venv/bin/pip install -q -r requirements.txt
+          gcloud run deploy "$SERVICE" \
+            --source . \
+            --region "$REGION" \
+            --memory 2Gi --cpu 1 --timeout 900 \
+            --concurrency 1 --max-instances 2 --min-instances 0 \
+            --no-allow-unauthenticated \
+            --service-account "$RUNTIME_SA" \
+            --quiet
 
-      - name: Deploy
-        env:
-          GOOGLE_APPLICATION_CREDENTIALS: ${{ runner.temp }}/sa-key.json
+      - name: Ensure the Eventarc trigger exists
         run: |
-          npx --yes firebase-tools@latest deploy --only functions \
-            --project bridgetrainer-3c759 --non-interactive --force
+          if gcloud eventarc triggers describe "$TRIGGER" \
+               --location "$REGION" >/dev/null 2>&1; then
+            echo "trigger already exists"
+          else
+            gcloud eventarc triggers create "$TRIGGER" \
+              --location "$REGION" \
+              --destination-run-service "$SERVICE" \
+              --destination-run-region "$REGION" \
+              --event-filters "type=google.cloud.firestore.document.v1.created" \
+              --event-filters "database=(default)" \
+              --event-filters-path-pattern "document=analysis_requests/{id}" \
+              --event-data-content-type "application/protobuf" \
+              --service-account "$RUNTIME_SA"
+          fi
+
+      - name: Remove the superseded Cloud Function
+        run: |
+          gcloud functions delete analyze_request \
+            --region "$REGION" --gen2 --quiet || \
+            echo "old function already gone"
 
       - name: Drop the key
         if: always()

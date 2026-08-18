@@ -169,8 +169,7 @@ def narrate_situation(facts: dict) -> str:
     lines = []
     lines.append(
         f"אתה יושב ב{m['my_seat_he']}, המחלק {m['dealer_he']}, "
-        f"{m['vul_he']}, שיטת ההכרזה "
-        f"{'SAYC' if m['system'] == 'sayc' else '2/1 Game Force'}, "
+        f"{m['vul_he']}, {_engine_label(facts)}, "
         f"סוג התחרות: {m['scoring_he']}. "
         f"בידך {hand_html(facts['hand']['pbn'])} "
         f"({facts['hand']['hcp']} נק').")
@@ -383,7 +382,7 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
 <style>{_CSS}</style></head><body>
 <h1>דוח ניתוח הכרזה</h1>
 <div class="subtitle">BridgeTrainer · {m['scoring_he']} ·
-שיטה: {'SAYC' if m['system'] == 'sayc' else '2/1 Game Force'} ·
+{_engine_label(facts)} ·
 {m['vul_he']} · מחלק: {m['dealer_he']} ·
 מנסח: {'LLM' if p.get('narrator') == 'llm' else 'תבניות (ללא LLM)'}</div>""")
 
@@ -421,13 +420,19 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
         + ("הדגימה נעצרה מוקדם — ההפרש בין שתי הפעולות המובילות הוכרע "
            "סטטיסטית. " if m["stopped_early"] else
            "הדגימה מוצתה עד התקרה. ")
-        + 'עמודת ה-IMP מחושבת מול החלופה הקשה ביותר של כל פעולה, לאחר '
-          'כיול single-dummy; עמודת DD גולמי מוצגת לצידה (INV5).</p>')
+        + ("עמודת ה-IMP מחושבת מול החלופה הקשה ביותר של כל פעולה, "
+           "בניקוד דאבל-דאמי על חוזה הרולאאוט."
+           if len(facts["policies"]) == 1 else
+           'עמודת ה-IMP מחושבת מול החלופה הקשה ביותר של כל פעולה, לאחר '
+           'כיול single-dummy; עמודת DD גולמי מוצגת לצידה (INV5).')
+        + "</p>")
     if m["in_dd_fog"]:
         parts.append('<div class="note">אזהרת "ערפל DD": ההמלצה לפי הציון '
                      'הגולמי ולפי הציון המכויל שונה — הבעיה נמצאת בטווח '
                      'שבו הנחת המשחק המושלם משנה את התשובה.</div>')
-    parts.append("<h3>יציבות בין מדיניות ההמשך</h3>")
+    parts.append("<h3>" + ("אמינות מנוע ההמשכים"
+                           if len(facts["policies"]) == 1
+                           else "יציבות בין מדיניות ההמשך") + "</h3>")
     badge = ('<span class="badge stable">מסקנה יציבה</span>'
              if facts["stability"]["stable"]
              else '<span class="badge fragile">רגיש להנחות</span>')
@@ -474,16 +479,31 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
         parts.append(
             f"<li>הדגימה לא השלימה את התקרה (חסרות {m['shortfall']} "
             f"חלוקות) — רווחי הסמך הורחבו פי {m['ci_widen']}.</li>")
-    parts.append(
-        "<li>תוצאות דאבל-דאמי מחמיאות לכרוז (במיוחד ב-NT); הציונים "
-        "המוצגים עברו כיול single-dummy סימטרי לפי טבלה נערכת "
-        "(bridge_trainer/dd/correction_table.yaml), ושתי הרמות — גולמי "
-        "ומכויל — מוצגות בטבלת התוצאות.</li>")
-    parts.append(
-        "<li>המשכי המכרז חושבו תחת שלוש מדיניות (שמרנית / ריאלית / חסם "
-        "עליון רואה-קלפים); כל הפרמטרים ב-analysis/policies.yaml. "
-        "בכל המדיניות היריבים מכפילים עונשין חוזה בגובה 4+ עם סטאק "
-        "בשליט.</li>")
+    if len(facts["policies"]) == 1:
+        parts.append(
+            "<li>הניקוד הוא דאבל-דאמי גולמי על החוזה שאליו הגיע המכרז "
+            "המדומה בכל חלוקה. דאבל-דאמי מחמיא מעט לכרוז (במיוחד ב-NT); "
+            "מכיוון שהוא מוחל באופן זהה על כל המועמדים, ההשוואה ביניהם "
+            "יציבה יותר מהערכים המוחלטים.</li>")
+    else:
+        parts.append(
+            "<li>תוצאות דאבל-דאמי מחמיאות לכרוז (במיוחד ב-NT); הציונים "
+            "המוצגים עברו כיול single-dummy סימטרי לפי טבלה נערכת "
+            "(bridge_trainer/dd/correction_table.yaml), ושתי הרמות — "
+            "גולמי ומכויל — מוצגות בטבלת התוצאות.</li>")
+    if len(facts["policies"]) == 1:
+        only = next(iter(facts["policies"].values()))
+        parts.append(
+            f"<li>המשכי המכרז: {html.escape(only['he'])} — הדגימה, "
+            "הכרזות ההמשך של כל ארבעת המושבים והחוזה הסופי בכל חלוקה "
+            "מגיעים ממנוע ההכרזות הנוירוני, לא מחוקים ידניים. עקביות "
+            "המכרז עם שיטת המנוע מוצגת בסעיף 3.</li>")
+    else:
+        parts.append(
+            "<li>המשכי המכרז חושבו תחת שלוש מדיניות (שמרנית / ריאלית / "
+            "חסם עליון רואה-קלפים); כל הפרמטרים ב-analysis/policies.yaml. "
+            "בכל המדיניות היריבים מכפילים עונשין חוזה בגובה 4+ עם סטאק "
+            "בשליט.</li>")
     if scoring_mp:
         parts.append(
             "<li>במאצ'פוינטס ה\"שדה\" מקורב על ידי תוצאות החלופות שנבדקו "
@@ -506,6 +526,13 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
 
 
 # ---------------------------------------------------------------------------
+def _engine_label(facts: dict) -> str:
+    if len(facts["policies"]) == 1:
+        return html.escape(next(iter(facts["policies"].values()))["he"])
+    m = facts["meta"]
+    return "שיטה: " + ("SAYC" if m["system"] == "sayc" else "2/1 Game Force")
+
+
 def _auction_table(facts: dict) -> str:
     rows_calls = facts["auction"]
     dealer = facts["meta"]["dealer"]
@@ -539,26 +566,30 @@ def _auction_table(facts: dict) -> str:
     out.append("</tr></table></div>")
     out.append('<p class="small">ריחוף/מגע על הכרזה מציג את פרשנותה. '
                'ההכרזה המנותחת מסומנת במסגרת.</p>')
-    # call-by-call meanings list
-    out.append("<details><summary>משמעויות ההכרזות, אחת-אחת</summary><ul>")
-    for c in rows_calls:
-        flag = ""
-        if c["is_override"]:
-            flag = ' <span class="badge fragile">הסכם אישי</span>'
-        elif c["is_fallback"]:
-            flag = ' <span class="badge fragile">ברירת מחדל</span>'
-        out.append(f"<li>{SEAT_HE[c['seat']]}: {token_html(c['token'])} — "
-                   f"{c['he'] or '—'}{flag}</li>")
-    out.append("</ul></details>")
+    # call-by-call meanings list — only when glosses exist (the Ben path
+    # carries no per-call system glosses by owner decision)
+    if any(c["he"] for c in rows_calls):
+        out.append("<details><summary>משמעויות ההכרזות, אחת-אחת</summary><ul>")
+        for c in rows_calls:
+            flag = ""
+            if c["is_override"]:
+                flag = ' <span class="badge fragile">הסכם אישי</span>'
+            elif c["is_fallback"]:
+                flag = ' <span class="badge fragile">ברירת מחדל</span>'
+            out.append(f"<li>{SEAT_HE[c['seat']]}: {token_html(c['token'])} — "
+                       f"{c['he'] or '—'}{flag}</li>")
+        out.append("</ul></details>")
     return "".join(out)
 
 
 def _results_table(facts: dict, policy: str) -> str:
     pol = facts["policies"][policy]
     scoring_mp = facts["meta"]["scoring"] == "MP"
-    # short headers — the table must fit a phone screen and a printed page
-    head = ["פעולה", "IMP ממוצע", "רווח סמך", "DD גולמי",
-            "% זכייה", "% הפסד", "חציון"]
+    # short headers — the table must fit a phone screen and a printed page.
+    # single-engine (Ben) facts carry one score level, so no raw-DD column.
+    single = len(facts["policies"]) == 1
+    head = ["פעולה", "IMP ממוצע", "רווח סמך"] + \
+        ([] if single else ["DD גולמי"]) + ["% זכייה", "% הפסד", "חציון"]
     if scoring_mp:
         head.insert(1, "MP %")
     out = ['<div class="tablewrap"><table><tr>'] + \
@@ -574,11 +605,11 @@ def _results_table(facts: dict, policy: str) -> str:
         cells = [token_html(row["action"]) +
                  f' <small>מול {token_html(row["vs"])}</small>',
                  f"{row['ev_imp']:+.2f}",
-                 f"±{row['ci']:.2f}",
-                 f"{row['ev_imp_raw']:+.2f}",
-                 f"{row['p_gain'] * 100:.0f}%",
-                 f"{row['p_loss'] * 100:.0f}%",
-                 f"{row['median_imp']:+.1f}"]
+                 f"±{row['ci']:.2f}"] + \
+            ([] if single else [f"{row['ev_imp_raw']:+.2f}"]) + \
+            [f"{row['p_gain'] * 100:.0f}%",
+             f"{row['p_loss'] * 100:.0f}%",
+             f"{row['median_imp']:+.1f}"]
         if scoring_mp:
             cells.insert(1, f"{row['mp_pct']:.1f}%")
         out.append(f"<tr{cls}>" + "".join(
@@ -588,10 +619,9 @@ def _results_table(facts: dict, policy: str) -> str:
 
 
 def _policy_summary_table(facts: dict) -> str:
-    out = ['<div class="tablewrap"><table><tr><th>מדיניות המשך</th>'
+    out = ['<div class="tablewrap"><table><tr><th>מנוע ההמשכים</th>'
            "<th>תיאור</th><th class='num'>הפעולה המובילה</th></tr>"]
-    for name in ("conservative", "realistic", "omniscient"):
-        pol = facts["policies"][name]
+    for name, pol in facts["policies"].items():
         out.append(f"<tr><td>{pol['he']}</td><td>{pol['he_desc']}</td>"
                    f"<td class='num'>{token_html(pol['top_action'])}</td></tr>")
     out.append("</table></div>")

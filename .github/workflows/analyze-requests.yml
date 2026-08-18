@@ -43,7 +43,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
       - name: Write the service-account key
         env:
@@ -55,21 +55,38 @@ jobs:
           fi
           printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > sa-key.json
 
-      # Cheap gate: only firebase-admin, no numpy/endplay/package install.
+      # Cheap gate: only firebase-admin, no Ben/tensorflow install.
       - name: Count pending requests
         id: gate
         run: |
           pip install -q firebase-admin
           python scripts/analysis_queue_gate.py --key sa-key.json
 
-      - name: Install the engine
+      # The analysis engine is Ben (owner decision, DECISIONS.md §10) — the
+      # worker needs the external checkout + tensorflow. Cached between
+      # runs; the pinned commit lives in scripts/setup_ben.sh.
+      - name: Cache the Ben engine
         if: steps.gate.outputs.pending != '0'
-        run: pip install -e ".[firestore]"
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/ben
+            ~/benv
+          key: ben-${{ runner.os }}-${{ hashFiles('scripts/setup_ben.sh', 'scripts/ben_rollout_context.patch') }}
+
+      - name: Install the engine (Ben + repo)
+        if: steps.gate.outputs.pending != '0'
+        run: |
+          bash scripts/setup_ben.sh
+          ~/benv/bin/pip install -q firebase-admin
 
       - name: Process the queue
         if: steps.gate.outputs.pending != '0'
+        env:
+          BEN_HOME: /home/runner/ben
         run: |
-          trainer analyze-worker --key sa-key.json --max 6 \
+          ~/benv/bin/python -m bridge_trainer.app.cli analyze-worker \
+            --key "$PWD/sa-key.json" --max 6 \
             --run-id "${GITHUB_RUN_ID}" | tee worker.log
 
       - name: Job summary

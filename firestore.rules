@@ -104,8 +104,7 @@ service cloud.firestore {
         && d.status == 'pending'
         && d.req is map
         && r.keys().hasAll(['dealer', 'vul', 'my_seat', 'my_hand',
-                            'auction', 'decision_index', 'system',
-                            'scoring'])
+                            'auction', 'decision_index', 'scoring'])
         && r.keys().hasOnly(['dealer', 'vul', 'my_seat', 'my_hand',
                              'auction', 'decision_index', 'system',
                              'scoring', 'overrides', 'narration',
@@ -113,7 +112,7 @@ service cloud.firestore {
         && r.dealer in ['N', 'E', 'S', 'W']
         && r.my_seat in ['N', 'E', 'S', 'W']
         && r.vul in ['None', 'NS', 'EW', 'Both']
-        && r.system in ['sayc', 'two_over_one']
+        && (!('system' in r) || r.system in ['sayc', 'two_over_one'])
         && r.scoring in ['IMP', 'MP']
         && r.my_hand is string && r.my_hand.size() <= 20
         && r.auction is list && r.auction.size() <= 40

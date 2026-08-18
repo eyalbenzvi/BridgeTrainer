@@ -70,9 +70,6 @@ label { margin-inline-end:6px; }
 .note { background:var(--warn-bg); color:var(--warn-fg);
   border:1px solid var(--warn-line); border-radius:8px; padding:6px 10px;
   font-size:13px; margin:6px 0; }
-.ovr { border:1px dashed var(--line); border-radius:8px; padding:8px;
-  margin:6px 0; }
-.ovr summary { cursor:pointer; }
 #status { color:#fff; margin:8px 4px; min-height:22px; }
 iframe.report { width:100%; height:75vh; border:1px solid var(--line);
   border-radius:10px; background:#fff; }
@@ -114,9 +111,6 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
     <option value="both">שני הצדדים</option></select>
 </div>
 <div class="row">
-  <label>שיטת הכרזה:</label>
-  <select id="system"><option value="two_over_one">2/1 Game Force</option>
-    <option value="sayc">SAYC</option></select>
   <label>סוג תחרות:</label>
   <select id="scoring"><option value="IMP">מפגשי (IMP)</option>
     <option value="MP">ניקוד מקסימלי (MP)</option></select>
@@ -141,14 +135,6 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
   <button id="btn-xx">רידאבל</button><button id="btn-undo">↩ בטל</button>
 </div>
 <div class="note" id="auction-note" hidden></div>
-</div>
-
-<div class="card" id="step-ovr">
-<h2>4. משמעויות מותאמות (רשות)</h2>
-<p style="color:var(--muted);font-size:13px">
-כברירת מחדל כל הכרזה מתפרשת לפי השיטה. פתח הכרזה כדי לדרוס את
-פרשנותה (הסכם מיוחד): טווח נק', אורכי סדרות, והערה חופשית.</p>
-<div id="ovr-list"><span style="color:var(--muted)">הזן מכרז תחילה.</span></div>
 </div>
 
 <div style="text-align:center">
@@ -187,10 +173,8 @@ document.getElementById("go").onclick = async () => {
   const body = {
     dealer: UI.dealer(), vul, my_seat: UI.heroSeat(),
     my_hand: UI.handPBN(), auction,
-    system: document.getElementById("system").value,
     scoring: document.getElementById("scoring").value,
     decision_indices: [auction.length],
-    overrides: UI.overrides(),
     narration: document.getElementById("narration").value,
   };
   try {

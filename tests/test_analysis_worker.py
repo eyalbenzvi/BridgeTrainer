@@ -87,6 +87,14 @@ class FakeDB:
         return FakeTransaction()
 
 
+@pytest.fixture(autouse=True)
+def _legacy_engine(monkeypatch):
+    """Unit tests run the legacy deterministic pipeline — the production
+    engine is Ben (py3.12 venv + external checkout, exercised in
+    test_analysis_ben.py's subprocess test)."""
+    monkeypatch.setenv("BT_ANALYSIS_ENGINE", "legacy")
+
+
 REQ = {
     "dealer": "E", "vul": "Both", "my_seat": "S",
     "my_hand": "AQ2.KJ3.KQ54.A32",

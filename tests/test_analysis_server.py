@@ -22,6 +22,8 @@ PAYLOAD = {
 
 @pytest.fixture(scope="module")
 def server(tmp_path_factory):
+    import os
+    os.environ["BT_ANALYSIS_ENGINE"] = "legacy"   # tests run w/o the Ben venv
     reports = tmp_path_factory.mktemp("reports")
     httpd = serve(port=0, reports_dir=reports, open_browser=False)
     port = httpd.server_address[1]

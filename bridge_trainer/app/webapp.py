@@ -5670,11 +5670,6 @@ _ANALYZE_CSS = """
 .badge { display:inline-block; border-radius:999px; padding:1px 10px;
   font-size:12px; font-weight:600; background:var(--warn-bg);
   color:var(--warn-fg); }
-.ovr { border:1px dashed var(--line); border-radius:8px; padding:8px;
-  margin:6px 0; }
-.ovr summary { cursor:pointer; }
-.ovr input { max-width:70px; }
-.ovr input[type=text] { max-width:none; }
 .note { background:var(--warn-bg); color:var(--warn-fg);
   border:1px solid var(--warn-line); border-radius:8px; padding:6px 10px;
   font-size:13px; margin:6px 0; }
@@ -5734,8 +5729,7 @@ async function submit() {
       dealer: UI.dealer(), vul: vul, my_seat: UI.heroSeat(),
       my_hand: UI.handPBN(), auction: auction,
       decision_index: auction.length,
-      system: $("system").value, scoring: $("scoring").value,
-      overrides: UI.overrides(), narration: "template",
+      scoring: $("scoring").value, narration: "template",
     };
     await window.BT.submitAnalysis(req);
     st.textContent = "הבקשה נשלחה! החישוב רץ בענן — בדרך כלל דקה-שתיים " +
@@ -5916,9 +5910,6 @@ def _analyze_html() -> str:
     <option value="both">שני הצדדים</option></select>
 </div>
 <div class="an-row">
-  <label>שיטת הכרזה:</label>
-  <select id="system"><option value="two_over_one">2/1 Game Force</option>
-    <option value="sayc">SAYC</option></select>
   <label>סוג תחרות:</label>
   <select id="scoring"><option value="IMP">מפגשי (IMP)</option>
     <option value="MP">ניקוד מקסימלי (MP)</option></select>
@@ -5940,14 +5931,6 @@ def _analyze_html() -> str:
   <button type="button" id="btn-undo">&#8617; בטל</button>
 </div>
 <div class="note" id="auction-note" hidden></div>
-</div>
-
-<div class="card">
-<h2>4. משמעויות מותאמות (רשות)</h2>
-<p style="color:var(--muted);font-size:13px;margin-top:0">
-כברירת מחדל כל הכרזה מתפרשת לפי השיטה. פתח הכרזה כדי לדרוס את פרשנותה
-(הסכם מיוחד): טווח נק', אורכי סדרות, והערה חופשית.</p>
-<div id="ovr-list"><span style="color:var(--muted)">הזן מכרז תחילה.</span></div>
 </div>
 
 <button type="button" class="an-go" id="go" disabled>נתח &#9654;</button>

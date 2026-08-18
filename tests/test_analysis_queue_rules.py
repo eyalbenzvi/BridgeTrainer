@@ -16,9 +16,13 @@ FB = (ROOT / "bridge_trainer" / "web" / "bt-firebase.js").read_text(
 PAGE_SRC = (ROOT / "bridge_trainer" / "app" / "webapp.py").read_text(
     encoding="utf-8")
 
+# `system` and `overrides` were removed from the product (the Ben engine
+# defines the meanings) but stay ALLOWED in the rules so cached old clients
+# don't break; the page no longer sends them.
 REQ_REQUIRED = ["dealer", "vul", "my_seat", "my_hand", "auction",
-                "decision_index", "system", "scoring"]
-REQ_OPTIONAL = ["overrides", "narration", "candidates", "seed", "max_deals"]
+                "decision_index", "scoring"]
+REQ_OPTIONAL = ["system", "overrides", "narration", "candidates", "seed",
+                "max_deals"]
 
 
 def _block(name: str) -> str:

@@ -97,25 +97,38 @@ def over_daily_limit(db, uid: str, now: float | None = None) -> bool:
     return n_today > DAILY_LIMIT
 
 
-def process_request(req: dict, narration_available: bool = False) -> tuple:
+def resolve_engine():
+    """The analysis engine: Ben (owner-mandated). The legacy heuristic
+    pipeline stays reachable ONLY via BT_ANALYSIS_ENGINE=legacy — for unit
+    tests and dev machines without the Ben checkout, never production."""
+    import os
+    if os.environ.get("BT_ANALYSIS_ENGINE") == "legacy":
+        return run_analysis
+    from .ben_pipeline import ben_available, run_analysis_ben
+    if not ben_available():
+        raise RuntimeError(
+            "Ben engine not installed (BEN_HOME) — run scripts/setup_ben.sh;"
+            " the analysis engine requires Ben")
+    return run_analysis_ben
+
+
+def process_request(req: dict, narration_available: bool = False,
+                    engine=None) -> tuple:
     """Validate + run one analysis. Returns (summary, html, facts_json).
     Raises on any invalid payload — the caller records status=error."""
-    overrides = {int(k): v for k, v in (req.get("overrides") or {}).items()}
     max_deals = min(int(req.get("max_deals", DEFAULT_DEALS)), MAX_DEALS_CAP)
     areq = AnalysisRequest(
         dealer=str(req["dealer"]), vul=str(req["vul"]),
         my_seat=str(req["my_seat"]), my_hand=str(req["my_hand"]),
         auction=[str(t) for t in req["auction"]],
         decision_index=int(req["decision_index"]),
-        system=str(req.get("system", "two_over_one")),
         scoring=str(req.get("scoring", "IMP")),
         candidates=[str(c) for c in req["candidates"]]
         if req.get("candidates") else None,
-        overrides=overrides,
         seed=int(req.get("seed", 1)),
         max_deals=max(100, max_deals),
     )
-    result = run_analysis(areq)
+    result = (engine or resolve_engine())(areq)
     facts = build_facts(result)
     use_llm = narration_available and req.get("narration") == "llm"
     prose = llm_narrate(facts) if use_llm else narrate_all(facts)
