@@ -88,6 +88,25 @@ def test_prompt_token_estimate(facts):
     assert est["approx_dynamic_tokens"] > 200
 
 
+def test_pdf_export_skips_broken_binaries(tmp_path, facts, monkeypatch):
+    """Regression (publish run 32183305083): on GitHub's runners the first
+    PATH hit was a snap stub that exits nonzero; export must fall through
+    to the next candidate instead of giving up."""
+    from bridge_trainer.analysis import pdf as pdf_mod
+    real = pdf_mod.find_chromiums()
+    if not real:
+        pytest.skip("no chromium available")
+    broken = tmp_path / "chromium-broken"
+    broken.write_text("#!/bin/sh\nexit 1\n")
+    broken.chmod(0o755)
+    monkeypatch.setattr(pdf_mod, "find_chromiums",
+                        lambda: [str(broken)] + real)
+    html_file = tmp_path / "r.html"
+    html_file.write_text(render_report(facts), encoding="utf-8")
+    out = pdf_mod.export_pdf(html_file, tmp_path / "r.pdf")
+    assert out is not None and out.read_bytes()[:5] == b"%PDF-"
+
+
 def test_pdf_export(tmp_path, facts):
     html_doc = render_report(facts)
     html_file = tmp_path / "report.html"
