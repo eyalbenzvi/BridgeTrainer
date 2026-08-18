@@ -1,0 +1,67 @@
+# Continuation-policy parameters for the analysis module (spec 3.4).
+# EVERY numeric knob of the heuristic continuation agents lives here —
+# nothing is hardcoded in continuation.py. Edit to taste; the report names
+# the policy whenever a conclusion depends on it.
+schema_version: 1
+policies:
+  conservative:
+    he: "שמרנית"
+    he_desc: "שותף ויריבים זהירים: מזמינים גבוה, מתחרים מעט, מכפילים רק עם סטאק מובהק"
+    params:
+      # partner raising our side's contract (support points thresholds)
+      raise_invite_pts: 11        # raise one level as an invite
+      raise_game_pts: 14          # drive straight to game
+      invite_accept_pts: 14       # accept partner's invite
+      min_fit_to_raise: 3         # cards in our denom needed to raise
+      # advancer over our takeout double
+      advancer_jump_pts: 10
+      penalty_pass_trumps: 5      # trumps needed to convert X for penalties
+      penalty_pass_trump_hcp: 4
+      nt_bid_pts: 14              # bid NT (with a stopper) instead of a suit
+      pull_high_double_max_hcp: 6 # pull partner's high-level X only this weak
+      pull_high_double_suit_len: 7
+      # enemy competition over our contract
+      compete_min_fit: 9          # combined enemy trumps to compete
+      compete_pts: 19             # combined enemy HCP to compete
+      compete_max_level: 3
+      vul_compete_penalty: 2      # extra HCP needed when competing vulnerable
+      # penalty doubles of a 4+-level contract (the mandated scenario)
+      dbl_min_level: 4
+      dbl_stack_len: 5
+      dbl_stack_hcp: 5            # honor points held in the trump suit
+      dbl_own_pts: 11             # doubler's own HCP floor
+      # our side bidding on over their competition
+      bid_on_fit: 10
+      bid_on_max_level: 4
+      max_actions_per_seat: 2
+  realistic:
+    he: "ריאלית"
+    he_desc: "סטנדרט תחרותי מקובל: הזמנות רגילות, תחרות על חלקיים, הכפלות עונשין שקולות"
+    params:
+      raise_invite_pts: 10
+      raise_game_pts: 13
+      invite_accept_pts: 13
+      min_fit_to_raise: 3
+      advancer_jump_pts: 9
+      penalty_pass_trumps: 5
+      penalty_pass_trump_hcp: 3
+      nt_bid_pts: 13
+      pull_high_double_max_hcp: 7
+      pull_high_double_suit_len: 6
+      compete_min_fit: 8
+      compete_pts: 17
+      compete_max_level: 4
+      vul_compete_penalty: 2
+      dbl_min_level: 4
+      dbl_stack_len: 4
+      dbl_stack_hcp: 4
+      dbl_own_pts: 10
+      bid_on_fit: 9
+      bid_on_max_level: 4
+      max_actions_per_seat: 2
+  omniscient:
+    he: "חסם עליון (רואה קלפים)"
+    he_desc: "כל צד בוחר את החלופה הטובה לו לפי דאבל-דאמי — גבול עליון, לא תחזית"
+    params:
+      mode: dd_optimal
+      max_actions_per_seat: 2

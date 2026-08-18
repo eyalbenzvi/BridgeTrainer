@@ -1,0 +1,31 @@
+# 2/1 Game Force parameter table: inherits SAYC and overrides only where
+# the systems differ. Same schema as sayc.yaml.
+schema_version: 1
+system: two_over_one
+he_name: "2/1 Game Force"
+extends: sayc
+meanings:
+  resp.nt1_forcing:
+    he: "1NT מחייב: 6–12 נק', אין תמיכה מיידית ואין 2/1"
+    constraints:
+      hcp: {core: [6, 12]}
+  resp.new2:
+    he: "2/1: מחייב למשחק — 12+ נק', 4+ קלפים (5+ ב־2♥ על 1♠)"
+    constraints:
+      hcp: {core: [12, 40], margin: [{range: [11, 11], weight: 0.4}]}
+      suits: {$own: {core: [4, 13]}}
+  resp.jumpshift:
+    he: "קפיצה בסדרה חדשה: חלשה (מנע) — סדרה שישייה, 0–6 נק'"
+    constraints:
+      hcp: {core: [0, 6], margin: [{range: [7, 8], weight: 0.3}]}
+      suits: {$own: {core: [6, 13]}}
+  resp.nt2_major:
+    he: "ג'ייקובי 2NT: 13+ נק' עם 4+ קלפי תמיכה, מחייב למשחק"
+    constraints:
+      hcp: {core: [13, 40], margin: [{range: [12, 12], weight: 0.4}]}
+      suits: {$partner: {core: [4, 13]}}
+  reb.opener.same_min:
+    he: "חזרה על הסדרה במינימום: 11–15 נק' (אחרי 2/1 — לא מוסיף כוח)"
+    constraints:
+      hcp: {core: [11, 15], margin: [{range: [16, 17], weight: 0.35}]}
+      suits: {$own: {core: [6, 13], margin: [{range: [5, 5], weight: 0.4}]}}

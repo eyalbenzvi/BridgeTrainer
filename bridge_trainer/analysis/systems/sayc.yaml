@@ -1,0 +1,359 @@
+# SAYC parameter table for the analysis interpreter.
+# Keys are structural meaning keys produced by interpreter.classify_calls;
+# band format (core / margin) is identical to semantics/rules. Suit symbols:
+# $own (suit of this call), $partner (partner's first suit), $enemy (the
+# enemy suit doubled/passed over), $own_first (this seat's first suit).
+schema_version: 1
+system: sayc
+he_name: "SAYC"
+meanings:
+  # ---- openings ---------------------------------------------------------
+  open.pass:
+    he: "פס בפתיחה: פחות מערכי פתיחה (עד 12 נק'; 13–14 בקושי, יד לא נוחה)"
+    constraints:
+      hcp:
+        core: [0, 12]
+        margin: [{range: [13, 14], weight: 0.25}]
+  open.1m:
+    he: "פתיחה {call}: 3+ קלפים בסדרה, 11–21 נק'"
+    constraints:
+      hcp: {core: [11, 21], margin: [{range: [10, 10], weight: 0.3}]}
+      suits: {$own: {core: [3, 13]}}
+      exclusions: [balanced_15_17, balanced_20_21]
+  open.1M:
+    he: "פתיחה {call}: 5+ קלפים בסדרה, 11–21 נק'"
+    constraints:
+      hcp: {core: [11, 21], margin: [{range: [10, 10], weight: 0.3}]}
+      suits: {$own: {core: [5, 13]}}
+      exclusions: [balanced_15_17, balanced_20_21]
+  open.1NT:
+    he: "פתיחה 1NT: יד מאוזנת, 15–17 נק'"
+    constraints:
+      hcp: {core: [15, 17]}
+      suits:
+        S: {core: [2, 5]}
+        H: {core: [2, 5]}
+        D: {core: [2, 6]}
+        C: {core: [2, 6]}
+  open.2C:
+    he: "פתיחה 2♣: יד חזקה מאוד, 22+ נק' או משחק ביד"
+    constraints:
+      hcp: {core: [22, 40], margin: [{range: [19, 21], weight: 0.3}]}
+  open.2NT:
+    he: "פתיחה 2NT: יד מאוזנת, 20–21 נק'"
+    constraints:
+      hcp: {core: [20, 21]}
+      suits:
+        S: {core: [2, 5]}
+        H: {core: [2, 5]}
+        D: {core: [2, 6]}
+        C: {core: [2, 6]}
+  open.weak2:
+    he: "פתיחת מנע {call}: סדרה שישייה טובה, 5–10 נק'"
+    constraints:
+      hcp: {core: [5, 10], margin: [{range: [11, 11], weight: 0.3}]}
+      suits: {$own: {core: [6, 6], margin: [{range: [7, 7], weight: 0.2}]}}
+      exclusions: [suit_quality_$own_3]
+  open.preempt3:
+    he: "פתיחת מנע {call}: סדרה שביעייה, 5–9 נק'"
+    constraints:
+      hcp: {core: [5, 9], margin: [{range: [3, 4], weight: 0.4},
+                                   {range: [10, 10], weight: 0.3}]}
+      suits: {$own: {core: [7, 7], margin: [{range: [6, 6], weight: 0.25},
+                                            {range: [8, 8], weight: 0.3}]}}
+  open.preempt4:
+    he: "פתיחת מנע {call}: סדרה שמינייה, 5–10 נק'"
+    constraints:
+      hcp: {core: [4, 10], margin: [{range: [11, 12], weight: 0.3}]}
+      suits: {$own: {core: [8, 13], margin: [{range: [7, 7], weight: 0.4}]}}
+
+  # ---- informative passes (INV8) ---------------------------------------
+  resp.pass:
+    he: "פס על פתיחת השותף: 0–5 נק'"
+    constraints:
+      hcp: {core: [0, 5], margin: [{range: [6, 6], weight: 0.3}]}
+  pass.resp_over_interference:
+    he: "פס של העונה מעל התערבות: יד חלשה או ללא פעולה נוחה (0–8 נק')"
+    constraints:
+      hcp: {core: [0, 8], margin: [{range: [9, 11], weight: 0.3}]}
+  pass.no_direct_action:
+    he: "פס במושב ישיר: אין פעולה — לא אוברקול, לא דאבל (עד 11 נק' או יד לא מתאימה)"
+    constraints:
+      hcp: {core: [0, 13], margin: [{range: [14, 16], weight: 0.25}]}
+      denials:
+        - {hcp: [8, 16], suit: "$each_unbid_by_enemy", min_len: 5, weight: 0.3}
+      exclusions: [takeout_shape_over_$enemy]
+  pass.no_action_high:
+    he: "פס מעל הכרזה גבוהה: אין פעולה ברורה (המידע מוגבל)"
+    constraints:
+      hcp: {core: [0, 15], margin: [{range: [16, 18], weight: 0.35}]}
+  pass.after_limited:
+    he: "פס לאחר שהיד כבר הוגבלה: ללא מידע חדש מהותי"
+    constraints: {}
+
+  # ---- doubles ----------------------------------------------------------
+  dbl.takeout:
+    he: "דאבל נגד: ערכי פתיחה, קוצר בסדרת היריב ותמיכה בשאר הסדרות"
+    constraints:
+      hcp: {core: [12, 40], margin: [{range: [10, 11], weight: 0.35}]}
+      suits: {$enemy: {core: [0, 2], margin: [{range: [3, 3], weight: 0.3}]}}
+  dbl.negative:
+    he: "דאבל שלילי: 6+ נק', בדרך כלל 4 קלפים במייג'ור שלא הוכרז"
+    constraints:
+      hcp: {core: [6, 40]}
+      suits: {$enemy: {core: [0, 3], margin: [{range: [4, 4], weight: 0.3}]}}
+  dbl.penalty_high:
+    he: "דאבל עונשין על חוזה גבוה: ערכי הגנה, לרוב כוח בשליט"
+    constraints:
+      hcp: {core: [10, 40], margin: [{range: [7, 9], weight: 0.4}]}
+      suits: {$enemy: {core: [2, 13], margin: [{range: [0, 1], weight: 0.4}]}}
+  dbl.other:
+    he: "דאבל (הקשר לא סטנדרטי): מבטא ערכים"
+    constraints:
+      hcp: {core: [8, 40], margin: [{range: [6, 7], weight: 0.4}]}
+  rdbl.strength:
+    he: "רידאבל: 10+ נק', רצון להעניש"
+    constraints:
+      hcp: {core: [10, 40]}
+
+  # ---- responses to 1NT --------------------------------------------------
+  resp.nt.stayman:
+    he: "סטיימן 2♣: שאלה למייג'ור רביעייה, בדרך כלל 8+ נק'"
+    constraints:
+      hcp: {core: [8, 40], margin: [{range: [0, 7], weight: 0.2}]}
+  resp.nt.transfer:
+    he: "העברה: 5+ קלפים בסדרת היעד"
+    constraints:
+      suits: {$own: {core: [5, 13]}}
+  resp.nt.inv:
+    he: "2NT מזמין: 8–9 נק' מאוזנות"
+    constraints:
+      hcp: {core: [8, 9]}
+  resp.nt.game:
+    he: "3NT: 10–15 נק', ללא מייג'ור חמישייה"
+    constraints:
+      hcp: {core: [10, 15]}
+
+  # ---- responses to suit openings ----------------------------------------
+  resp.raise_simple:
+    he: "תמיכה פשוטה: 6–10 נק' עם התאמה (3+ קלפים)"
+    constraints:
+      hcp: {core: [6, 10], margin: [{range: [4, 5], weight: 0.3}]}
+      suits: {$own: {core: [3, 13]}}
+  resp.raise_invite:
+    he: "תמיכה מזמינה (קפיצה): 10–12 נק' עם התאמה"
+    constraints:
+      hcp: {core: [10, 12], margin: [{range: [9, 9], weight: 0.3}]}
+      suits: {$own: {core: [3, 13]}}
+  resp.raise_game:
+    he: "תמיכה למשחק מלא: יד חלוקתית מנעית (5+ קלפי שליט, עד 9 נק')"
+    constraints:
+      hcp: {core: [0, 9], margin: [{range: [10, 13], weight: 0.3}]}
+      suits: {$own: {core: [5, 13], margin: [{range: [4, 4], weight: 0.4}]}}
+  resp.nt1:
+    he: "1NT: 6–10 נק'"
+    constraints:
+      hcp: {core: [6, 10]}
+  resp.nt1_forcing:
+    he: "1NT: 6–10 נק' (SAYC — לא מחייב)"
+    constraints:
+      hcp: {core: [6, 10]}
+  resp.nt2_major:
+    he: "2NT: 13–15 נק' מאוזנות"
+    constraints:
+      hcp: {core: [13, 15]}
+      exclusions: [any_suit_6_plus]
+  resp.nt2_minor:
+    he: "2NT: 13–15 נק' מאוזנות"
+    constraints:
+      hcp: {core: [13, 15]}
+      exclusions: [any_suit_6_plus]
+  resp.nt3_major:
+    he: "3NT: 16–18 נק' מאוזנות"
+    constraints:
+      hcp: {core: [16, 18]}
+  resp.nt3_minor:
+    he: "3NT: 16–18 נק' מאוזנות"
+    constraints:
+      hcp: {core: [16, 18]}
+  resp.new1:
+    he: "סדרה חדשה בגובה 1: 6+ נק', 4+ קלפים, מחייב לסיבוב"
+    constraints:
+      hcp: {core: [6, 40]}
+      suits: {$own: {core: [4, 13]}}
+  resp.new2:
+    he: "סדרה חדשה בגובה 2: 10+ נק' (SAYC), 4+ קלפים"
+    constraints:
+      hcp: {core: [10, 40]}
+      suits: {$own: {core: [4, 13]}}
+  resp.jumpshift:
+    he: "קפיצה בסדרה חדשה: יד חזקה מאוד, 17+ נק' (SAYC)"
+    constraints:
+      hcp: {core: [17, 40], margin: [{range: [16, 16], weight: 0.4}]}
+      suits: {$own: {core: [5, 13]}}
+
+  # ---- responses to preempts / 2C ----------------------------------------
+  resp.preempt.raise:
+    he: "תמיכה במנע: הרחבת המנע או ציפייה לביצוע — יד עם התאמה"
+    constraints:
+      suits: {$own: {core: [2, 13]}}
+  resp.preempt.2nt_ask:
+    he: "2NT מעל מנע: בירור, 14+ נק'"
+    constraints:
+      hcp: {core: [14, 40]}
+  resp.2c.waiting:
+    he: "2♦ ממתין: כל יד שאינה חיובית עם סדרה עצמאית"
+    constraints: {}
+  resp.2c.positive:
+    he: "תגובה חיובית ל־2♣: 8+ נק' וסדרה טובה"
+    constraints:
+      hcp: {core: [8, 40]}
+
+  # ---- opener rebids ------------------------------------------------------
+  reb.opener.same_min:
+    he: "חזרה על הסדרה במינימום: 6+ קלפים, 11–15 נק'"
+    constraints:
+      hcp: {core: [11, 15], margin: [{range: [16, 16], weight: 0.3}]}
+      suits: {$own: {core: [6, 13], margin: [{range: [5, 5], weight: 0.3}]}}
+  reb.opener.same_jump:
+    he: "קפיצה בסדרת הפתיחה: 6+ קלפים, 16–18 נק'"
+    constraints:
+      hcp: {core: [16, 18]}
+      suits: {$own: {core: [6, 13]}}
+  reb.opener.raise:
+    he: "תמיכה בסדרת השותף: 11–15 נק', 4 קלפים (או 3 טובים)"
+    constraints:
+      hcp: {core: [11, 15]}
+      suits: {$partner: {core: [4, 13], margin: [{range: [3, 3], weight: 0.3}]}}
+  reb.opener.raise_jump:
+    he: "תמיכה בקפיצה: 16–18 נק' עם התאמה"
+    constraints:
+      hcp: {core: [16, 18]}
+      suits: {$partner: {core: [4, 13]}}
+  reb.opener.nt_min:
+    he: "NT במינימום: 12–14 נק' מאוזנות"
+    constraints:
+      hcp: {core: [12, 14]}
+      exclusions: [any_suit_6_plus]
+  reb.opener.nt_jump:
+    he: "NT בקפיצה: 18–19 נק' מאוזנות"
+    constraints:
+      hcp: {core: [18, 19]}
+  reb.opener.new:
+    he: "סדרה שנייה: 11–17 נק', 4+ קלפים"
+    constraints:
+      hcp: {core: [11, 17]}
+      suits: {$own: {core: [4, 13]}}
+  reb.opener.reverse:
+    he: "ריברס: 16+ נק', סדרה ראשונה ארוכה מהשנייה"
+    constraints:
+      hcp: {core: [16, 21], margin: [{range: [15, 15], weight: 0.4}]}
+      suits:
+        $own: {core: [4, 13]}
+        $own_first: {core: [5, 13]}
+  reb.opener.jumpshift:
+    he: "קפיצה בסדרה חדשה: 19+ נק', מחייב למשחק"
+    constraints:
+      hcp: {core: [19, 40], margin: [{range: [18, 18], weight: 0.4}]}
+      suits: {$own: {core: [4, 13]}}
+
+  # ---- responder rebids ---------------------------------------------------
+  reb.responder.same:
+    he: "חזרה על סדרת העונה: 6+ קלפים, יד מוגבלת"
+    constraints:
+      hcp: {core: [6, 10], margin: [{range: [11, 12], weight: 0.4}]}
+      suits: {$own: {core: [6, 13], margin: [{range: [5, 5], weight: 0.4}]}}
+  reb.responder.pref:
+    he: "העדפה לסדרת הפותח: 6–10 נק', 2–3 קלפים"
+    constraints:
+      hcp: {core: [6, 10], margin: [{range: [11, 12], weight: 0.35}]}
+      suits: {$partner: {core: [2, 4]}}
+  reb.responder.nt:
+    he: "NT של העונה: יד מאוזנת בטווח ההכרזה הקודמת"
+    constraints: {}
+  reb.responder.new:
+    he: "סדרה חדשה של העונה: מחייב, 11+ נק'"
+    constraints:
+      hcp: {core: [11, 40], margin: [{range: [10, 10], weight: 0.4}]}
+      suits: {$own: {core: [4, 13]}}
+
+  # ---- overcalls ----------------------------------------------------------
+  ovc.simple1:
+    he: "אוברקול בגובה 1: 8–16 נק', סדרה חמישייה+"
+    constraints:
+      hcp:
+        core: [8, 16]
+        margin: [{range: [7, 7], weight: 0.5}, {range: [17, 17], weight: 0.4}]
+      suits: {$own: {core: [5, 13]}}
+      exclusions: [takeout_shape_over_$enemy, strong_jump_shift_values]
+  ovc.simple2:
+    he: "אוברקול בגובה 2: 10–17 נק', סדרה חמישייה+ טובה"
+    constraints:
+      hcp: {core: [10, 17], margin: [{range: [9, 9], weight: 0.35}]}
+      suits: {$own: {core: [5, 13]}}
+      exclusions: [takeout_shape_over_$enemy]
+  ovc.jump_weak:
+    he: "אוברקול בקפיצה: מנע — סדרה שישייה, 5–10 נק'"
+    constraints:
+      hcp: {core: [5, 10], margin: [{range: [11, 12], weight: 0.3}]}
+      suits: {$own: {core: [6, 13]}}
+  ovc.nt1:
+    he: "אוברקול 1NT: 15–18 נק' מאוזנות עם עוצר"
+    constraints:
+      hcp: {core: [15, 18]}
+      suits: {$enemy: {core: [2, 6]}}
+  ovc.cue:
+    he: "קיו־ביד בסדרת היריב: יד דו־סדרתית/חזקה, קוצר בסדרת היריב"
+    constraints:
+      hcp: {core: [10, 40], margin: [{range: [8, 9], weight: 0.4}]}
+      suits: {$enemy: {core: [0, 3]}}
+  ovc.rebid_suit:
+    he: "חזרה על סדרת האוברקול: 6+ קלפים"
+    constraints:
+      suits: {$own: {core: [6, 13], margin: [{range: [5, 5], weight: 0.4}]}}
+
+  # ---- advancer -----------------------------------------------------------
+  adv.x_min:
+    he: "תגובה מינימלית לדאבל: 0–8 נק', הסדרה הזולה ביותר עם אורך"
+    constraints:
+      hcp: {core: [0, 8], margin: [{range: [9, 10], weight: 0.35}]}
+      suits: {$own: {core: [3, 13]}}
+  adv.x_jump:
+    he: "תגובה בקפיצה לדאבל: 9–11 נק', 4+ קלפים"
+    constraints:
+      hcp: {core: [9, 11], margin: [{range: [12, 12], weight: 0.4}]}
+      suits: {$own: {core: [4, 13]}}
+  adv.x_nt:
+    he: "NT בתגובה לדאבל: 6–10 נק' עם עוצר בסדרת היריב"
+    constraints:
+      hcp: {core: [6, 10]}
+      suits: {$enemy: {core: [2, 6]}}
+  adv.x_strong:
+    he: "קיו־ביד בתגובה לדאבל: 12+ נק', מחייב"
+    constraints:
+      hcp: {core: [12, 40]}
+  adv.raise:
+    he: "תמיכה באוברקול: 6–10 נק', 3+ קלפים"
+    constraints:
+      hcp: {core: [6, 10], margin: [{range: [4, 5], weight: 0.4}]}
+      suits: {$partner: {core: [3, 13]}}
+  adv.raise_jump:
+    he: "תמיכה בקפיצה: מנעית — 4+ קלפים, יד חלשה־בינונית"
+    constraints:
+      hcp: {core: [3, 9], margin: [{range: [10, 11], weight: 0.35}]}
+      suits: {$partner: {core: [4, 13]}}
+  adv.cue:
+    he: "קיו־ביד: תמיכה טובה+ עם 10+ נק'"
+    constraints:
+      hcp: {core: [10, 40]}
+      suits: {$partner: {core: [3, 13]}}
+  adv.new:
+    he: "סדרה חדשה של המסייע: 8–15 נק', 5+ קלפים"
+    constraints:
+      hcp: {core: [8, 15], margin: [{range: [6, 7], weight: 0.35}]}
+      suits: {$own: {core: [5, 13]}}
+  adv.nt:
+    he: "NT של המסייע: 8–12 נק' עם עוצר"
+    constraints:
+      hcp: {core: [8, 12]}
+      suits: {$enemy: {core: [2, 6]}}
