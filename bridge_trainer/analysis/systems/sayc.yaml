@@ -201,6 +201,10 @@ meanings:
     he: "2NT מעל מנע: בירור, 14+ נק'"
     constraints:
       hcp: {core: [14, 40]}
+  resp.preempt.pass:
+    he: "פס על מנע השותף: אין עניין במשחק מלא (עד 13–14 נק')"
+    constraints:
+      hcp: {core: [0, 13], margin: [{range: [14, 15], weight: 0.4}]}
   resp.2c.waiting:
     he: "2♦ ממתין: כל יד שאינה חיובית עם סדרה עצמאית"
     constraints: {}
@@ -301,6 +305,11 @@ meanings:
     he: "אוברקול 1NT: 15–18 נק' מאוזנות עם עוצר"
     constraints:
       hcp: {core: [15, 18]}
+      suits: {$enemy: {core: [2, 6]}}
+  ovc.nt_other:
+    he: "NT ישיר מעל התערבות/מנע: יד מאוזנת חזקה עם עוצר בסדרת היריב"
+    constraints:
+      hcp: {core: [15, 22], margin: [{range: [14, 14], weight: 0.4}]}
       suits: {$enemy: {core: [2, 6]}}
   ovc.cue:
     he: "קיו־ביד בסדרת היריב: יד דו־סדרתית/חזקה, קוצר בסדרת היריב"

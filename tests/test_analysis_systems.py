@@ -71,6 +71,24 @@ def test_passes_are_informative():
     assert ks[-1] == "pass.no_action_high"
 
 
+def test_pass_of_partner_preempt_is_not_0_to_5():
+    assert keys("N", ["2H", "P", "P"])[-1] == "resp.preempt.pass"
+    assert keys("N", ["3H", "3NT", "P"])[-1] == "resp.preempt.pass"
+    ia = _profile(["2H", "P", "P"], my_seat="W", dealer="N")
+    sc = ia.profile.seats["S"]
+    assert sc.hcp_weights[12] == 1.0     # 12 HCP may still pass a weak two
+    assert sc.hcp_weights[17] == 0.0     # but not a strong hand
+
+
+def test_direct_nt_over_preempt_has_real_meaning():
+    ms = classify_calls(Auction.from_tokens("N", ["3H", "3NT"]))
+    assert ms[-1].key == "ovc.nt_other"
+    ia = _profile(["3H", "3NT"], my_seat="W", dealer="N")
+    sc = ia.profile.seats["E"]
+    assert sc.hcp_weights[13] == 0.0
+    assert sc.hcp_weights[16] == 1.0
+
+
 def test_penalty_double_at_game_level():
     assert keys("N", ["4S", "X"])[-1] == "dbl.penalty_high"
 

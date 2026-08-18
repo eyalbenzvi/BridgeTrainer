@@ -224,8 +224,8 @@ def classify_calls(auction: Auction) -> list[CallMeaning]:
 
         key = ""
         if tok == "P":
-            key = _classify_pass(seat, opener, my_side_opened, me, pard,
-                                 level, last_bid_seat, params)
+            key = _classify_pass(seat, opener, opening_token, my_side_opened,
+                                 me, pard, level, last_bid_seat, params)
         elif tok == "X":
             key = _classify_double(seat, opener, my_side_opened, me, pard,
                                    level, denom, last_bid_seat, params)
@@ -259,16 +259,18 @@ def classify_calls(auction: Auction) -> list[CallMeaning]:
     return out
 
 
-def _classify_pass(seat, opener, my_side_opened, me, pard, level,
-                   last_bid_seat, params) -> str:
+def _classify_pass(seat, opener, opening_token, my_side_opened, me, pard,
+                   level, last_bid_seat, params) -> str:
     if opener is None:
         return "open.pass"
     if me.acted:
         return "pass.after_limited"
     if my_side_opened:
         if partner_of(seat) == opener and not me.acted:
-            # responder's pass; interference in between changes little for
-            # v1 — a free pass just denies the direct actions.
+            # a pass of partner's PREEMPT is "no game interest", not the
+            # 0-5 a pass of a one-level opening shows
+            if int(opening_token[0]) >= 2 and opening_token != "2C":
+                return "resp.preempt.pass"
             if level and last_bid_seat and \
                     side_of(last_bid_seat) != side_of(seat):
                 return "pass.resp_over_interference"

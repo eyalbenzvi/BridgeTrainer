@@ -128,6 +128,11 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
   <label>סוג תחרות:</label>
   <select id="scoring"><option value="IMP">מפגשי (IMP)</option>
     <option value="MP">ניקוד מקסימלי (MP)</option></select>
+  <label>ניסוח הדוח:</label>
+  <select id="narration">
+    <option value="template">תבניות — חינם, ללא LLM</option>
+    <option value="llm">LLM (קריאה אחת, זול; נופל לתבניות אם אין מפתח)</option>
+  </select>
 </div>
 </div>
 
@@ -468,6 +473,7 @@ document.getElementById("go").onclick = async () => {
     scoring: document.getElementById("scoring").value,
     decision_indices: [...decisionPoints].sort((a, b) => a - b),
     overrides,
+    narration: document.getElementById("narration").value,
   };
   try {
     const r = await fetch("/api/analyze", {
