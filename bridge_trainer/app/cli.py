@@ -52,6 +52,12 @@ def cmd_analyze(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_analyze_worker(args: argparse.Namespace) -> int:
+    from ..analysis.worker import main as worker_main
+    return worker_main(key_path=args.key, max_requests=args.max,
+                       run_id=args.run_id)
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     problem = load_problem(args.problem)
     _print_problem(problem)
@@ -451,6 +457,18 @@ def main(argv: list[str] | None = None) -> int:
     an_p.add_argument("--reports-dir", default="reports/analysis")
     an_p.add_argument("--no-browser", action="store_true")
     an_p.set_defaults(func=cmd_analyze)
+
+    aw_p = sub.add_parser(
+        "analyze-worker",
+        help="process pending analysis requests from Firestore (runs in "
+             "the analyze-requests GitHub Actions workflow)")
+    aw_p.add_argument("--key", default=None,
+                      help="service-account JSON (or set "
+                           "GOOGLE_APPLICATION_CREDENTIALS)")
+    aw_p.add_argument("--max", type=int, default=6,
+                      help="max requests to process in one pass")
+    aw_p.add_argument("--run-id", default="manual")
+    aw_p.set_defaults(func=cmd_analyze_worker)
 
     pub_p = sub.add_parser(
         "publish", help="build the static quiz site for the whole bank")

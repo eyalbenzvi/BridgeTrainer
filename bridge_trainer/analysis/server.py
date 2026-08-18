@@ -103,6 +103,13 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, analyze_page().encode(),
                        "text/html; charset=utf-8")
             return
+        if self.path == "/assets/bt-analyze-ui.js":
+            from importlib import resources
+            src = (resources.files("bridge_trainer") / "web"
+                   / "bt-analyze-ui.js").read_text(encoding="utf-8")
+            self._send(200, src.encode(),
+                       "text/javascript; charset=utf-8")
+            return
         if self.path.startswith("/reports/"):
             name = Path(self.path[len("/reports/"):]).name  # no traversal
             f = (self.reports_dir / name)

@@ -87,5 +87,66 @@ service cloud.firestore {
         allow update: if owner(uid) && validUpdate();
       }
     }
+
+    // ---- bidding-analysis queue --------------------------------------
+    // A signed-in user files an analysis REQUEST (status "pending"); the
+    // GitHub Actions worker (Admin SDK, bypasses rules) claims it, runs the
+    // simulation and writes the result. Clients may only create a strictly
+    // shaped pending request with their own uid, read/list/delete their own
+    // requests, and never update one — status transitions are the worker's
+    // alone. `list` is safe because a query is admitted only if EVERY doc it
+    // could return satisfies the rule, so clients must filter uid == theirs.
+    function validAnalysisReq() {
+      let d = request.resource.data;
+      let r = request.resource.data.req;
+      return d.keys().hasOnly(['uid', 'status', 'createdAt', 'req'])
+        && d.uid == request.auth.uid
+        && d.status == 'pending'
+        && d.req is map
+        && r.keys().hasAll(['dealer', 'vul', 'my_seat', 'my_hand',
+                            'auction', 'decision_index', 'system',
+                            'scoring'])
+        && r.keys().hasOnly(['dealer', 'vul', 'my_seat', 'my_hand',
+                             'auction', 'decision_index', 'system',
+                             'scoring', 'overrides', 'narration',
+                             'candidates', 'seed', 'max_deals'])
+        && r.dealer in ['N', 'E', 'S', 'W']
+        && r.my_seat in ['N', 'E', 'S', 'W']
+        && r.vul in ['None', 'NS', 'EW', 'Both']
+        && r.system in ['sayc', 'two_over_one']
+        && r.scoring in ['IMP', 'MP']
+        && r.my_hand is string && r.my_hand.size() <= 20
+        && r.auction is list && r.auction.size() <= 40
+        && r.decision_index is int
+        && r.decision_index >= 0 && r.decision_index < 40
+        && (!('narration' in r) || r.narration in ['template', 'llm'])
+        && (!('overrides' in r)
+            || (r.overrides is map && r.overrides.size() <= 40))
+        && (!('candidates' in r)
+            || (r.candidates is list && r.candidates.size() <= 8))
+        && (!('max_deals' in r)
+            || (r.max_deals is int && r.max_deals <= 2000));
+    }
+
+    match /analysis_requests/{id} {
+      allow get, list: if request.auth != null
+        && resource.data.uid == request.auth.uid;
+      allow create: if request.auth != null && validAnalysisReq();
+      allow delete: if request.auth != null
+        && resource.data.uid == request.auth.uid;
+      allow update: if false;
+    }
+
+    // The finished report (HTML + facts JSON), written by the worker only.
+    // Single-doc reads by the owner; no listing (reports are ~60-100 KB
+    // each — a list would burn bandwidth and reads for nothing).
+    match /analysis_reports/{id} {
+      allow get: if request.auth != null
+        && resource.data.uid == request.auth.uid;
+      allow list: if false;
+      allow delete: if request.auth != null
+        && resource.data.uid == request.auth.uid;
+      allow create, update: if false;
+    }
   }
 }

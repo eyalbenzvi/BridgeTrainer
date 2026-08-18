@@ -1497,6 +1497,7 @@ function ensureVisible(el, block) {
 const HE = {
   brand: "מאמן הברידג'",
   home: "בית", practice: "תרגול", progress: "התקדמות", account: "חשבון",
+  analyze: "ניתוח יד",
   skip: "דלג לתוכן", mainNav: "ניווט ראשי", settings: "הגדרות",
   theme: "ערכת נושא", themeSystem: "מערכת", themeLight: "בהיר",
   themeDark: "כהה", textSize: "גודל טקסט", sizeS: "רגיל", sizeL: "גדול",
@@ -2352,9 +2353,14 @@ const ICO = {
     ' aria-hidden="true"><circle cx="12" cy="12" r="3.2"/>' +
     '<path d="M12 2.8v3M12 18.2v3M2.8 12h3M18.2 12h3M5.5 5.5l2.1 2.1' +
     'M16.4 16.4l2.1 2.1M18.5 5.5l-2.1 2.1M7.6 16.4l-2.1 2.1"/></svg>',
+  scope: '<svg viewBox="0 0 24 24" width="22" height="22" fill="none"' +
+    ' stroke="currentColor" stroke-width="2" stroke-linecap="round"' +
+    ' aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.2"/>' +
+    '<path d="M15.2 15.2 21 21M8 10.5h5M10.5 8v5"/></svg>',
 };
 const NAV_ITEMS = [
   {id: "practice", href: "index.html", ico: ICO.spade, label: HE.home},
+  {id: "analyze", href: "analyze.html", ico: ICO.scope, label: HE.analyze},
   {id: "progress", href: "dashboard.html", ico: ICO.chart, label: HE.progress},
 ];
 function initChrome() {
@@ -5610,7 +5616,338 @@ def _history_html() -> str:
 
 
 # Static ES-module assets copied verbatim next to the generated pages.
-_ASSET_FILES = ("firebase-config.js", "bt-logic.js", "bt-firebase.js")
+# ---------------------------------------------------------------------------
+# analyze.html — user-entered deal + real auction -> expert analysis report.
+# The INPUT components (card picker, bidding box, legality, overrides,
+# decision points) are the shared asset web/bt-analyze-ui.js, identical to
+# the local `trainer analyze` page. This page's own script only wires the
+# Firestore queue: submit request docs, watch them live, open finished
+# reports. Compute runs in GitHub Actions (analyze-requests.yml) — the page
+# says so and updates by itself via onSnapshot when the worker finishes.
+
+_ANALYZE_CSS = """
+.suitrow { display:flex; align-items:center; gap:4px; margin:4px 0;
+  direction:ltr; }
+.suitrow .glyph { width:22px; font-size:18px; text-align:center; }
+.suitrow .cnt { width:56px; direction:rtl; font-size:11px;
+  color:var(--muted); text-align:right; }
+.cardbtn { width:calc((100% - 15*4px - 22px - 56px)/13); min-width:26px;
+  height:40px; border-radius:6px; font-weight:700; font-size:14px;
+  padding:0; border:1px solid var(--line); background:var(--card);
+  color:var(--fg); }
+.cardbtn.sel { background:var(--accent); color:var(--on-accent);
+  border-color:var(--accent); }
+.cardbtn:disabled { opacity:.35; }
+#handsum { font-weight:600; }
+#handsum.bad { color:var(--loss); }
+.an-row { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center;
+  margin:6px 0; }
+.an-row select, .an-row input { font:inherit; padding:4px 8px;
+  border:1px solid var(--line); border-radius:8px; background:var(--card);
+  color:var(--fg); }
+.an-row input[type=number] { width:64px; }
+.bbox { direction:ltr; display:grid; grid-template-columns:repeat(5,1fr);
+  gap:4px; max-width:330px; }
+.bbox button, .bcalls button { height:36px; font-weight:700; padding:0;
+  border:1px solid var(--line); border-radius:8px; background:var(--card);
+  color:var(--fg); cursor:pointer; }
+.bbox button:disabled, .bcalls button:disabled { opacity:.35;
+  cursor:default; }
+.bcalls { display:flex; gap:6px; margin-top:8px; max-width:330px;
+  direction:ltr; }
+.bcalls button { flex:1; }
+.auction-strip { direction:ltr; display:grid;
+  grid-template-columns:repeat(4,1fr); gap:2px; margin:10px 0;
+  max-width:420px; }
+.auction-strip .hdr { text-align:center; font-size:12px;
+  color:var(--muted); }
+.auction-strip .cell { text-align:center; border:1px solid var(--line);
+  border-radius:6px; padding:2px 0; min-height:26px;
+  background:var(--card); }
+.auction-strip .cell.hero { background:var(--accent-tint); }
+.auction-strip .cell.dp { outline:2px solid var(--accent);
+  font-weight:700; }
+.badge { display:inline-block; border-radius:999px; padding:1px 10px;
+  font-size:12px; font-weight:600; background:var(--warn-bg);
+  color:var(--warn-fg); }
+.ovr { border:1px dashed var(--line); border-radius:8px; padding:8px;
+  margin:6px 0; }
+.ovr summary { cursor:pointer; }
+.ovr input { max-width:70px; }
+.ovr input[type=text] { max-width:none; }
+.dp-list label { display:inline-flex; align-items:center; gap:4px;
+  border:1px solid var(--line); border-radius:8px; padding:4px 10px;
+  margin:3px; cursor:pointer; }
+.dp-list input:checked + span { font-weight:700; color:var(--accent); }
+.note { background:var(--warn-bg); color:var(--warn-fg);
+  border:1px solid var(--warn-line); border-radius:8px; padding:6px 10px;
+  font-size:13px; margin:6px 0; }
+button.an-go { display:block; margin:14px auto; background:var(--accent);
+  color:var(--on-accent); border:none; border-radius:10px; font:inherit;
+  font-weight:700; padding:10px 26px; font-size:16px; cursor:pointer; }
+button.an-go:disabled { opacity:.4; cursor:default; }
+.an-status { color:var(--on-felt-muted); text-align:center;
+  min-height:20px; }
+.an-list { list-style:none; margin:0; padding:0; }
+.an-list li { border-bottom:1px solid var(--line); padding:8px 2px;
+  display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
+.an-list .chip { border-radius:999px; padding:1px 10px; font-size:12px;
+  font-weight:600; }
+.chip.pending { background:var(--warn-bg); color:var(--warn-fg); }
+.chip.running { background:var(--accent-tint); color:var(--accent); }
+.chip.done { background:var(--nonvul); color:var(--on-nonvul); }
+.chip.error { background:var(--loss); color:var(--on-loss); }
+.an-list .meta2 { font-size:12px; color:var(--muted); flex-basis:100%; }
+.an-list button { font:inherit; font-size:13px; border-radius:8px;
+  border:1px solid var(--line); background:var(--card); color:var(--fg);
+  padding:2px 10px; cursor:pointer; }
+iframe.an-report { width:100%; height:78vh; border:1px solid var(--line);
+  border-radius:10px; background:#fff; }
+"""
+
+_ANALYZE_JS = """
+"use strict";
+const UI = window.BTAnalyzeUI;
+const $ = (id) => document.getElementById(id);
+let UNSUB = null, ROWS = [];
+
+function refreshGo() {
+  $("go").disabled = !UI.ready();
+}
+
+function init() {
+  UI.init({onChange: refreshGo});
+  $("go").onclick = submit;
+  if (UNSUB) UNSUB();
+  UNSUB = window.BT.watchAnalyses(renderList);
+  refreshGo();
+}
+
+async function submit() {
+  const st = $("an-status");
+  $("go").disabled = true;
+  const vulSel = $("vul").value;
+  const us = "NS".includes(UI.heroSeat()) ? "NS" : "EW";
+  const vul = {none: "None", both: "Both",
+               us: us, them: us === "NS" ? "EW" : "NS"}[vulSel];
+  try {
+    for (const idx of UI.decisionPoints()) {
+      const req = {
+        dealer: UI.dealer(), vul: vul, my_seat: UI.heroSeat(),
+        my_hand: UI.handPBN(), auction: UI.auction(),
+        decision_index: idx,
+        system: $("system").value, scoring: $("scoring").value,
+        overrides: UI.overrides(), narration: "template",
+      };
+      await window.BT.submitAnalysis(req);
+    }
+    st.textContent = "הבקשה נשלחה! החישוב רץ בענן — בדרך כלל 5-10 " +
+      "דקות; הרשימה למטה תתעדכן לבד כשהדוח מוכן.";
+    $("queue-card").scrollIntoView({behavior: "smooth"});
+  } catch (e) {
+    console.error(e);
+    st.textContent = "השליחה נכשלה: " + (e.message || e);
+  }
+  refreshGo();
+}
+
+const STATUS_HE = {pending: "ממתין בתור", running: "מחשב...",
+                   done: "מוכן", error: "שגיאה"};
+
+function rowMeta(r) {
+  const q = r.req || {};
+  const when = r.createdAt && r.createdAt.seconds
+    ? new Date(r.createdAt.seconds * 1000).toLocaleString("he-IL") : "";
+  const call = (q.auction || [])[q.decision_index] || "?";
+  return {when, call, hand: q.my_hand || ""};
+}
+
+function renderList(rows) {
+  ROWS = rows;
+  const ul = $("an-list");
+  if (!rows.length) {
+    ul.innerHTML = '<li><span class="meta2">אין עדיין ניתוחים. ' +
+      'מלא את הטופס למעלה ולחץ "נתח".</span></li>';
+    return;
+  }
+  ul.innerHTML = "";
+  for (const r of rows) {
+    const li = document.createElement("li");
+    const m = rowMeta(r);
+    let extra = "";
+    if (r.status === "done" && r.summary) {
+      extra = 'המלצה: <b dir="ltr">' + UI.tokHtml(r.summary.recommended) +
+        "</b> (" + (r.summary.n_deals || "?") + " חלוקות)";
+    } else if (r.status === "error") {
+      extra = '<span class="meta2">' + (r.error || "") + "</span>";
+    }
+    li.innerHTML =
+      '<span class="chip ' + r.status + '">' +
+      (STATUS_HE[r.status] || r.status) + "</span>" +
+      '<span dir="ltr">' + UI.tokHtml(m.call) + "</span>" +
+      "<span>" + extra + "</span>" +
+      (r.status === "done"
+        ? '<button data-open="' + r.id + '">פתח דוח</button>' : "") +
+      '<button data-del="' + r.id + '">מחק</button>' +
+      '<span class="meta2" dir="ltr">' + m.hand + " · " + m.when + "</span>";
+    ul.appendChild(li);
+  }
+  ul.querySelectorAll("button[data-open]").forEach((b) =>
+    (b.onclick = () => openReport(b.dataset.open)));
+  ul.querySelectorAll("button[data-del]").forEach((b) =>
+    (b.onclick = async () => {
+      if (!confirm("למחוק את הניתוח?")) return;
+      try { await window.BT.deleteAnalysis(b.dataset.del); }
+      catch (e) { alert("מחיקה נכשלה: " + e.message); }
+    }));
+}
+
+async function openReport(id) {
+  const card = $("viewer-card");
+  card.hidden = false;
+  $("an-frame").srcdoc =
+    "<p style='font-family:sans-serif'>טוען את הדוח...</p>";
+  card.scrollIntoView({behavior: "smooth"});
+  try {
+    const rep = await window.BT.getAnalysisReport(id);
+    if (!rep || !rep.html) throw new Error("הדוח לא נמצא");
+    $("an-frame").srcdoc = rep.html;
+    $("an-open-print").onclick = () => {
+      const w = window.open("", "_blank");
+      w.document.write(rep.html);
+      w.document.close();
+    };
+  } catch (e) {
+    $("an-frame").srcdoc = "<p>שגיאה בטעינת הדוח: " +
+      (e.message || e) + "</p>";
+  }
+}
+
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
+"""
+
+_ANALYZE_CSS_HREF = f"analyze.css?v={_asset_ver(_ANALYZE_CSS)}"
+_ANALYZE_SRC = f"analyze.js?v={_asset_ver(_ANALYZE_JS)}"
+
+
+def _analyze_ui_src() -> str:
+    """Version the shared input-components asset by content, like the other
+    assets, so a change ships past the gh-pages 10-minute cache."""
+    src = (resources.files("bridge_trainer") / "web"
+           / "bt-analyze-ui.js").read_text(encoding="utf-8")
+    return f"bt-analyze-ui.js?v={_asset_ver(src)}"
+
+
+def _analyze_html() -> str:
+    return f"""<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{_theme_head_script()}
+<title>ניתוח הכרזה</title>
+<link rel="stylesheet" href="{_CSS_HREF}">
+<link rel="stylesheet" href="{_ANALYZE_CSS_HREF}">
+{_head_preloads()}
+<script type="module" src="bt-firebase.js"></script></head>
+<body data-nav="analyze">
+<main id="main" tabindex="-1">
+<h1>ניתוח הכרזה מיד אמיתית</h1>
+<div class="card">
+<p style="margin:0;font-size:13.5px">הזן יד ומכרז מהמשחק שלך וקבל דוח
+ניתוח מלא: סימולציית חלוקות מותנית במכרז, פתרון דאבל-דאמי, השוואת כל
+הפעולות בנקודת ההחלטה, חלוקות מייצגות ומסקנה מנומקת. החישוב רץ בענן
+(GitHub Actions) — הדוח מופיע כאן, בדרך כלל בתוך 5–10 דקות.</p>
+</div>
+
+<div class="card">
+<h2>1. היד שלך <span id="handsum">(0/13)</span></h2>
+<div id="picker"></div>
+<div class="an-row">
+  <label>הזנה מהירה (PBN):</label>
+  <input type="text" id="quick" dir="ltr" size="22"
+         placeholder="AQ2.KJ3.KQ54.A32">
+  <button type="button" id="quickfill">מלא מהטקסט</button>
+  <button type="button" id="clearhand">נקה</button>
+</div>
+</div>
+
+<div class="card">
+<h2>2. תנאי המשחק</h2>
+<div class="an-row">
+  <label>המושב שלך:</label>
+  <select id="seat"><option value="S">דרום</option>
+    <option value="N">צפון</option><option value="E">מזרח</option>
+    <option value="W">מערב</option></select>
+  <label>המחלק:</label>
+  <select id="dealer"><option value="N">צפון</option>
+    <option value="E">מזרח</option><option value="S">דרום</option>
+    <option value="W">מערב</option></select>
+  <label>פגיעות:</label>
+  <select id="vul"><option value="none">ללא</option>
+    <option value="us">שלנו</option><option value="them">שלהם</option>
+    <option value="both">שני הצדדים</option></select>
+</div>
+<div class="an-row">
+  <label>שיטת הכרזה:</label>
+  <select id="system"><option value="two_over_one">2/1 Game Force</option>
+    <option value="sayc">SAYC</option></select>
+  <label>סוג תחרות:</label>
+  <select id="scoring"><option value="IMP">מפגשי (IMP)</option>
+    <option value="MP">ניקוד מקסימלי (MP)</option></select>
+</div>
+</div>
+
+<div class="card">
+<h2>3. המכרז בפועל</h2>
+<div class="auction-strip" id="strip"></div>
+<div id="turnline"></div>
+<div class="bbox" id="bbox"></div>
+<div class="bcalls">
+  <button type="button" id="btn-p">פס</button>
+  <button type="button" id="btn-x">דאבל</button>
+  <button type="button" id="btn-xx">רידאבל</button>
+  <button type="button" id="btn-undo">&#8617; בטל</button>
+</div>
+<div class="note" id="auction-note" hidden></div>
+</div>
+
+<div class="card">
+<h2>4. משמעויות מותאמות (רשות)</h2>
+<p style="color:var(--muted);font-size:13px;margin-top:0">
+כברירת מחדל כל הכרזה מתפרשת לפי השיטה. פתח הכרזה כדי לדרוס את פרשנותה
+(הסכם מיוחד): טווח נק', אורכי סדרות, והערה חופשית.</p>
+<div id="ovr-list"><span style="color:var(--muted)">הזן מכרז תחילה.</span></div>
+</div>
+
+<div class="card">
+<h2>5. נקודות החלטה לניתוח</h2>
+<div class="dp-list" id="dp-list"><span style="color:var(--muted)">
+בחר לאחר השלמת המכרז (אפשר יותר מאחת).</span></div>
+</div>
+
+<button type="button" class="an-go" id="go" disabled>נתח &#9654;</button>
+<div class="an-status" id="an-status"></div>
+
+<div class="card" id="queue-card">
+<h2>הניתוחים שלי</h2>
+<ul class="an-list" id="an-list"><li><span class="meta2">טוען...</span></li></ul>
+</div>
+
+<div class="card" id="viewer-card" hidden>
+<h2>הדוח</h2>
+<div class="an-row"><button type="button" id="an-open-print">פתח בחלון
+מלא (הדפסה / שמירה כ-PDF)</button></div>
+<iframe class="an-report" id="an-frame" title="דוח הניתוח"></iframe>
+</div>
+</main>
+<script src="{_SHARED_SRC}"></script>
+<script src="{_analyze_ui_src()}"></script>
+<script src="{_ANALYZE_SRC}"></script>
+</body></html>"""
+
+
+_ASSET_FILES = ("firebase-config.js", "bt-logic.js", "bt-firebase.js",
+                "bt-analyze-ui.js")
 
 
 def write_app(out_dir: str | Path) -> None:
@@ -5622,6 +5959,7 @@ def write_app(out_dir: str | Path) -> None:
     (out / "lead.html").write_text(_lead_html(), encoding="utf-8")
     (out / "dashboard.html").write_text(_dashboard_html(), encoding="utf-8")
     (out / "history.html").write_text(_history_html(), encoding="utf-8")
+    (out / "analyze.html").write_text(_analyze_html(), encoding="utf-8")
     # Emit the shared CSS/JS as external files (T2/PERF-F-4): every page links
     # them instead of inlining ~73 KB, so the browser caches them once and each
     # page's HTML shrinks to a few KB. The Python constants stay the source of
@@ -5640,6 +5978,8 @@ def write_app(out_dir: str | Path) -> None:
     (out / "dashboard.js").write_text(_DASHBOARD_JS, encoding="utf-8")
     (out / "history.css").write_text(_HISTORY_CSS, encoding="utf-8")
     (out / "history.js").write_text(_HISTORY_JS, encoding="utf-8")
+    (out / "analyze.css").write_text(_ANALYZE_CSS, encoding="utf-8")
+    (out / "analyze.js").write_text(_ANALYZE_JS, encoding="utf-8")
     web = resources.files("bridge_trainer") / "web"
     for name in _ASSET_FILES:
         (out / name).write_text((web / name).read_text(encoding="utf-8"),

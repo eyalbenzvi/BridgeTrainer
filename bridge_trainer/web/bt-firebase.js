@@ -32,7 +32,7 @@ import {
   initializeFirestore, getFirestore, persistentLocalCache,
   persistentMultipleTabManager, doc, getDoc, getDocs, collection, setDoc,
   writeBatch, serverTimestamp, query, where, orderBy, increment,
-  getCountFromServer,
+  getCountFromServer, onSnapshot, deleteDoc,
 } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig, isConfigured } from "./firebase-config.js";
 import { classifySignInError, mergePending, prunePending,
@@ -595,6 +595,49 @@ const BT = {
     ATTEMPTS = {}; LAST_TS = 0; PENDING = {};
     try { localStorage.removeItem(cacheKey(USER.uid)); } catch (e) { /* */ }
     try { localStorage.removeItem(pendingKey(USER.uid)); } catch (e) { /* */ }
+  },
+
+  // ---- bidding-analysis queue (analyze.html) --------------------------
+  // The client only FILES requests; the GitHub Actions worker computes and
+  // writes results back (see .github/workflows/analyze-requests.yml). The
+  // page watches its own requests live, so the finished report appears
+  // without polling. Shapes are validated by firestore.rules
+  // (validAnalysisReq) and re-validated by the worker.
+  async submitAnalysis(req) {
+    if (!USER) throw new Error("not signed in");
+    const reqRef = doc(collection(db, "analysis_requests"));
+    await setDoc(reqRef, {
+      uid: USER.uid, status: "pending",
+      createdAt: serverTimestamp(), req,
+    });
+    return reqRef.id;
+  },
+  // Live view of MY analysis requests (rules admit the query only when it
+  // filters on my uid). Sorted newest-first client-side — no orderBy, so no
+  // composite index is needed. Returns the unsubscribe function.
+  watchAnalyses(cb) {
+    if (!USER) return () => {};
+    const q = query(collection(db, "analysis_requests"),
+                    where("uid", "==", USER.uid));
+    return onSnapshot(q, (snap) => {
+      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      rows.sort((a, b) => {
+        const ta = (a.createdAt && a.createdAt.seconds) || 0;
+        const tb = (b.createdAt && b.createdAt.seconds) || 0;
+        return tb - ta;
+      });
+      cb(rows);
+    }, (e) => console.error("watchAnalyses", e));
+  },
+  async getAnalysisReport(id) {
+    const s = await getDoc(doc(db, "analysis_reports", id));
+    return s.exists() ? s.data() : null;
+  },
+  async deleteAnalysis(id) {
+    // the report doc may not exist (pending/error) — delete best-effort
+    try { await deleteDoc(doc(db, "analysis_reports", id)); }
+    catch (e) { /* no report yet, or already gone */ }
+    await deleteDoc(doc(db, "analysis_requests", id));
   },
 
   // Sign-in is required. Gate the whole app until authenticated; preload the
