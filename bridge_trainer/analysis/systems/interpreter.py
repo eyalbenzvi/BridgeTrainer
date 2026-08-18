@@ -42,7 +42,7 @@ SUIT_HE = {"S": "♠", "H": "♥", "D": "♦", "C": "♣", "NT": "NT"}
 def call_he(token: str) -> str:
     """Hebrew-friendly rendering of a call token (suit glyphs, LTR-safe)."""
     if token == "P":
-        return "פס"
+        return "פאס"
     if token == "X":
         return "דאבל"
     if token == "XX":
@@ -522,7 +522,7 @@ def _fallback_meaning(token: str) -> tuple[SeatConstraints, str]:
         return sc, note
     if token == "P":
         return SeatConstraints(), \
-            "פס בהקשר לא מכוסה — לא נגזרו אילוצים נוספים."
+            "פאס בהקשר לא מכוסה — לא נגזרו אילוצים נוספים."
     lvl, d = int(token[0]), token[1:]
     hcp_lo = min(6 + 2 * lvl, 16)
     hcp = [Band(hcp_lo, MAX_HCP), Band(max(0, hcp_lo - 3), hcp_lo - 1, 0.35)]

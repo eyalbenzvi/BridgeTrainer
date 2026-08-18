@@ -38,7 +38,7 @@ def vul_he(vul: str, my_seat: str) -> str:
 
 def token_html(tok: str) -> str:
     if tok in ("P", "X", "XX", "—"):
-        return {"P": "פס", "X": "דאבל", "XX": "רידאבל", "—": "—"}[tok]
+        return {"P": "פאס", "X": "דאבל", "XX": "רידאבל", "—": "—"}[tok]
     denom = tok[1:]
     if denom == "NT":
         return f'<span class="ltr">{tok}</span>'
@@ -122,6 +122,8 @@ def build_facts(res: AnalysisResult) -> dict:
             "toss_up_with": pol.corrected.toss_up_with,
         }
 
+    seat_of_decision = (seats[req.decision_index]
+                        if req.decision_index < len(seats) else req.my_seat)
     return {
         "meta": {
             "dealer": req.dealer, "dealer_he": SEAT_HE[req.dealer],
@@ -141,11 +143,12 @@ def build_facts(res: AnalysisResult) -> dict:
         "hand": {"pbn": req.my_hand, "hcp": _hcp_of(req.my_hand)},
         "auction": calls,
         "decision": {"index": req.decision_index, "actual": res.actual_call,
-                     "seat_of_decision": seats[req.decision_index]},
+                     "seat_of_decision": seat_of_decision},
         "candidates": res.candidates,
         "policies": policies,
         "recommended": res.recommended,
-        "actual_was_recommended": res.actual_call == res.recommended,
+        "actual_was_recommended": (res.actual_call is not None
+                                   and res.actual_call == res.recommended),
         "stability": {"stable": res.stable, "note": res.stability_note},
         "top_pair": {"a": res.top_pair[0], "b": res.top_pair[1],
                      "mean_imp": round(res.top_pair_mean_imp, 2),
@@ -186,7 +189,7 @@ def narrate_situation(facts: dict) -> str:
         lines.append("קריאת המכרז עד נקודת ההחלטה: " +
                      "; ".join(reads) + ".")
     lines.append(
-        "חשוב לזכור שגם פס נושא מידע: טווחי הנקודות והאורכים של כל "
+        "חשוב לזכור שגם פאס נושא מידע: טווחי הנקודות והאורכים של כל "
         "המושבים החבויים נגזרו מכל ההכרזות שקדמו להחלטה, כולל הפסים.")
     return "<p>" + "</p>\n<p>".join(lines) + "</p>"
 
@@ -237,7 +240,8 @@ def narrate_candidate(facts: dict, row: dict, is_top: bool) -> str:
 
 def narrate_conclusion(facts: dict) -> str:
     rec = token_html(facts["recommended"])
-    actual = token_html(facts["decision"]["actual"])
+    actual_tok = facts["decision"]["actual"]
+    actual = token_html(actual_tok) if actual_tok else ""
     tp = facts["top_pair"]
     real = facts["policies"]["realistic"]
     scoring_mp = facts["meta"]["scoring"] == "MP"
@@ -257,7 +261,9 @@ def narrate_conclusion(facts: dict) -> str:
         lines.append(
             f"השורה התחתונה: {rec} היא הפעולה המומלצת — {metric} מול "
             f"החלופה הקרובה ביותר ({token_html(tp['b'])}).")
-    if facts["actual_was_recommended"]:
+    if actual_tok is None:
+        pass   # stem-only mode: the user's choice is unknown by design
+    elif facts["actual_was_recommended"]:
         lines.append(f"ההכרזה שבחרת בפועל ({actual}) תואמת את ההמלצה.")
     else:
         row = next((r for r in real["rows"]
@@ -315,8 +321,11 @@ h3 { font-size: 15px; margin: 16px 0 6px; }
 .red { color: var(--he-red); }
 .ltr { direction: ltr; unicode-bidi: isolate; }
 .hand .cards { letter-spacing: 1px; font-weight: 600; margin-inline: 2px; }
-table { border-collapse: collapse; width: 100%; margin: 10px 0; }
-th, td { border: 1px solid var(--line); padding: 6px 10px; text-align: right; }
+.tablewrap { overflow-x: auto; max-width: 100%; }
+table { border-collapse: collapse; width: 100%; margin: 10px 0;
+        font-size: 13.5px; }
+th, td { border: 1px solid var(--line); padding: 5px 8px;
+         text-align: right; }
 th { background: var(--accent-tint); font-weight: 600; }
 td.num, th.num { text-align: center; direction: ltr; }
 tr.rec { background: var(--rec-bg); font-weight: 600; }
@@ -327,10 +336,10 @@ tr.actual td:first-child::after { content: " ★"; color: var(--accent); }
 .auction-grid td.decision { outline: 2px solid var(--accent);
                             background: var(--accent-tint); font-weight: 700; }
 .deal-diagram { direction: ltr; display: grid;
-  grid-template-columns: 1fr 1fr 1fr; gap: 4px; max-width: 560px;
-  margin: 8px auto; font-size: 13.5px; }
+  grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px;
+  max-width: 560px; margin: 8px auto; font-size: 13px; }
 .deal-diagram .seatbox { border: 1px solid var(--line); border-radius: 8px;
-  padding: 6px 8px; background: #fff; }
+  padding: 6px 8px; background: #fff; overflow-wrap: anywhere; }
 .deal-diagram .seatname { font-size: 11px; color: var(--muted); }
 .deal-diagram .mid { display: flex; align-items: center; justify-content:
   center; background: var(--felt); color: #fff; border-radius: 8px;
@@ -346,10 +355,15 @@ tr.actual td:first-child::after { content: " ★"; color: var(--accent); }
 .freq-bar { background: var(--accent-tint); height: 10px; border-radius: 5px;
             display: inline-block; vertical-align: middle; }
 @media print {
-  body { background: #fff; padding: 0; font-size: 12.5px; }
+  body { background: #fff; padding: 0; font-size: 12px; }
   .card { box-shadow: none; border: 1px solid var(--line);
           break-inside: avoid; }
   h2 { break-after: avoid; }
+  /* tables must FIT the page — smaller type and padding, wrappable cells */
+  table { font-size: 10.5px; }
+  th, td { padding: 3px 5px; }
+  .tablewrap { overflow-x: visible; }
+  .deal-diagram { font-size: 11px; }
 }
 """
 
@@ -443,6 +457,10 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
             f'(ציון {rep["score_alt"]:+.0f}). '
             f'הפרש: <b class="ltr">{rep["imp_swing"]:+.0f} IMP</b> '
             f'לטובת {token_html(rec_tok if rep["imp_swing"] >= 0 else alt_tok)}.</p>')
+        for tok, cont in ((rec_tok, rep.get("cont_top")),
+                          (alt_tok, rep.get("cont_alt"))):
+            parts.append(f'<p class="small">המשך משוער אחרי '
+                         f'{token_html(tok)}: {_continuation_html(cont)}</p>')
         parts.append("</div>")
 
     # 6 -----------------------------------------------------------------
@@ -492,7 +510,7 @@ def _auction_table(facts: dict) -> str:
     rows_calls = facts["auction"]
     dealer = facts["meta"]["dealer"]
     order = ["W", "N", "E", "S"]
-    out = ['<table class="auction-grid"><tr>']
+    out = ['<div class="tablewrap"><table class="auction-grid"><tr>']
     for s in order:
         mark = " (אתה)" if s == facts["meta"]["my_seat"] else ""
         out.append(f"<th>{SEAT_HE[s]}{mark}</th>")
@@ -509,9 +527,16 @@ def _auction_table(facts: dict) -> str:
         title = html.escape(c["he"] or "")
         out.append(f'<td{cls} title="{title}">{token_html(c["token"])}</td>')
         col += 1
+    if facts["decision"]["index"] == len(rows_calls):
+        # stem-only mode: the analyzed call is the NEXT one — show it as "?"
+        if col == 4:
+            out.append("</tr><tr>")
+            col = 0
+        out.append('<td class="decision" title="ההכרזה המנותחת">?</td>')
+        col += 1
     for _ in range(col, 4):
         out.append("<td></td>")
-    out.append("</tr></table>")
+    out.append("</tr></table></div>")
     out.append('<p class="small">ריחוף/מגע על הכרזה מציג את פרשנותה. '
                'ההכרזה המנותחת מסומנת במסגרת.</p>')
     # call-by-call meanings list
@@ -531,11 +556,13 @@ def _auction_table(facts: dict) -> str:
 def _results_table(facts: dict, policy: str) -> str:
     pol = facts["policies"][policy]
     scoring_mp = facts["meta"]["scoring"] == "MP"
-    head = ["פעולה", "IMP ממוצע מול החלופה הקשה", "רווח סמך (95%)",
-            "IMP גולמי (DD)", "% זכייה", "% הפסד", "חציון IMP"]
+    # short headers — the table must fit a phone screen and a printed page
+    head = ["פעולה", "IMP ממוצע", "רווח סמך", "DD גולמי",
+            "% זכייה", "% הפסד", "חציון"]
     if scoring_mp:
         head.insert(1, "MP %")
-    out = ["<table><tr>"] + [f"<th class='num'>{h}</th>" for h in head]
+    out = ['<div class="tablewrap"><table><tr>'] + \
+        [f"<th class='num'>{h}</th>" for h in head]
     out.append("</tr>")
     for row in pol["rows"]:
         classes = []
@@ -556,23 +583,24 @@ def _results_table(facts: dict, policy: str) -> str:
             cells.insert(1, f"{row['mp_pct']:.1f}%")
         out.append(f"<tr{cls}>" + "".join(
             f'<td class="num">{c}</td>' for c in cells) + "</tr>")
-    out.append("</table>")
+    out.append("</table></div>")
     return "".join(out)
 
 
 def _policy_summary_table(facts: dict) -> str:
-    out = ["<table><tr><th>מדיניות המשך</th><th>תיאור</th>"
-           "<th class='num'>הפעולה המובילה</th></tr>"]
+    out = ['<div class="tablewrap"><table><tr><th>מדיניות המשך</th>'
+           "<th>תיאור</th><th class='num'>הפעולה המובילה</th></tr>"]
     for name in ("conservative", "realistic", "omniscient"):
         pol = facts["policies"][name]
         out.append(f"<tr><td>{pol['he']}</td><td>{pol['he_desc']}</td>"
                    f"<td class='num'>{token_html(pol['top_action'])}</td></tr>")
-    out.append("</table>")
+    out.append("</table></div>")
     return "".join(out)
 
 
 def _partner_response_table(facts: dict) -> str:
-    out = ["<table><tr><th>הפעולה</th><th>תגובות השותף (שכיחות)</th></tr>"]
+    out = ['<div class="tablewrap"><table><tr><th>הפעולה</th>'
+           "<th>תגובות השותף (שכיחות)</th></tr>"]
     for cand in facts["candidates"]:
         rows = facts["partner_responses"].get(cand) or []
         cells = []
@@ -585,22 +613,31 @@ def _partner_response_table(facts: dict) -> str:
                          f'<span class="ltr">{share * 100:.0f}%</span>')
         out.append(f"<tr><td>{token_html(cand)}</td>"
                    f"<td>{' &nbsp; '.join(cells) or '—'}</td></tr>")
-    out.append("</table>")
+    out.append("</table></div>")
     return "".join(out)
 
 
 def _contracts_table(facts: dict) -> str:
     pol = facts["policies"]["realistic"]
-    out = ["<table><tr><th>הפעולה</th><th>חוזים סופיים (מדיניות ריאלית)"
-           "</th></tr>"]
+    out = ['<div class="tablewrap"><table><tr><th>הפעולה</th>'
+           "<th>חוזים סופיים (מדיניות ריאלית)</th></tr>"]
     for row in pol["rows"]:
         cells = [f"{contract_html(c)} <span class='ltr'>"
                  f"{share * 100:.0f}%</span>"
                  for c, share in row["top_contracts"] if share >= 0.02]
         out.append(f"<tr><td>{token_html(row['action'])}</td>"
                    f"<td>{' &nbsp;·&nbsp; '.join(cells) or '—'}</td></tr>")
-    out.append("</table>")
+    out.append("</table></div>")
     return "".join(out)
+
+
+def _continuation_html(cont: list | None) -> str:
+    """(seat, call) pairs -> 'מערב: פאס · צפון: 5♣ · ...' (trailing passes
+    were already trimmed by the pipeline)."""
+    if not cont:
+        return "שלושה פאסים — ההכרזה נשארת."
+    bits = [f"{SEAT_HE[s]}: {token_html(t)}" for s, t in cont]
+    return " · ".join(bits) + " · ואז פאסים עד הסוף."
 
 
 def _deal_diagram(hands: dict, my_seat: str) -> str:

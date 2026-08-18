@@ -35,7 +35,9 @@ _MAX_BODY = 1 << 20   # 1 MB is far beyond any legitimate request
 def analyze_decision_points(payload: dict, reports_dir: Path) -> list[dict]:
     """Run one analysis per requested decision point; write html/json/pdf."""
     reports_dir.mkdir(parents=True, exist_ok=True)
-    indices = payload.get("decision_indices") or [payload["decision_index"]]
+    indices = (payload.get("decision_indices")
+               or [payload.get("decision_index",
+                               len(payload.get("auction", [])))])
     overrides = {int(k): v for k, v in (payload.get("overrides") or {}).items()}
     narration = payload.get("narration", "template")
     out = []

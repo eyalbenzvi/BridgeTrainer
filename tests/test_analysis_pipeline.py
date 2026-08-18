@@ -93,6 +93,54 @@ def test_adaptive_stop_reports_sample_size():
         res.top_pair_mean_imp)
 
 
+def test_stem_only_mode_is_the_primary_flow():
+    """The auction ends at the hero's turn; the analyzed call is NOT
+    entered (user-requested flow). decision_index == len(auction)."""
+    res = run_analysis(AnalysisRequest(
+        dealer="E", vul="Both", my_seat="S",
+        my_hand="AQ2.KJ3.KQ54.A32",
+        auction=["2H"], decision_index=1,
+        system="two_over_one", scoring="IMP",
+        candidates=["X", "3NT", "P"], seed=11,
+        max_deals=150, block=75))
+    assert res.actual_call is None
+    assert res.stem == ["2H"]
+    assert res.recommended in ("X", "3NT", "P")
+    # report renders without an "actual" call anywhere
+    from bridge_trainer.analysis.report import build_facts, render_report
+    facts = build_facts(res)
+    assert facts["decision"]["actual"] is None
+    html_doc = render_report(facts)
+    assert "ההכרזה שלך בפועל" not in html_doc
+    assert "שבחרת בפועל" not in html_doc
+    # the auction diagram shows the analyzed call as "?"
+    assert 'title="ההכרזה המנותחת">?' in html_doc
+    # representative deals show the assumed continuation
+    assert "המשך משוער אחרי" in html_doc
+
+
+def test_stem_only_rejects_wrong_turn_or_finished_auction():
+    base = dict(dealer="E", vul="Both", my_seat="S",
+                my_hand="AQ2.KJ3.KQ54.A32", system="two_over_one",
+                scoring="IMP", candidates=["P"], max_deals=120, block=60)
+    with pytest.raises(AuctionStateError):   # after 2H it is S's turn, not W
+        run_analysis(AnalysisRequest(
+            auction=["2H", "P", "P"], decision_index=3,
+            **dict(base, my_seat="W")))
+    with pytest.raises(AuctionStateError):   # finished auction
+        run_analysis(AnalysisRequest(
+            auction=["2H", "P", "P", "P"], decision_index=4, **base))
+
+
+def test_stem_only_auto_candidates():
+    from bridge_trainer.analysis.pipeline import suggest_candidates
+    cands = suggest_candidates(AnalysisRequest(
+        dealer="E", vul="Both", my_seat="S",
+        my_hand="AQ2.KJ3.KQ54.A32", auction=["2H"], decision_index=1))
+    assert "P" in cands and "X" in cands
+    assert any(c.endswith("NT") for c in cands)
+
+
 def test_determinism_same_seed():
     a = run_analysis(small_req(candidates=["X", "P"]))
     b = run_analysis(small_req(candidates=["X", "P"]))

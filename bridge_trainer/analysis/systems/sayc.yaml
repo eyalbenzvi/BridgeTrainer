@@ -9,7 +9,7 @@ he_name: "SAYC"
 meanings:
   # ---- openings ---------------------------------------------------------
   open.pass:
-    he: "פס בפתיחה: פחות מערכי פתיחה (עד 12 נק'; 13–14 בקושי, יד לא נוחה)"
+    he: "פאס בפתיחה: פחות מערכי פתיחה (עד 12 נק'; 13–14 בקושי, יד לא נוחה)"
     constraints:
       hcp:
         core: [0, 12]
@@ -69,26 +69,26 @@ meanings:
 
   # ---- informative passes (INV8) ---------------------------------------
   resp.pass:
-    he: "פס על פתיחת השותף: 0–5 נק'"
+    he: "פאס על פתיחת השותף: 0–5 נק'"
     constraints:
       hcp: {core: [0, 5], margin: [{range: [6, 6], weight: 0.3}]}
   pass.resp_over_interference:
-    he: "פס של העונה מעל התערבות: יד חלשה או ללא פעולה נוחה (0–8 נק')"
+    he: "פאס של העונה מעל התערבות: יד חלשה או ללא פעולה נוחה (0–8 נק')"
     constraints:
       hcp: {core: [0, 8], margin: [{range: [9, 11], weight: 0.3}]}
   pass.no_direct_action:
-    he: "פס במושב ישיר: אין פעולה — לא אוברקול, לא דאבל (עד 11 נק' או יד לא מתאימה)"
+    he: "פאס במושב ישיר: אין פעולה — לא אוברקול, לא דאבל (עד 11 נק' או יד לא מתאימה)"
     constraints:
       hcp: {core: [0, 13], margin: [{range: [14, 16], weight: 0.25}]}
       denials:
         - {hcp: [8, 16], suit: "$each_unbid_by_enemy", min_len: 5, weight: 0.3}
       exclusions: [takeout_shape_over_$enemy]
   pass.no_action_high:
-    he: "פס מעל הכרזה גבוהה: אין פעולה ברורה (המידע מוגבל)"
+    he: "פאס מעל הכרזה גבוהה: אין פעולה ברורה (המידע מוגבל)"
     constraints:
       hcp: {core: [0, 15], margin: [{range: [16, 18], weight: 0.35}]}
   pass.after_limited:
-    he: "פס לאחר שהיד כבר הוגבלה: ללא מידע חדש מהותי"
+    he: "פאס לאחר שהיד כבר הוגבלה: ללא מידע חדש מהותי"
     constraints: {}
 
   # ---- doubles ----------------------------------------------------------
@@ -202,7 +202,7 @@ meanings:
     constraints:
       hcp: {core: [14, 40]}
   resp.preempt.pass:
-    he: "פס על מנע השותף: אין עניין במשחק מלא (עד 13–14 נק')"
+    he: "פאס על מנע השותף: אין עניין במשחק מלא (עד 13–14 נק')"
     constraints:
       hcp: {core: [0, 13], margin: [{range: [14, 15], weight: 0.4}]}
   resp.2c.waiting:

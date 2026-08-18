@@ -5675,10 +5675,6 @@ _ANALYZE_CSS = """
 .ovr summary { cursor:pointer; }
 .ovr input { max-width:70px; }
 .ovr input[type=text] { max-width:none; }
-.dp-list label { display:inline-flex; align-items:center; gap:4px;
-  border:1px solid var(--line); border-radius:8px; padding:4px 10px;
-  margin:3px; cursor:pointer; }
-.dp-list input:checked + span { font-weight:700; color:var(--accent); }
 .note { background:var(--warn-bg); color:var(--warn-fg);
   border:1px solid var(--warn-line); border-radius:8px; padding:6px 10px;
   font-size:13px; margin:6px 0; }
@@ -5731,16 +5727,17 @@ async function submit() {
   const vul = {none: "None", both: "Both",
                us: us, them: us === "NS" ? "EW" : "NS"}[vulSel];
   try {
-    for (const idx of UI.decisionPoints()) {
-      const req = {
-        dealer: UI.dealer(), vul: vul, my_seat: UI.heroSeat(),
-        my_hand: UI.handPBN(), auction: UI.auction(),
-        decision_index: idx,
-        system: $("system").value, scoring: $("scoring").value,
-        overrides: UI.overrides(), narration: "template",
-      };
-      await window.BT.submitAnalysis(req);
-    }
+    // stem-only flow: the auction stops at the hero's turn; the analyzed
+    // call is the NEXT one (decision_index == auction length)
+    const auction = UI.auction();
+    const req = {
+      dealer: UI.dealer(), vul: vul, my_seat: UI.heroSeat(),
+      my_hand: UI.handPBN(), auction: auction,
+      decision_index: auction.length,
+      system: $("system").value, scoring: $("scoring").value,
+      overrides: UI.overrides(), narration: "template",
+    };
+    await window.BT.submitAnalysis(req);
     st.textContent = "הבקשה נשלחה! החישוב רץ בענן — בדרך כלל דקה-שתיים " +
       "(עד ~10 דקות במסלול הגיבוי); הרשימה למטה תתעדכן לבד כשהדוח מוכן.";
     $("queue-card").scrollIntoView({behavior: "smooth"});
@@ -5758,9 +5755,14 @@ function rowMeta(r) {
   const q = r.req || {};
   const when = r.createdAt && r.createdAt.seconds
     ? new Date(r.createdAt.seconds * 1000).toLocaleString("he-IL") : "";
-  const call = (q.auction || [])[q.decision_index] || "?";
-  return {when, call, hand: q.my_hand || ""};
+  // stem-only requests have no entered call at the decision index — label
+  // the row by the last stem call instead ("אחרי 3♥")
+  const entered = (q.auction || [])[q.decision_index];
+  const last = (q.auction || [])[(q.auction || []).length - 1];
+  const call = entered || (last ? "אחרי " + tokLabel(last) : "פתיחה");
+  return {when, call, entered: !!entered, hand: q.my_hand || ""};
 }
+function tokLabel(tok) { return tok === "P" ? "פאס" : tok; }
 
 function renderList(rows) {
   ROWS = rows;
@@ -5784,7 +5786,7 @@ function renderList(rows) {
     li.innerHTML =
       '<span class="chip ' + r.status + '">' +
       (STATUS_HE[r.status] || r.status) + "</span>" +
-      '<span dir="ltr">' + UI.tokHtml(m.call) + "</span>" +
+      "<span>" + (m.entered ? UI.tokHtml(m.call) : m.call) + "</span>" +
       "<span>" + extra + "</span>" +
       (r.status === "done"
         ? '<button data-open="' + r.id + '">פתח דוח</button>' : "") +
@@ -5812,10 +5814,35 @@ async function openReport(id) {
     const rep = await window.BT.getAnalysisReport(id);
     if (!rep || !rep.html) throw new Error("הדוח לא נמצא");
     $("an-frame").srcdoc = rep.html;
+    const fname = "bridge-analysis-" + id.slice(0, 8) + ".html";
+    // print / save-as-PDF from a full window
     $("an-open-print").onclick = () => {
       const w = window.open("", "_blank");
       w.document.write(rep.html);
       w.document.close();
+    };
+    // download: a self-contained HTML file — opens in any browser, no
+    // sign-in needed by the recipient
+    $("an-download").onclick = () => {
+      const blob = new Blob([rep.html], {type: "text/html"});
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = fname;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    };
+    // share: the report FILE itself via the system share sheet (WhatsApp
+    // etc. on mobile); falls back to download where files can't be shared
+    $("an-share").onclick = async () => {
+      const file = new File([rep.html], fname, {type: "text/html"});
+      if (navigator.canShare && navigator.canShare({files: [file]})) {
+        try {
+          await navigator.share({files: [file],
+                                 title: "ניתוח הכרזה — BridgeTrainer"});
+          return;
+        } catch (e) { if (e.name === "AbortError") return; }
+      }
+      $("an-download").click();
     };
   } catch (e) {
     $("an-frame").srcdoc = "<p>שגיאה בטעינת הדוח: " +
@@ -5899,12 +5926,15 @@ def _analyze_html() -> str:
 </div>
 
 <div class="card">
-<h2>3. המכרז בפועל</h2>
+<h2>3. המכרז — עד תורך</h2>
+<p style="color:var(--muted);font-size:13px;margin-top:0">
+הזן את ההכרזות מתחילת המכרז ו<b>עצור כשמגיע תורך</b> — את ההכרזה
+שעליה תישאל אל תזין (היא מסומנת ?), ואין להזין פאסים בסופו.</p>
 <div class="auction-strip" id="strip"></div>
 <div id="turnline"></div>
 <div class="bbox" id="bbox"></div>
 <div class="bcalls">
-  <button type="button" id="btn-p">פס</button>
+  <button type="button" id="btn-p">פאס</button>
   <button type="button" id="btn-x">דאבל</button>
   <button type="button" id="btn-xx">רידאבל</button>
   <button type="button" id="btn-undo">&#8617; בטל</button>
@@ -5920,12 +5950,6 @@ def _analyze_html() -> str:
 <div id="ovr-list"><span style="color:var(--muted)">הזן מכרז תחילה.</span></div>
 </div>
 
-<div class="card">
-<h2>5. נקודות החלטה לניתוח</h2>
-<div class="dp-list" id="dp-list"><span style="color:var(--muted)">
-בחר לאחר השלמת המכרז (אפשר יותר מאחת).</span></div>
-</div>
-
 <button type="button" class="an-go" id="go" disabled>נתח &#9654;</button>
 <div class="an-status" id="an-status"></div>
 
@@ -5936,8 +5960,13 @@ def _analyze_html() -> str:
 
 <div class="card" id="viewer-card" hidden>
 <h2>הדוח</h2>
-<div class="an-row"><button type="button" id="an-open-print">פתח בחלון
-מלא (הדפסה / שמירה כ-PDF)</button></div>
+<div class="an-row">
+<button type="button" id="an-share">שתף &#128228;</button>
+<button type="button" id="an-download">הורד קובץ</button>
+<button type="button" id="an-open-print">הדפסה / שמירה כ-PDF</button>
+</div>
+<p style="color:var(--muted);font-size:12.5px;margin:4px 0">הקובץ
+המשותף/המורד נפתח בכל דפדפן — מי שמקבל אותו לא צריך להתחבר לאתר.</p>
 <iframe class="an-report" id="an-frame" title="דוח הניתוח"></iframe>
 </div>
 </main>

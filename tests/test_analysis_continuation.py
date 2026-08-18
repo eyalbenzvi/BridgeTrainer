@@ -107,6 +107,39 @@ def test_penalty_pass_converts_takeout_double():
     assert fc.doubled and fc.declarer == "E"
 
 
+def test_partner_pulls_high_double_with_shortness_and_long_suit():
+    """User-reported gap: a high-level X must NOT be assumed to stand when
+    partner holds shortness in their suit, a long suit and weak defense."""
+    # E opens 4S; hero S doubles; N: void in spades, 7 hearts, 5 HCP -> 5H
+    pbn = ("N:.QJT98765.542.87 KQJT98.2.J93.KQJ "
+           "A2.AK3.AKQT8.A32 76543.4.76.T9654")
+    eng = engine(["4S"], dealer="E", hero="S")
+    fc = eng.project(Deal(pbn), "X", "realistic")
+    assert fc.denom == "H" and fc.level == 5
+    assert fc.declarer == "N"
+
+
+def test_partner_sits_high_double_with_flat_hand():
+    """...but with a flat hand and trump tricks the double stands."""
+    pbn = ("N:T932.QJ5.542.876 KQJ87.T98.J9.KQJ "
+           "A4.AK3.AKQT8.A32 65.7642.763.T954")
+    eng = engine(["4S"], dealer="E", hero="S")
+    fc = eng.project(Deal(pbn), "X", "realistic")
+    assert fc.denom == "S" and fc.level == 4 and fc.doubled
+
+
+def test_partner_corrects_to_own_suit_without_fit():
+    """Every hand keeps bidding: partner with no fit but a long suit of his
+    own corrects instead of freezing on the candidate's spot."""
+    # hero S opens 1S; N: singleton spade, 6 hearts, 8 HCP -> bids 2H
+    pbn = ("N:2.AKJT98.T54.876 KQJT9.32.J93.KQJ "
+           "A8765.Q4.AKQ8.32 43.765.762.AT954")
+    eng = engine([], dealer="S", hero="S")
+    fc, calls = eng.project_with_calls(Deal(pbn), "1S", "realistic")
+    assert "2H" in calls
+    assert fc.denom in ("H", "S")
+
+
 def test_omniscient_requires_tricks():
     eng = engine(["1S", "P"])
     with pytest.raises(ValueError):
