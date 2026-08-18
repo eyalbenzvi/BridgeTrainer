@@ -127,6 +127,13 @@ class ContinuationEngine:
         `tricks`: {(denom, declarer): dd_tricks} for THIS deal; required
         for the omniscient policy, ignored by heuristic policies.
         """
+        return self.project_with_calls(deal, candidate, policy, tricks)[0]
+
+    def project_with_calls(
+            self, deal, candidate: str, policy: str,
+            tricks: dict | None = None) -> tuple[FinalContract, list[str]]:
+        """Like project(), also returning the continuation call tokens
+        (used for the report's partner-response frequency table)."""
         views = deal_views(deal)
         params = self.policies[policy]["params"]
         state = replay(self.dealer, self.stem_tokens).apply(candidate)
@@ -144,6 +151,7 @@ class ContinuationEngine:
             st_walk = st_walk.apply(t)
 
         n = 0
+        calls: list[str] = []
         while not state.finished and n < _MAX_CONTINUATION_CALLS:
             seat = state.turn
             cap = int(params.get("max_actions_per_seat", 2))
@@ -158,14 +166,16 @@ class ContinuationEngine:
                 actions[seat] += 1
                 last_side_action[side_of(seat)] = tok
             state = state.apply(tok)
+            calls.append(tok)
             n += 1
 
         standing = state.standing_contract()
         if standing is None:
-            return FinalContract(level=0, denom="", declarer=None)
+            return FinalContract(level=0, denom="", declarer=None), calls
         return FinalContract(level=standing.level, denom=standing.denom,
                              declarer=standing.declarer,
-                             doubled=standing.doubled, terminal=True)
+                             doubled=standing.doubled,
+                             terminal=True), calls
 
     def denoms_possible(self, deal, candidates: list[str]) -> set[str]:
         """Denominations any policy could reach on this deal (for DD)."""
