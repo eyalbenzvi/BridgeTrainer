@@ -12,17 +12,16 @@ Cost: within the Cloud Run free tier at personal volume (~180k
 vCPU-seconds/month ≈ thousands of analyses); max_instances bounds the
 worst case. Requires the Firebase project on the Blaze plan.
 
-REGION must match the Firestore database location family. nam5 (the
-default multi-region) pairs with us-central1; if your database lives
-elsewhere (e.g. eur3 -> europe-west4, me-west1 -> me-west1), change the
-constant — a mismatch fails at deploy time with a location error.
+REGION must match the Firestore database location: this project's DB is
+in me-west1 (Tel Aviv) — the first deploy attempt (run 32186416063)
+reported the trigger there, so the function is collocated with it.
 """
 from firebase_admin import firestore, initialize_app
 from firebase_functions import firestore_fn, options
 
 initialize_app()
 
-REGION = "us-central1"
+REGION = "me-west1"
 
 # Firestore triggers do NOT retry by default (and FirestoreOptions exposes
 # no retry knob in this SDK) — a failed analysis lands as status=error via
