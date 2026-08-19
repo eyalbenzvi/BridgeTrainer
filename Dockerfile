@@ -22,7 +22,15 @@ COPY scripts/ben_rollout_context.patch /tmp/ben_rollout_context.patch
 RUN git -C /opt/ben apply /tmp/ben_rollout_context.patch \
     && rm -rf /opt/ben/.git
 
-RUN pip install --no-cache-dir tensorflow \
+# Ben pins psutil==5.9.0, which predates Python 3.12 and ships no cp312
+# wheel — pip would try to compile it, and this slim image carries no C
+# compiler (that is exactly how the first Cloud Build failed). 5.9.8 is the
+# oldest 5.9.x with cp312 wheels; Ben only uses psutil for server-side
+# process stats, so the bump is behavior-neutral for the rollout path.
+# tensorflow comes from requirements.txt (pinned there) — installing it
+# separately first would download a second, newer copy only to downgrade it.
+RUN sed -i 's/^psutil==5\.9\.0[[:space:]]*$/psutil==5.9.8/' /opt/ben/requirements.txt \
+    && grep -q '^psutil==5.9.8$' /opt/ben/requirements.txt \
     && pip install --no-cache-dir -r /opt/ben/requirements.txt \
     && pip install --no-cache-dir firebase-admin
 
