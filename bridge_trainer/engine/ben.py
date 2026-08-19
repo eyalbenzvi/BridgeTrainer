@@ -78,6 +78,7 @@ class Evaluation:
     n_samples: int
     quality: float
     sample_deals: list[str] = field(default_factory=list)  # pbn-ish 4-hand rows
+    plan_hits: dict = field(default_factory=dict)  # "bid|pard->my" -> n applied
 
 
 def merge_evaluations(a: Evaluation, b: Evaluation) -> Evaluation:
@@ -241,14 +242,17 @@ class BenEngine:
     # -- paired evaluation of an explicit candidate list -------------------
     def evaluate(self, bot, dealer_i: int, auction: list[str],
                  bids: list[str], n_samples: int | None = None,
-                 dd_memo: dict | None = None) -> Evaluation:
+                 dd_memo: dict | None = None,
+                 plans: dict | None = None) -> Evaluation:
         """Mirror of BotBid.bid()'s rollout block, but on OUR candidate
         list, all candidates on the same sampled layouts (INV1 pairing).
-        n_samples temporarily overrides the sampler's target count."""
+        n_samples temporarily overrides the sampler's target count.
+        plans: {candidate_tok: {partner_reply_tok: my_tok}} — the user's
+        continuation rules, overriding Ben at the hero's first re-turn."""
         padded, hands_np, hands_pbn, quality = self.sample_for_auction(
             bot, dealer_i, auction, n_samples)
         return self.rollout_eval(bot, padded, bids, hands_np, hands_pbn,
-                                 quality, dd_memo=dd_memo)
+                                 quality, dd_memo=dd_memo, plans=plans)
 
     def sample_for_auction(self, bot, dealer_i: int, auction: list[str],
                            n_samples: int | None = None):
@@ -268,16 +272,60 @@ class BenEngine:
         finally:
             self.sampler._sample_hands_auction = saved
 
+    def _apply_plan(self, bot, padded, cand_ben: str, plan: dict,
+                    hands_np, hands_pbn, auctions_np, hits: dict,
+                    hit_prefix: str):
+        """Overrule Ben at the hero's FIRST turn after the candidate.
+
+        plan maps the partner's reply (repo token) to the hero's forced
+        call. Samples are regrouped by the exact (LHO, partner, RHO)
+        triple that followed the candidate; each matching group where the
+        forced call is legal re-rolls the rest of the auction from that
+        point (Ben continues everyone afterwards, hero included). Groups
+        where the auction ended earlier, the reply matches no rule, or
+        the forced call is illegal keep Ben's line."""
+        from bidding import bidding as ben_bidding
+
+        col = len(padded)          # candidate column; LHO/pard/RHO follow
+        pad_end = ben_bidding.BID2ID["PAD_END"]
+        groups: dict[tuple, list[int]] = {}
+        for i in range(auctions_np.shape[0]):
+            ids = (int(auctions_np[i, col + 1]), int(auctions_np[i, col + 2]),
+                   int(auctions_np[i, col + 3]))
+            if pad_end in ids:
+                continue           # auction ended before the hero's re-turn
+            if from_ben(ben_bidding.ID2BID[ids[1]]) in plan:
+                groups.setdefault(ids, []).append(i)
+        for ids, idxs in groups.items():
+            lho, pard, rho = (ben_bidding.ID2BID[v] for v in ids)
+            my_ben = to_ben(plan[from_ben(pard)])
+            prefix = list(padded) + [cand_ben, lho, pard, rho]
+            if not ben_bidding.can_bid(my_ben, prefix):
+                continue
+            sub = bot.bidding_rollout(
+                prefix, my_ben, hands_np[idxs],
+                [hands_pbn[j] for j in idxs])
+            auctions_np[idxs] = sub
+            key = f"{hit_prefix}|{from_ben(pard)}->{plan[from_ben(pard)]}"
+            hits[key] = hits.get(key, 0) + len(idxs)
+        return auctions_np
+
     def rollout_eval(self, bot, padded, bids, hands_np, hands_pbn,
-                     quality: float, dd_memo: dict | None = None) -> Evaluation:
+                     quality: float, dd_memo: dict | None = None,
+                     plans: dict | None = None) -> Evaluation:
         """Rollout + DD + score the candidates on the given sample rows."""
         from bidding import bidding as ben_bidding
 
         n = hands_np.shape[0]
         ev, contracts, aucs = {}, {}, {}
+        plan_hits: dict = {}
         for bid in bids:
             ben_bid = to_ben(bid)
             auctions_np = bot.bidding_rollout(padded, ben_bid, hands_np, hands_pbn)
+            if plans and plans.get(bid):
+                auctions_np = self._apply_plan(
+                    bot, padded, ben_bid, plans[bid], hands_np, hands_pbn,
+                    auctions_np, plan_hits, bid)
             cts, tricks_softmax = _tricks_dd_memo(bot, hands_pbn, auctions_np,
                                                   dd_memo)
             scores = bot.expected_score(len(padded) % 4, cts, tricks_softmax)
@@ -295,7 +343,7 @@ class BenEngine:
             for j in range(4)) for i in range(min(n, 200))]
         return Evaluation(bids=list(bids), ev=ev, contracts=contracts,
                           auctions=aucs, n_samples=n, quality=float(quality),
-                          sample_deals=deals)
+                          sample_deals=deals, plan_hits=plan_hits)
 
     # -- opening leads -----------------------------------------------------
     def lead_bot(self, hand_pbn: str, seat_i: int, dealer_i: int,

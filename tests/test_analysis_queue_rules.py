@@ -22,7 +22,7 @@ PAGE_SRC = (ROOT / "bridge_trainer" / "app" / "webapp.py").read_text(
 REQ_REQUIRED = ["dealer", "vul", "my_seat", "my_hand", "auction",
                 "decision_index", "scoring"]
 REQ_OPTIONAL = ["system", "overrides", "narration", "candidates",
-                "extra_candidates", "seed", "max_deals"]
+                "extra_candidates", "plans", "seed", "max_deals"]
 
 
 def _block(name: str) -> str:
@@ -49,6 +49,7 @@ def test_requests_keys_are_locked_down():
     for k in REQ_OPTIONAL:
         assert f"'{k}'" in b, k
     assert "r.extra_candidates.size() <= 4" in b
+    assert "r.plans.size() <= 6" in b
 
 
 def test_requests_client_may_not_update_status():

@@ -5657,6 +5657,9 @@ _ANALYZE_CSS = """
 #extras-chips .chip { display:inline-block; background:#2B6CB014;
   border:1px solid #2B6CB0; border-radius:999px; padding:2px 10px;
   margin:2px 4px; cursor:pointer; font-weight:600; direction:ltr; }
+.plan-row { margin:6px 0; font-size:13.5px; }
+.plan-row select { margin:0 3px; padding:2px 4px; }
+.plan-row button { margin-inline-start:6px; }
 .bbox button:disabled, .bcalls button:disabled { opacity:.35;
   cursor:default; }
 .bcalls { display:flex; gap:6px; margin-top:8px; max-width:330px;
@@ -5739,6 +5742,8 @@ async function submit() {
     };
     const extras = UI.extraCandidates();
     if (extras.length) req.extra_candidates = extras;
+    const plans = UI.plans();
+    if (plans.length) req.plans = plans;
     await window.BT.submitAnalysis(req);
     st.textContent = "הבקשה נשלחה! החישוב רץ בענן — בדרך כלל דקה-שתיים " +
       "(עד ~10 דקות במסלול הגיבוי); הרשימה למטה תתעדכן לבד כשהדוח מוכן.";
@@ -5945,6 +5950,13 @@ def _analyze_html() -> str:
   <div class="note" id="extras-note" hidden>מצב הוספה פעיל: הקש בקופסת
   ההכרזות על הכרזות שתרצה לצרף לבדיקה (עד 4) — הן ייבחנו בסימולציה גם אם
   המנוע כמעט לא שוקל אותן. הקשה על תגית מסירה אותה.</div>
+</div>
+<div class="extras-row" id="plans-area" hidden>
+  <button type="button" id="btn-plan-add">+ תוכנית המשך (רשות)</button>
+  <div id="plans-box"></div>
+  <div class="note" id="plans-note" hidden>כל שורה: אם אכריז X ושותף ישיב
+  Y — אכריז Z. בסימולציה הבחירה שלך גוברת על המנוע בתור הראשון שלך אחרי
+  ההכרזה הנבדקת (עד 6 כללים).</div>
 </div>
 </div>
 

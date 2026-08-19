@@ -75,6 +75,28 @@ def _should_stop(mean: float, half: float, n: int) -> bool:
 
 
 MAX_EXTRA_CANDIDATES = 4
+MENU_FILL_FLOOR = 0.001   # only pure numeric noise stays out of the menu
+MAX_PLANS = 6
+
+
+def _menu_from_policy(policy) -> list[str]:
+    """Owner spec (round 5): evaluate the next-ranked calls too, up to
+    MENU_MAX — the 2% floor no longer gates EVALUATION (a 0.9% 3NT over a
+    preempt must be measured), it only decides which candidates the report
+    gives a summary card. The fill floor keeps <0.1% numeric noise out."""
+    return [it.bid for it in policy if it.p >= MENU_FILL_FLOOR][:MENU_MAX]
+
+
+def _plans_by_candidate(triples) -> dict[str, dict[str, str]]:
+    """[[candidate, partner_reply, my_call], ...] -> {cand: {reply: my}}.
+    First rule wins on duplicate (cand, reply) pairs; bounded by MAX_PLANS."""
+    plans: dict[str, dict[str, str]] = {}
+    for row in list(triples or [])[:MAX_PLANS]:
+        if not isinstance(row, (list, tuple)) or len(row) != 3:
+            continue
+        cand, reply, mine = (str(t).upper()[:3] for t in row)
+        plans.setdefault(cand, {}).setdefault(reply, mine)
+    return plans
 
 
 def _with_extras(candidates: list[str], extras, state) -> tuple[list, list]:
@@ -168,7 +190,9 @@ def _concat_batches(a, b):
                   for c in a.bids},
         n_samples=n,
         quality=(a.quality * a.n_samples + b.quality * b.n_samples) / n,
-        sample_deals=list(a.sample_deals) + list(b.sample_deals))
+        sample_deals=list(a.sample_deals) + list(b.sample_deals),
+        plan_hits={k: a.plan_hits.get(k, 0) + b.plan_hits.get(k, 0)
+                   for k in set(a.plan_hits) | set(b.plan_hits)})
 
 
 def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
@@ -197,8 +221,7 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
     if req.candidates:
         candidates = list(req.candidates)
     else:
-        candidates = [it.bid for it in policy
-                      if it.p >= MENU_P_FLOOR][:MENU_MAX]
+        candidates = _menu_from_policy(policy)
         if len(candidates) < 2:
             for extra in ("P", "X"):
                 st = replay(req.dealer, stem)
@@ -209,8 +232,12 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
     if actual is not None and actual not in candidates:
         candidates = [actual] + candidates
     state = replay(req.dealer, stem)
-    candidates, user_added = _with_extras(candidates, req.extra_candidates,
-                                          state)
+    plans = _plans_by_candidate(req.plans)
+    # a plan's candidate must be evaluated even if the menu skipped it —
+    # planned candidates outrank plain extras for the extras cap
+    extras_wanted = [c for c in plans if c not in candidates] + \
+        list(req.extra_candidates or [])
+    candidates, user_added = _with_extras(candidates, extras_wanted, state)
     candidates = [c for c in candidates if state.is_legal(c)]
     if not candidates:
         raise ValueError("no legal candidate actions at the decision point")
@@ -237,7 +264,8 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
         bot.hash_integer = (base_hash + req.seed + 7919 * batch_i) % (2 ** 31)
         batch_i += 1
         batch = engine.evaluate(bot, dealer_i, stem, candidates,
-                                n_samples=BLOCK_SAMPLES, dd_memo=dd_memo)
+                                n_samples=BLOCK_SAMPLES, dd_memo=dd_memo,
+                                plans=plans or None)
         merged = batch if merged is None else _concat_batches(merged, batch)
         if progress:
             progress(merged.n_samples, MAX_SAMPLES)
@@ -285,14 +313,22 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
     notes = [f"המשכי המכרז והדגימה: מנוע Ben ‏({engine.model_id}). "
              f"בנקודת ההחלטה Ben עצמו היה מכריז "
              f"{ben_top} (הסתברות {ben_top_p * 100:.0f}%)."]
+    pol_p = {it.bid: float(it.p) for it in policy}
     if user_added:
-        pol_p = {it.bid: float(it.p) for it in policy}
         for tok in user_added:
             notes.append(
                 f"מועמד שהוספת לבדיקה: {tok} — במדיניות Ben הוא מקבל "
                 f"{pol_p.get(tok, 0.0) * 100:.1f}% בנקודת ההחלטה; "
                 f"ההערכה בסימולציה זהה לשאר המועמדים (המשך מלא של "
                 f"כל ארבע הידיים).")
+    for key, hit_n in sorted((merged.plan_hits or {}).items()):
+        cand_tok, rule = key.split("|", 1)
+        reply, mine = rule.split("->", 1)
+        notes.append(
+            f"תוכנית המשך שהגדרת ל-{cand_tok}: אחרי תגובת שותף {reply} "
+            f"הוכרז {mine} במקום בחירת Ben — הופעלה ב-{hit_n} מתוך "
+            f"{n} חלוקות (בשאר לא התקיים התנאי או שההכרזה לא הייתה "
+            f"חוקית שם).")
     if consistency < QUALITY_BAD:
         notes.append(
             f"אזהרה: עקביות המכרז עם שיטת המנוע נמוכה מאוד "
@@ -330,7 +366,9 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
         stopped_early=stopped_early, top_pair=(top.action, second),
         top_pair_mean_imp=mean, top_pair_ci=half,
         representative=reps, elapsed_s=time.perf_counter() - t0,
-        seed=req.seed, in_dd_fog=False)
+        seed=req.seed, in_dd_fog=False,
+        ben_prior={c: pol_p.get(c, 0.0) for c in candidates},
+        user_added=list(user_added))
 
 
 def _representatives_ben(req, merged, cmp_res, dealer_i, stem_len,

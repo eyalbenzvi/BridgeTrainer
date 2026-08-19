@@ -155,6 +155,7 @@
     const st = replayState();
     const heroTurn = !st.finished && st.turn === heroSeat();
     row.hidden = !heroTurn;
+    if ($("plans-area")) $("plans-area").hidden = !heroTurn;
     if (!heroTurn && extrasMode) extrasMode = false;
     if (heroTurn) extras = extras.filter(isLegal);
     const btn = $("btn-extras");
@@ -171,6 +172,53 @@
     if (extrasMode) { toggleExtra(tok); return; }
     auction.push(tok);
     refreshAuction();
+  }
+
+  /* continuation plans: rows of "if I bid C and partner replies R, I bid M"
+     — the simulation forces M over the engine's choice at the hero's first
+     re-turn (owner spec, round 5) */
+  const MAX_PLANS = 6;
+  const ALL_CALLS = ["P", "X", "XX"].concat((() => {
+    const out = [];
+    for (let l = 1; l <= 7; l++)
+      for (const d of ["C", "D", "H", "S", "NT"]) out.push(l + d);
+    return out;
+  })());
+  function callText(t) { return t === "P" ? "פאס" : t; }
+  function planSelect(cls) {
+    const s = document.createElement("select");
+    s.className = cls;
+    s.innerHTML = '<option value="">—</option>' + ALL_CALLS.map((t) =>
+      `<option value="${t}">${callText(t)}</option>`).join("");
+    return s;
+  }
+  function addPlanRow() {
+    const box = $("plans-box");
+    if (!box || box.children.length >= MAX_PLANS) return;
+    const row = document.createElement("div");
+    row.className = "plan-row";
+    row.appendChild(document.createTextNode("אם אכריז "));
+    row.appendChild(planSelect("pl-cand"));
+    row.appendChild(document.createTextNode(" ושותף ישיב "));
+    row.appendChild(planSelect("pl-reply"));
+    row.appendChild(document.createTextNode(" — אכריז "));
+    row.appendChild(planSelect("pl-mine"));
+    const del = document.createElement("button");
+    del.type = "button";
+    del.textContent = "✕";
+    del.onclick = () => row.remove();
+    row.appendChild(del);
+    box.appendChild(row);
+  }
+  function plansList() {
+    const out = [];
+    document.querySelectorAll("#plans-box .plan-row").forEach((row) => {
+      const c = row.querySelector(".pl-cand").value;
+      const r = row.querySelector(".pl-reply").value;
+      const m = row.querySelector(".pl-mine").value;
+      if (c && r && m) out.push([c, r, m]);
+    });
+    return out.slice(0, MAX_PLANS);
   }
   function buildBBox() {
     const box = $("bbox");
@@ -259,6 +307,11 @@
           extrasMode = !extrasMode;
           refreshExtras();
         };
+      if ($("btn-plan-add"))
+        $("btn-plan-add").onclick = () => {
+          $("plans-note").hidden = false;
+          addPlanRow();
+        };
       refreshAuction();
     },
     handSize: () => sel.size,
@@ -273,5 +326,6 @@
       return sel.size === 13 && !st.finished && st.turn === heroSeat();
     },
     extraCandidates: () => extras.filter(isLegal),
+    plans: plansList,
   };
 })();
