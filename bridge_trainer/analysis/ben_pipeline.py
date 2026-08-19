@@ -373,11 +373,16 @@ def _representatives_ben(req, merged, cmp_res, dealer_i, stem_len,
     def q_index(q: float) -> int:
         return int(order[min(n - 1, max(0, round(q * (n - 1))))])
 
+    # disaster is a low PERCENTILE, not the absolute worst sample: the
+    # single min of a Monte-Carlo sample is statistically unstable and
+    # preferentially surfaces the engine's rare rollout breakdowns (~1%
+    # tails like a conventional cuebid the responder net fails to field),
+    # which then headline the report while barely moving the means.
     picks = [("typical", q_index(0.5)), ("best", q_index(0.97)),
              ("failure", q_index(0.10))]
-    worst = int(order[0])
-    if diff[worst] <= big_loss:
-        picks.append(("disaster", worst))
+    disaster = q_index(0.02)
+    if diff[disaster] <= big_loss:
+        picks.append(("disaster", disaster))
 
     out, seen = [], set()
     for kind, i in picks:
