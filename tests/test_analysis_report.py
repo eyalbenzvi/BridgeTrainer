@@ -46,20 +46,27 @@ def test_facts_are_json_serializable_and_complete(facts):
 def test_template_narration_covers_all_sections(facts):
     prose = narrate_all(facts)
     assert prose["narrator"] == "template"
-    assert "<p>" in prose["situation_html"]
     assert set(prose["candidates_html"]) == {"X", "3NT", "P"}
-    assert "השורה התחתונה" in prose["conclusion_html"]
+    assert "ההמלצה" in prose["conclusion_html"]
 
 
 def test_report_structure_follows_spec(facts):
     html_doc = render_report(facts)
     # RTL + Hebrew shell
     assert 'dir="rtl"' in html_doc and 'lang="he"' in html_doc
-    # all seven numbered sections of spec 4.1
-    for i, title in enumerate(["תיאור המצב", "הפעולות המועמדות",
-                               "טבלת תוצאות", "טבלאות תדירויות",
-                               "חלוקות מייצגות", "סייגים", "מסקנה"], 1):
+    # the lean owner-approved structure: banner + five numbered sections
+    assert 'class="rec-banner"' in html_doc          # recommendation first
+    for i, title in enumerate(["היד והמכרז", "הפעולות המועמדות",
+                               "תוצאות הסימולציה", "שכיחויות מפתח",
+                               "חלוקות מייצגות"], 1):
         assert re.search(f"<h2>{i}\\. .*{title}", html_doc), title
+    # a graphic hand box and vulnerability-colored auction header
+    assert 'class="handbox"' in html_doc
+    assert 'auction-grid' in html_doc and ('th class="vul"' in html_doc
+                                           or 'th class="nv"' in html_doc)
+    # the removed disclaimers stay removed
+    for gone in ["ריחוף", "סייגים", "מנסח", "ללא מודל שפה"]:
+        assert gone not in html_doc, gone
     # suit symbols with red class for hearts/diamonds
     assert 'class="red">♥' in html_doc or 'class="red">♦' in html_doc
     # real CI shown
