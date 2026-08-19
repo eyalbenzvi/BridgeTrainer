@@ -301,7 +301,7 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
                   else cmp_res.candidates[0].action)
     outcome = PolicyOutcome(
         policy=BEN_POLICY_KEY,
-        he=f"מנוע Ben ‏({engine.model_id})",
+        he="מנוע Ben",
         he_desc="דגימה, הכרזות המשך של כל ארבעת המושבים וניקוד — כולם "
                 "על ידי מנוע ההכרזות הנוירוני של הפרויקט",
         raw=cmp_res, corrected=cmp_res, mp_pct=mp_pct,
@@ -310,9 +310,8 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
 
     # -- report metadata ----------------------------------------------------
     consistency = float(merged.quality)
-    notes = [f"המשכי המכרז והדגימה: מנוע Ben ‏({engine.model_id}). "
-             f"בנקודת ההחלטה Ben עצמו היה מכריז "
-             f"{ben_top} (הסתברות {ben_top_p * 100:.0f}%)."]
+    notes = [f"בנקודת ההחלטה המנוע עצמו היה בוחר {ben_top} "
+             f"(הסתברות {ben_top_p * 100:.0f}%)."]
     pol_p = {it.bid: float(it.p) for it in policy}
     if user_added:
         for tok in user_added:
@@ -325,22 +324,12 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
         cand_tok, rule = key.split("|", 1)
         reply, mine = rule.split("->", 1)
         notes.append(
-            f"תוכנית המשך שהגדרת ל-{cand_tok}: אחרי תגובת שותף {reply} "
+            f"תוכנית המשך שהגדרת ל-{cand_tok}: אחרי {reply} מהשותף "
             f"הוכרז {mine} במקום בחירת Ben — הופעלה ב-{hit_n} מתוך "
-            f"{n} חלוקות (בשאר לא התקיים התנאי או שההכרזה לא הייתה "
-            f"חוקית שם).")
-    if consistency < QUALITY_BAD:
-        notes.append(
-            f"אזהרה: עקביות המכרז עם שיטת המנוע נמוכה מאוד "
-            f"({consistency * 100:.0f}%) — המכרז כנראה מכיל הכרזות שהמנוע "
-            f"מפרש אחרת מההסכמים שלך; אמינות הניתוח מוגבלת.")
-    elif consistency < QUALITY_WARN:
-        notes.append(
-            f"שים לב: עקביות המכרז עם שיטת המנוע חלקית "
-            f"({consistency * 100:.0f}%) — ייתכן שחלק מההכרזות מתפרשות "
-            f"אצל המנוע אחרת מכוונתך.")
+            f"{n} חלוקות (בשאר לא התקיים התנאי או שההכרזה לא "
+            f"הייתה חוקית).")
     stability_note = (
-        f"עקביות המכרז עם שיטת המנוע: {consistency * 100:.0f}%. "
+        f"התאמת המכרז לשיטת המנוע: {consistency * 100:.0f}%. "
         "ההמשכים בכל חלוקה הוכרזו על ידי Ben עבור כל ארבעת המושבים עד "
         "סוף המכרז — ללא חוקים ידניים.")
 

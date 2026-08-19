@@ -49,7 +49,7 @@ def token_html(tok: str) -> str:
 def contract_html(spec: str) -> str:
     """'4SEx' / 'Pass-out' -> pretty HTML."""
     if spec in ("Pass-out", "P"):
-        return "עובר (ללא משחק)"
+        return "כולם פאס"
     doubled = spec.endswith("x")
     body = spec[:-1] if doubled else spec
     decl = body[-1]
@@ -66,6 +66,18 @@ def hand_html(pbn: str) -> str:
         segs.append(f'<span{cls}>{SUIT_GLYPH[s]}</span>'
                     f'<span class="cards">{html.escape(holding) or "—"}</span>')
     return '<span class="hand ltr">' + " ".join(segs) + "</span>"
+
+
+def hand_box(pbn: str, hcp: int) -> str:
+    """The hero's hand as a clear standalone diagram (owner fix #1)."""
+    rows = []
+    for suit, holding in zip("SHDC", pbn.split(".")):
+        cls = ' class="red"' if suit in RED else ""
+        cards = " ".join(holding) if holding else "—"
+        rows.append(f'<div class="hb-row"><span{cls}>{SUIT_GLYPH[suit]}'
+                    f'</span><span class="hb-cards">{cards}</span></div>')
+    return ('<div class="handbox" dir="ltr">' + "".join(rows) +
+            f'</div><div class="hb-hcp">{hcp} נק"ג</div>')
 
 
 def _hcp_of(pbn: str) -> int:
@@ -132,8 +144,8 @@ def build_facts(res: AnalysisResult) -> dict:
             "my_seat": req.my_seat, "my_seat_he": SEAT_HE[req.my_seat],
             "vul": req.vul, "vul_he": vul_he(req.vul, req.my_seat),
             "system": req.system, "scoring": req.scoring,
-            "scoring_he": ("מפגשי (IMP)" if req.scoring == "IMP"
-                           else "ניקוד מקסימלי (Matchpoints)"),
+            "scoring_he": ("ניקוד IMP" if req.scoring == "IMP"
+                           else "טופ-בוטום (Matchpoints)"),
             "seed": res.seed, "n_deals": res.n_deals,
             "ess": round(res.ess, 1),
             "acceptance_rate": round(res.acceptance_rate, 6),
@@ -167,75 +179,45 @@ def build_facts(res: AnalysisResult) -> dict:
 # Hebrew template narration (default + fallback; spec 4.3)
 
 def narrate_situation(facts: dict) -> str:
-    m = facts["meta"]
-    lines = []
-    lines.append(
-        f"אתה יושב ב{m['my_seat_he']}, המחלק {m['dealer_he']}, "
-        f"{m['vul_he']}, {_engine_label(facts)}, "
-        f"סוג התחרות: {m['scoring_he']}. "
-        f"בידך {hand_html(facts['hand']['pbn'])} "
-        f"({facts['hand']['hcp']} נק').")
     reads = []
     for c in facts["auction"]:
         if c["index"] >= facts["decision"]["index"]:
             break
-        if c["token"] == "P" and not c["he"]:
-            continue
-        who = ("השותף" if c["is_hero_side"]
-               and c["seat"] != facts["meta"]["my_seat"] else
-               c["seat_he"])
         if c["he"]:
-            reads.append(f"{token_html(c['token'])} של {who} — {c['he']}")
-    if reads:
-        lines.append("קריאת המכרז עד נקודת ההחלטה: " +
-                     "; ".join(reads) + ".")
-    lines.append(
-        "חשוב לזכור שגם פאס נושא מידע: טווחי הנקודות והאורכים של כל "
-        "המושבים החבויים נגזרו מכל ההכרזות שקדמו להחלטה, כולל הפסים.")
-    return "<p>" + "</p>\n<p>".join(lines) + "</p>"
+            reads.append(f"{token_html(c['token'])} של {c['seat_he']} — "
+                         f"{c['he']}")
+    if not reads:
+        return ""
+    return ("<p>קריאת המכרז: " + "; ".join(reads) + ".</p>")
+
+
+def _imp_ci(ev: float, ci: float) -> str:
+    return f'<span class="ltr">{ev:+.2f} ±{ci:.2f} IMP</span>'
 
 
 def narrate_candidate(facts: dict, row: dict, is_top: bool) -> str:
-    """Template prose for one candidate: what the stats say and WHY."""
+    """One tight paragraph per candidate — the tables carry the rest."""
     scoring_mp = facts["meta"]["scoring"] == "MP"
-    a = token_html(row["action"])
     vs = token_html(row["vs"])
     bits = []
     if scoring_mp:
-        bits.append(
-            f"במאצ'פוינטס {a} משיג בממוצע {row['mp_pct']:.0f}% מול שדה "
-            f"החלופות שנבדקו — "
-            + ("הציון הגבוה במדגם." if is_top else "פחות מהחלופה המובילה."))
-    if row["ev_imp"] >= 0:
-        bits.append(
-            f"מול החלופה הקשה ביותר שלו ({vs}) הפעולה מרוויחה בממוצע "
-            f"{row['ev_imp']:+.2f} IMP (רווח סמך ±{row['ci']:.2f}).")
-    else:
-        bits.append(
-            f"מול {vs} הפעולה מפסידה בממוצע {abs(row['ev_imp']):.2f} IMP "
-            f"(רווח סמך ±{row['ci']:.2f}).")
+        bits.append(f'ממוצע <span class="ltr">{row["mp_pct"]:.0f}%</span> '
+                    f"במאצ'פוינטס מול שדה החלופות.")
+    verb = "מרוויחה" if row["ev_imp"] >= 0 else "מפסידה"
     bits.append(
-        f"היא זוכה ב-{row['p_gain'] * 100:.0f}% מהחלוקות, מפסידה "
-        f"ב-{row['p_loss'] * 100:.0f}%, ושוויון ב-{row['p_push'] * 100:.0f}%.")
+        f"מול {vs} הפעולה {verb} בממוצע "
+        f"{_imp_ci(row['ev_imp'], row['ci'])} — "
+        f'רווח <span class="ltr">{row["p_gain"] * 100:.0f}%</span>, '
+        f'הפסד <span class="ltr">{row["p_loss"] * 100:.0f}%</span>.')
     if row["p_big_loss"] >= 0.08:
         bits.append(
-            f"שימו לב לזנב הסיכון: ב-{row['p_big_loss'] * 100:.0f}% "
-            f"מהחלוקות ההפסד חד (5+ IMP) — הפעולה תנודתית, והמחיר "
-            f"כשהיא נכשלת גבוה.")
-    elif row["p_big_gain"] >= 0.15:
-        bits.append(
-            f"פרופיל הרווח נוטה לזכיות גדולות: ב-{row['p_big_gain'] * 100:.0f}% "
-            f"מהחלוקות הרווח הוא 5+ IMP.")
+            f'ב-<span class="ltr">{row["p_big_loss"] * 100:.0f}%</span> '
+            f'מהחלוקות ההפסד כבד (<span class="ltr">5+ IMP</span>).')
     if row["top_contracts"]:
         tc = ", ".join(
-            f"{contract_html(c)} ({share * 100:.0f}%)"
+            f'{contract_html(c)} <span class="ltr">{share * 100:.0f}%</span>'
             for c, share in row["top_contracts"][:3])
-        bits.append(f"החוזים השכיחים בהמשך (מדיניות ריאלית): {tc}.")
-    resp = facts["partner_responses"].get(row["action"]) or []
-    resp = [(t, s) for t, s in resp if s >= 0.05]
-    if len(resp) > 1:
-        rr = ", ".join(f"{token_html(t)} ({s * 100:.0f}%)" for t, s in resp)
-        bits.append(f"תגובות השותף מתפזרות: {rr}.")
+        bits.append(f"חוזים שכיחים: {tc}.")
     return "<p>" + " ".join(bits) + "</p>"
 
 
@@ -249,11 +231,11 @@ def narrate_conclusion(facts: dict) -> str:
     lines = []
     # A single bottom line, always: the recommendation, with its measured
     # margin as data (owner decision — no "either is fine" hedging).
-    metric = (f"{real['rows'][0]['mp_pct']:.0f}% במאצ'פוינטס"
-              if scoring_mp else
-              f"{tp['mean_imp']:+.2f} IMP (רווח סמך ±{tp['ci']:.2f})")
+    metric = (f'<span class="ltr">{real["rows"][0]["mp_pct"]:.0f}%</span> '
+              "במאצ'פוינטס" if scoring_mp else
+              _imp_ci(tp["mean_imp"], tp["ci"]))
     lines.append(
-        f"השורה התחתונה: ההמלצה היא {rec} — {metric} מול "
+        f"ההמלצה: {rec} — {metric} מול "
         f"החלופה הקרובה ביותר ({token_html(tp['b'])}).")
     if actual_tok is None:
         pass   # stem-only mode: the user's choice is unknown by design
@@ -263,13 +245,14 @@ def narrate_conclusion(facts: dict) -> str:
         row = next((r for r in real["rows"]
                     if r["action"] == facts["decision"]["actual"]), None)
         if row is not None:
-            gap = (f"{row['mp_pct']:.0f}% מול "
-                   f"{real['rows'][0]['mp_pct']:.0f}%" if scoring_mp else
-                   f"פער ממוצע של {abs(row['ev_imp']):.2f} IMP")
+            gap = (f'<span class="ltr">{row["mp_pct"]:.0f}%</span> מול '
+                   f'<span class="ltr">{real["rows"][0]["mp_pct"]:.0f}%</span>'
+                   if scoring_mp else
+                   f'פער ממוצע של <span class="ltr">'
+                   f'{abs(row["ev_imp"]):.2f} IMP</span>')
             lines.append(
                 f"ההכרזה שבחרת בפועל ({actual}) אינה ההמלצה — {gap} "
                 f"מול הפעולה המובילה.")
-    lines.append(facts["stability"]["note"])
     return "<p>" + "</p>\n<p>".join(lines) + "</p>"
 
 
@@ -315,6 +298,18 @@ h3 { font-size: 15px; margin: 16px 0 6px; }
 .red { color: var(--he-red); }
 .ltr { direction: ltr; unicode-bidi: isolate; }
 .hand .cards { letter-spacing: 1px; font-weight: 600; margin-inline: 2px; }
+.handbox { display: inline-block; border: 1px solid var(--line);
+  border-radius: 10px; background: var(--gold-bg); padding: 10px 16px;
+  font-size: 18px; line-height: 1.5; }
+.handbox .hb-row { display: flex; gap: 10px; align-items: baseline; }
+.handbox .hb-cards { font-weight: 700; letter-spacing: 2px;
+  font-family: "Segoe UI", Arial, sans-serif; }
+.hb-hcp { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.rec-banner { background: var(--rec-bg); border-right: 5px solid var(--win);
+  border-radius: 8px; padding: 12px 16px; margin: 14px 0; font-size: 16px; }
+.rec-banner p { margin: 4px 0; }
+.auction-grid th.vul { background: #C8102E1f; color: #8F1020; }
+.auction-grid th.nv { background: #E6F4EA; color: #1A7A43; }
 .tablewrap { overflow-x: auto; max-width: 100%; }
 table { border-collapse: collapse; width: 100%; margin: 10px 0;
         font-size: 13.5px; }
@@ -376,28 +371,26 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
 <title>ניתוח הכרזה — BridgeTrainer</title>
 <style>{_CSS}</style></head><body>
 <h1>דוח ניתוח הכרזה</h1>
-<div class="subtitle">BridgeTrainer · {m['scoring_he']} ·
-{_engine_label(facts)} ·
-{m['vul_he']} · מחלק: {m['dealer_he']} ·
-מנסח: {'LLM' if p.get('narrator') == 'llm' else 'תבניות (ללא LLM)'}</div>""")
+<div class="subtitle">BridgeTrainer · {m['scoring_he']} · {m['vul_he']} ·
+מחלק: {m['dealer_he']} · {_engine_label(facts)}</div>""")
+
+    # the bottom line first — one recommendation, no hedging
+    parts.append(f'<div class="rec-banner">{p["conclusion_html"]}</div>')
 
     # 1 -----------------------------------------------------------------
-    parts.append('<h2>1. תיאור המצב וקריאת המכרז</h2><div class="card">')
-    parts.append(p["situation_html"])
+    parts.append('<h2>1. היד והמכרז</h2><div class="card">')
+    parts.append(hand_box(facts["hand"]["pbn"], facts["hand"]["hcp"]))
     parts.append(_auction_table(facts))
-    fallback_rows = [c for c in facts["auction"]
-                     if (c["is_fallback"] or c["is_override"]) and c["note"]]
-    if facts["transparency_notes"] or fallback_rows:
-        parts.append("<h3>הערות שקיפות על פרשנות המכרז</h3>")
-        for n in facts["transparency_notes"]:
-            parts.append(f'<div class="note">{html.escape(n)}</div>')
+    parts.append(p["situation_html"])
+    for n in facts["transparency_notes"]:
+        parts.append(f'<div class="note">{html.escape(n)}</div>')
     parts.append("</div>")
 
     # 2 -----------------------------------------------------------------
-    # owner spec: a summary card for candidates the engine takes seriously
-    # (policy >= 2%) or that EARNED it in the simulation (top 3 by result)
-    # or that the user asked about; the rest still appear in the table.
-    parts.append('<h2>2. הפעולות המועמדות — ניתוח</h2>')
+    # a summary card for candidates the engine takes seriously (policy
+    # >= 2%) or that EARNED it in the simulation (top 3 by result) or that
+    # the user asked about; the rest still appear in the table.
+    parts.append('<h2>2. הפעולות המועמדות</h2>')
     skipped = []
     for i, row in enumerate(real["rows"]):
         in_summary = (i < 3 or row.get("ben_p", 1.0) >= 0.02
@@ -411,7 +404,7 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
             if row["action"] == facts["decision"]["actual"] else ""
         rec = " — הפעולה המומלצת" \
             if row["action"] == facts["recommended"] else ""
-        added = " (מועמד שהוספת)" if row.get("user_added") else ""
+        added = " (מועמדת שהוספת)" if row.get("user_added") else ""
         parts.append(f'<div class="card"><h3>{token_html(row["action"])}'
                      f'{rec}{star}{added}</h3>')
         parts.append(p["candidates_html"].get(
@@ -419,48 +412,33 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
         parts.append("</div>")
     if skipped:
         parts.append(
-            '<p class="small">מועמדות נוספות שנבדקו ומופיעות בטבלה בסעיף '
+            '<p class="small">מועמדות נוספות שנבדקו מופיעות בטבלה בסעיף '
             '3: ' + ", ".join(token_html(t) for t in skipped) + '.</p>')
 
     # 3 -----------------------------------------------------------------
-    parts.append('<h2>3. טבלת תוצאות הסימולציה</h2><div class="card">')
+    parts.append('<h2>3. תוצאות הסימולציה</h2><div class="card">')
     parts.append(_results_table(facts, "realistic"))
     parts.append(
-        f'<p class="small">מדגם בפועל: {m["n_deals"]} חלוקות '
-        f'(מדגם אפקטיבי ESS: {m["ess"]}); '
-        + ("הדגימה נעצרה מוקדם — ההפרש בין שתי הפעולות המובילות הוכרע "
-           "סטטיסטית. " if m["stopped_early"] else
-           "הדגימה מוצתה עד התקרה. ")
-        + ("עמודת ה-IMP מחושבת מול החלופה הקשה ביותר של כל פעולה, "
-           "בניקוד דאבל-דאמי על חוזה הרולאאוט."
-           if len(facts["policies"]) == 1 else
-           'עמודת ה-IMP מחושבת מול החלופה הקשה ביותר של כל פעולה, לאחר '
-           'כיול single-dummy; עמודת DD גולמי מוצגת לצידה (INV5).')
-        + "</p>")
-    if m["in_dd_fog"]:
-        parts.append('<div class="note">אזהרת "ערפל DD": ההמלצה לפי הציון '
-                     'הגולמי ולפי הציון המכויל שונה — הבעיה נמצאת בטווח '
-                     'שבו הנחת המשחק המושלם משנה את התשובה.</div>')
-    parts.append("<h3>" + ("אמינות מנוע ההמשכים"
-                           if len(facts["policies"]) == 1
-                           else "יציבות בין מדיניות ההמשך") + "</h3>")
-    badge = ('<span class="badge stable">מסקנה יציבה</span>'
-             if facts["stability"]["stable"]
-             else '<span class="badge fragile">רגיש להנחות</span>')
-    parts.append(f"<p>{badge} {html.escape(facts['stability']['note'])}</p>")
-    parts.append(_policy_summary_table(facts))
+        f'<p class="small">מדגם: <span class="ltr">{m["n_deals"]}</span> '
+        f'חלוקות · התאמת המכרז לשיטת המנוע: '
+        f'<span class="ltr">{m["acceptance_rate"] * 100:.0f}%</span> · '
+        f'<span class="ltr">seed {m["seed"]}</span> · '
+        f'<span class="ltr">{m["elapsed_s"]:.0f}</span> שניות. '
+        f'ה-IMP מחושב מול החלופה החזקה ביותר לכל פעולה, בניקוד '
+        f'דאבל-דאמי; ההמשכים בכל חלוקה הוכרזו על ידי המנוע עבור כל '
+        f'ארבעת המושבים עד סוף המכרז.</p>')
     parts.append("</div>")
 
     # 4 -----------------------------------------------------------------
-    parts.append('<h2>4. טבלאות תדירויות מפתח</h2><div class="card">')
-    parts.append("<h3>תגובת השותף הראשונה (מדיניות ריאלית)</h3>")
+    parts.append('<h2>4. שכיחויות מפתח</h2><div class="card">')
+    parts.append("<h3>תגובת השותף הראשונה</h3>")
     parts.append(_partner_response_table(facts))
     parts.append("<h3>החוזים הסופיים השכיחים</h3>")
     parts.append(_contracts_table(facts))
     parts.append("</div>")
 
     # 5 -----------------------------------------------------------------
-    parts.append('<h2>5. חלוקות מייצגות מהסימולציה</h2>')
+    parts.append('<h2>5. חלוקות מייצגות</h2>')
     rec_tok, alt_tok = facts["top_pair"]["a"], facts["top_pair"]["b"]
     for rep in facts["representative"]:
         parts.append('<div class="card">')
@@ -468,9 +446,9 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
         parts.append(_deal_diagram(rep["hands"], facts["meta"]["my_seat"]))
         parts.append(
             f'<p>{token_html(rec_tok)} מוביל ל-{contract_html(rep["contract_top"])} '
-            f'(ציון {rep["score_top"]:+.0f}); '
+            f'(<span class="ltr">{rep["score_top"]:+.0f}</span>); '
             f'{token_html(alt_tok)} מוביל ל-{contract_html(rep["contract_alt"])} '
-            f'(ציון {rep["score_alt"]:+.0f}). '
+            f'(<span class="ltr">{rep["score_alt"]:+.0f}</span>). '
             f'הפרש: <b class="ltr">{rep["imp_swing"]:+.0f} IMP</b> '
             f'לטובת {token_html(rec_tok if rep["imp_swing"] >= 0 else alt_tok)}.</p>')
         for tok, cont in ((rec_tok, rep.get("cont_top")),
@@ -479,59 +457,6 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
                          f'{token_html(tok)}: {_continuation_html(cont)}</p>')
         parts.append("</div>")
 
-    # 6 -----------------------------------------------------------------
-    parts.append('<h2>6. סייגים על הסימולציה</h2><div class="card"><ul>')
-    parts.append(
-        f"<li>גודל מדגם: {m['n_deals']} חלוקות (ESS {m['ess']}), "
-        f"שיעור קבלה בדגימה {m['acceptance_rate'] * 100:.3f}%. "
-        f"רווח הסמך של ההפרש המוביל: ±{facts['top_pair']['ci']:.2f} IMP "
-        f"(95%).</li>")
-    if m["shortfall"]:
-        parts.append(
-            f"<li>הדגימה לא השלימה את התקרה (חסרות {m['shortfall']} "
-            f"חלוקות) — רווחי הסמך הורחבו פי {m['ci_widen']}.</li>")
-    if len(facts["policies"]) == 1:
-        parts.append(
-            "<li>הניקוד הוא דאבל-דאמי גולמי על החוזה שאליו הגיע המכרז "
-            "המדומה בכל חלוקה. דאבל-דאמי מחמיא מעט לכרוז (במיוחד ב-NT); "
-            "מכיוון שהוא מוחל באופן זהה על כל המועמדים, ההשוואה ביניהם "
-            "יציבה יותר מהערכים המוחלטים.</li>")
-    else:
-        parts.append(
-            "<li>תוצאות דאבל-דאמי מחמיאות לכרוז (במיוחד ב-NT); הציונים "
-            "המוצגים עברו כיול single-dummy סימטרי לפי טבלה נערכת "
-            "(bridge_trainer/dd/correction_table.yaml), ושתי הרמות — "
-            "גולמי ומכויל — מוצגות בטבלת התוצאות.</li>")
-    if len(facts["policies"]) == 1:
-        only = next(iter(facts["policies"].values()))
-        parts.append(
-            f"<li>המשכי המכרז: {html.escape(only['he'])} — הדגימה, "
-            "הכרזות ההמשך של כל ארבעת המושבים והחוזה הסופי בכל חלוקה "
-            "מגיעים ממנוע ההכרזות הנוירוני, לא מחוקים ידניים. עקביות "
-            "המכרז עם שיטת המנוע מוצגת בסעיף 3.</li>")
-    else:
-        parts.append(
-            "<li>המשכי המכרז חושבו תחת שלוש מדיניות (שמרנית / ריאלית / "
-            "חסם עליון רואה-קלפים); כל הפרמטרים ב-analysis/policies.yaml. "
-            "בכל המדיניות היריבים מכפילים עונשין חוזה בגובה 4+ עם סטאק "
-            "בשליט.</li>")
-    if scoring_mp:
-        parts.append(
-            "<li>במאצ'פוינטס ה\"שדה\" מקורב על ידי תוצאות החלופות שנבדקו "
-            "על אותה חלוקה — קירוב מקובל בהעדר נתוני שדה אמיתיים.</li>")
-    parts.append(
-        f"<li>ריצה דטרמיניסטית: seed {m['seed']}; זמן חישוב "
-        f"{m['elapsed_s']} שניות.</li>")
-    parts.append("</ul></div>")
-
-    # 7 -----------------------------------------------------------------
-    parts.append('<h2>7. מסקנה</h2><div class="card">')
-    parts.append(p["conclusion_html"])
-    parts.append("</div>")
-
-    parts.append('<p class="small">הדוח הופק על ידי מנוע הניתוח של '
-                 'BridgeTrainer: כל המספרים חושבו בסימולציה מקומית '
-                 '(דאבל-דאמי + כיול), ללא מודל שפה בשכבת החישוב.</p>')
     parts.append("</body></html>")
     return "\n".join(parts)
 
@@ -539,7 +464,7 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
 # ---------------------------------------------------------------------------
 def _engine_label(facts: dict) -> str:
     if len(facts["policies"]) == 1:
-        return html.escape(next(iter(facts["policies"].values()))["he"])
+        return "מנוע Ben"
     m = facts["meta"]
     return "שיטה: " + ("SAYC" if m["system"] == "sayc" else "2/1 Game Force")
 
@@ -547,11 +472,14 @@ def _engine_label(facts: dict) -> str:
 def _auction_table(facts: dict) -> str:
     rows_calls = facts["auction"]
     dealer = facts["meta"]["dealer"]
+    vul = facts["meta"]["vul"]
     order = ["W", "N", "E", "S"]
     out = ['<div class="tablewrap"><table class="auction-grid"><tr>']
     for s in order:
         mark = " (אתה)" if s == facts["meta"]["my_seat"] else ""
-        out.append(f"<th>{SEAT_HE[s]}{mark}</th>")
+        side = "NS" if s in "NS" else "EW"
+        cls = "vul" if vul in (side, "Both") else "nv"
+        out.append(f'<th class="{cls}">{SEAT_HE[s]}{mark}</th>')
     out.append("</tr><tr>")
     pad = order.index(dealer)
     for _ in range(pad):
@@ -575,8 +503,8 @@ def _auction_table(facts: dict) -> str:
     for _ in range(col, 4):
         out.append("<td></td>")
     out.append("</tr></table></div>")
-    out.append('<p class="small">ריחוף/מגע על הכרזה מציג את פרשנותה. '
-               'ההכרזה המנותחת מסומנת במסגרת.</p>')
+    out.append('<p class="small">אדום — צד פגיע; ירוק — צד לא פגיע. '
+               'התור המנותח מסומן ?.</p>')
     # call-by-call meanings list — only when glosses exist (the Ben path
     # carries no per-call system glosses by owner decision)
     if any(c["he"] for c in rows_calls):
@@ -599,8 +527,8 @@ def _results_table(facts: dict, policy: str) -> str:
     # short headers — the table must fit a phone screen and a printed page.
     # single-engine (Ben) facts carry one score level, so no raw-DD column.
     single = len(facts["policies"]) == 1
-    head = ["פעולה", "IMP ממוצע", "רווח סמך"] + \
-        ([] if single else ["DD גולמי"]) + ["% זכייה", "% הפסד", "חציון"]
+    head = ["פעולה", "IMP ממוצע", "בר-סמך"] + \
+        ([] if single else ["DD גולמי"]) + ["% רווח", "% הפסד", "חציון"]
     if scoring_mp:
         head.insert(1, "MP %")
     out = ['<div class="tablewrap"><table><tr>'] + \
@@ -661,7 +589,7 @@ def _partner_response_table(facts: dict) -> str:
 def _contracts_table(facts: dict) -> str:
     pol = facts["policies"]["realistic"]
     out = ['<div class="tablewrap"><table><tr><th>הפעולה</th>'
-           "<th>חוזים סופיים (מדיניות ריאלית)</th></tr>"]
+           "<th>חוזים סופיים (שכיחות במדגם)</th></tr>"]
     for row in pol["rows"]:
         cells = [f"{contract_html(c)} <span class='ltr'>"
                  f"{share * 100:.0f}%</span>"
@@ -676,7 +604,7 @@ def _continuation_html(cont: list | None) -> str:
     """(seat, call) pairs -> 'מערב: פאס · צפון: 5♣ · ...' (trailing passes
     were already trimmed by the pipeline)."""
     if not cont:
-        return "שלושה פאסים — ההכרזה נשארת."
+        return "שלושה פאסים — סוף המכרז."
     bits = [f"{SEAT_HE[s]}: {token_html(t)}" for s, t in cont]
     return " · ".join(bits) + " · ואז פאסים עד הסוף."
 

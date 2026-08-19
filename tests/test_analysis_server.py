@@ -58,7 +58,7 @@ def test_analyze_endpoint_full_flow(server):
     # the saved HTML report is served back and is a full spec-4.1 document
     with urllib.request.urlopen(server + rep["html_url"]) as r:
         html_doc = r.read().decode()
-    assert "חלוקות מייצגות" in html_doc and "מסקנה" in html_doc
+    assert "חלוקות מייצגות" in html_doc and "rec-banner" in html_doc
 
     with urllib.request.urlopen(server + rep["json_url"]) as r:
         facts = json.loads(r.read())
