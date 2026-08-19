@@ -112,6 +112,16 @@ def resolve_engine():
     return run_analysis_ben
 
 
+def _plan_row(row) -> list | None:
+    """One continuation rule from the wire: either a {c,r,m} map (the web
+    client — Firestore rejects nested arrays) or a 3-list (local tools)."""
+    if isinstance(row, dict):
+        row = [row.get("c"), row.get("r"), row.get("m")]
+    if not isinstance(row, (list, tuple)) or len(row) < 3 or None in row[:3]:
+        return None
+    return [str(t)[:3] for t in row[:3]]
+
+
 def process_request(req: dict, narration_available: bool = False,
                     engine=None) -> tuple:
     """Validate + run one analysis. Returns (summary, html, facts_json).
@@ -127,8 +137,8 @@ def process_request(req: dict, narration_available: bool = False,
         if req.get("candidates") else None,
         extra_candidates=[str(c)[:3] for c in req["extra_candidates"]][:4]
         if req.get("extra_candidates") else [],
-        plans=[[str(t)[:3] for t in row][:3] for row in req["plans"]
-               if isinstance(row, (list, tuple))][:6]
+        plans=[_plan_row(row) for row in req["plans"]
+               if _plan_row(row)][:6]
         if req.get("plans") else [],
         seed=int(req.get("seed", 1)),
         max_deals=max(100, max_deals),
