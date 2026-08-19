@@ -22,10 +22,27 @@ def _steps():
 def test_deploy_targets_cloud_run_in_the_firestore_region():
     assert DEPLOY["env"]["REGION"] == "me-west1"
     run_step = next(s for s in _steps()
-                    if s.get("name") == "Build and deploy to Cloud Run")
+                    if s.get("name") == "Deploy to Cloud Run")
     assert "--memory 2Gi" in run_step["run"]
     assert "--concurrency 1" in run_step["run"]
     assert "--no-allow-unauthenticated" in run_step["run"]
+
+
+def test_build_streams_its_logs_into_the_actions_job():
+    # `gcloud run deploy --source` hides docker errors behind "check build
+    # logs"; an explicit `gcloud builds submit` streams them into the job.
+    build = next(s for s in _steps()
+                 if s.get("name") == "Build the container image")
+    assert "gcloud builds submit" in build["run"]
+    deploy = next(s for s in _steps() if s.get("name") == "Deploy to Cloud Run")
+    assert "--image" in deploy["run"] and "--source" not in deploy["run"]
+
+
+def test_dockerfile_avoids_source_only_pins_on_the_slim_base():
+    # psutil==5.9.0 (Ben's pin) has no cp312 wheel; the slim image has no
+    # compiler, so the build must bump it to a wheel-backed release.
+    assert "psutil==5.9.8" in DOCKER
+    assert re.search(r"sed .*psutil", DOCKER)
 
 
 def test_deploy_wires_the_firestore_trigger_and_kills_the_old_function():

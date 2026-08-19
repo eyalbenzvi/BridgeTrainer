@@ -45,10 +45,28 @@ jobs:
             --key-file="$RUNNER_TEMP/sa-key.json"
           gcloud config set project "$PROJECT"
 
-      - name: Build and deploy to Cloud Run
+      # An explicit Cloud Build (instead of `run deploy --source`) streams
+      # the full docker-build log into this job's output — the source deploy
+      # only prints "Build failed; check build logs" on error, which the
+      # key can't follow up on from a phone.
+      - name: Build the container image
+        run: |
+          IMAGE="$REGION-docker.pkg.dev/$PROJECT/cloud-run-source-deploy/$SERVICE:$GITHUB_SHA"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          gcloud artifacts repositories describe cloud-run-source-deploy \
+            --location "$REGION" >/dev/null 2>&1 || \
+            gcloud artifacts repositories create cloud-run-source-deploy \
+              --repository-format docker --location "$REGION" \
+              --description "Cloud Run deploy images"
+          gcloud builds submit . \
+            --region "$REGION" \
+            --tag "$IMAGE" \
+            --timeout 1800
+
+      - name: Deploy to Cloud Run
         run: |
           gcloud run deploy "$SERVICE" \
-            --source . \
+            --image "$IMAGE" \
             --region "$REGION" \
             --memory 2Gi --cpu 1 --timeout 900 \
             --concurrency 1 --max-instances 2 --min-instances 0 \
