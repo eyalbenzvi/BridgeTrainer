@@ -116,6 +116,16 @@ def test_plans_parse_into_per_candidate_rules():
     assert _plans_by_candidate(None) == {}
 
 
+def test_worker_accepts_plan_maps_and_lists():
+    # Firestore rejects nested arrays, so the web client ships {c,r,m}
+    # maps; local tools still send 3-lists. Both must normalize.
+    from bridge_trainer.analysis.worker import _plan_row
+    assert _plan_row({"c": "X", "r": "3S", "m": "3NT"}) == ["X", "3S", "3NT"]
+    assert _plan_row(["X", "3H", "P"]) == ["X", "3H", "P"]
+    assert _plan_row({"c": "X", "r": "3S"}) is None
+    assert _plan_row("junk") is None
+
+
 def test_stop_rule_has_no_first_crossing_bias():
     from bridge_trainer.analysis.ben_pipeline import _should_stop
     # the shipped 2D-vs-P signature — mean barely over the CI. The old rule

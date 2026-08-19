@@ -5742,8 +5742,10 @@ async function submit() {
     };
     const extras = UI.extraCandidates();
     if (extras.length) req.extra_candidates = extras;
+    // Firestore rejects nested arrays -> ship plans as {c,r,m} maps
     const plans = UI.plans();
-    if (plans.length) req.plans = plans;
+    if (plans.length)
+      req.plans = plans.map(([c, r, m]) => ({c: c, r: r, m: m}));
     await window.BT.submitAnalysis(req);
     st.textContent = "הבקשה נשלחה! החישוב רץ בענן — בדרך כלל דקה-שתיים " +
       "(עד ~10 דקות במסלול הגיבוי); הרשימה למטה תתעדכן לבד כשהדוח מוכן.";
