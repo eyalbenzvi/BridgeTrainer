@@ -245,21 +245,14 @@ def narrate_conclusion(facts: dict) -> str:
     real = facts["policies"]["realistic"]
     scoring_mp = facts["meta"]["scoring"] == "MP"
     lines = []
-    if real["toss_up"]:
-        tied = " / ".join(token_html(t) for t in
-                          [real["top_action"]] + real["toss_up_with"])
-        lines.append(
-            f"השורה התחתונה: המדגם אינו מפריד בין {tied} — ההפרש "
-            f"({tp['mean_imp']:+.2f} IMP) קטן מרווח הסמך (±{tp['ci']:.2f}) "
-            f"או מסף המשמעות המעשית (0.5 IMP). זו החלטה שקולה באמת, "
-            f"ואף בחירה אינה טעות.")
-    else:
-        metric = (f"{real['rows'][0]['mp_pct']:.0f}% במאצ'פוינטס"
-                  if scoring_mp else
-                  f"{tp['mean_imp']:+.2f} IMP (רווח סמך ±{tp['ci']:.2f})")
-        lines.append(
-            f"השורה התחתונה: {rec} היא הפעולה המומלצת — {metric} מול "
-            f"החלופה הקרובה ביותר ({token_html(tp['b'])}).")
+    # A single bottom line, always: the recommendation, with its measured
+    # margin as data (owner decision — no "either is fine" hedging).
+    metric = (f"{real['rows'][0]['mp_pct']:.0f}% במאצ'פוינטס"
+              if scoring_mp else
+              f"{tp['mean_imp']:+.2f} IMP (רווח סמך ±{tp['ci']:.2f})")
+    lines.append(
+        f"השורה התחתונה: ההמלצה היא {rec} — {metric} מול "
+        f"החלופה הקרובה ביותר ({token_html(tp['b'])}).")
     if actual_tok is None:
         pass   # stem-only mode: the user's choice is unknown by design
     elif facts["actual_was_recommended"]:

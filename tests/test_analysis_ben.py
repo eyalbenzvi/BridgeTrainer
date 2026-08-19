@@ -60,6 +60,55 @@ def test_concat_batches_pairs_rows():
     assert m.quality == pytest.approx(0.8)
 
 
+def test_stop_rule_has_no_first_crossing_bias():
+    from bridge_trainer.analysis.ben_pipeline import _should_stop
+    # the shipped 2D-vs-P signature — mean barely over the CI. The old rule
+    # stopped here and reported a fabricated edge; the new one must not.
+    assert not _should_stop(0.43, 0.401, 600)
+    # precision target reached: stop regardless of the mean
+    assert _should_stop(0.05, 0.35, 600)
+    # clear dominance stops, but only once the sample is respectable
+    assert _should_stop(1.0, 0.4, 600)
+    assert not _should_stop(1.0, 0.4, 400)
+
+
+@pytest.mark.skipif(not (os.path.exists(BEN_VENV)
+                         and os.path.isdir(os.path.join(BEN_HOME, "src"))),
+                    reason="Ben venv/checkout not installed")
+def test_adaptive_batches_sample_fresh_deals_subprocess():
+    """Ben reseeds its sampler from hash(hand) on every call, so two
+    evaluate() calls on the same bot return IDENTICAL deals — the bug that
+    turned '600 samples' into 200 triplicated ones. The batch loop varies
+    bot.hash_integer; this pins both halves of that contract."""
+    code = r"""
+import json, sys
+sys.path.insert(0, __ROOT__)
+import numpy as np
+from bridge_trainer.engine.ben import get_engine
+
+engine = get_engine()
+bot = engine.bot("J87.976.A64.K843", 0, 0, (False, False))
+stem = ["P", "P", "1D", "2C", "P", "P", "X", "P"]
+memo = {}
+a = engine.evaluate(bot, 0, stem, ["2D"], n_samples=40, dd_memo=memo)
+b = engine.evaluate(bot, 0, stem, ["2D"], n_samples=40, dd_memo=memo)
+bot.hash_integer = (bot.hash_integer + 1) % (2 ** 31)
+c = engine.evaluate(bot, 0, stem, ["2D"], n_samples=40, dd_memo=memo)
+print(json.dumps({
+    "same_hash_identical": a.sample_deals == b.sample_deals,
+    "new_hash_fresh": a.sample_deals != c.sample_deals,
+}))
+""".replace("__ROOT__", repr(os.path.abspath(
+        os.path.join(os.path.dirname(__file__), ".."))))
+    env = dict(os.environ, BEN_HOME=BEN_HOME)
+    out = subprocess.run([BEN_VENV, "-c", code], capture_output=True,
+                         text=True, timeout=600, env=env)
+    assert out.returncode == 0, out.stderr[-2000:]
+    data = json.loads(out.stdout.strip().splitlines()[-1])
+    assert data["same_hash_identical"]   # Ben's determinism (the trap)
+    assert data["new_hash_fresh"]        # the loop's antidote
+
+
 @pytest.mark.skipif(not (os.path.exists(BEN_VENV)
                          and os.path.isdir(os.path.join(BEN_HOME, "src"))),
                     reason="Ben venv/checkout not installed")
