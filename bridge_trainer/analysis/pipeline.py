@@ -52,6 +52,9 @@ class AnalysisRequest:
     system: str = "two_over_one"
     scoring: str = "IMP"        # or "MP"
     candidates: list[str] | None = None   # None -> auto-suggest
+    # calls the user asks to test IN ADDITION to the engine's own menu —
+    # the answer to "the menu skipped 3NT even though experts bid it"
+    extra_candidates: list[str] = field(default_factory=list)
     overrides: dict[int, dict] = field(default_factory=dict)
     seed: int = 1
     max_deals: int = DEFAULT_MAX_DEALS

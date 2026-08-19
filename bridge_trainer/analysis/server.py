@@ -49,6 +49,8 @@ def analyze_decision_points(payload: dict, reports_dir: Path) -> list[dict]:
             auction=list(payload["auction"]), decision_index=int(idx),
             scoring=payload.get("scoring", "IMP"),
             candidates=payload.get("candidates"),
+            extra_candidates=[str(c)[:3] for c in
+                              payload.get("extra_candidates") or []][:4],
             seed=int(payload.get("seed", 1)),
             max_deals=int(payload.get("max_deals", 2000)),
         )

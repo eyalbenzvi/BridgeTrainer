@@ -60,6 +60,35 @@ def test_concat_batches_pairs_rows():
     assert m.quality == pytest.approx(0.8)
 
 
+def test_user_extras_join_the_menu():
+    """A mainstream call the policy starves (3NT over a preempt at 0.9%)
+    must be evaluable when the user asks — legal extras join the menu,
+    duplicates and illegal ones don't."""
+    from bridge_trainer.analysis.ben_pipeline import _with_extras
+    from bridge_trainer.validate.auction_state import replay
+    state = replay("W", ["3C", "P", "P"])
+    menu, added = _with_extras(["3D", "X", "P"],
+                               ["3NT", "3D", "2C", "4D"], state)
+    assert menu == ["3D", "X", "P", "3NT", "4D"]   # dup + illegal dropped
+    assert added == ["3NT", "4D"]
+    menu, added = _with_extras(["3D"], None, state)
+    assert menu == ["3D"] and added == []
+    # the cap: at most 4 extras are honored
+    menu, added = _with_extras([], ["3NT", "4C", "4D", "4H", "4S"], state)
+    assert len(added) == 4
+
+
+def test_web_ui_exposes_extra_candidates():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent / "bridge_trainer"
+    ui = (root / "web" / "bt-analyze-ui.js").read_text(encoding="utf-8")
+    assert "extraCandidates" in ui and "btn-extras" in ui
+    site = (root / "app" / "webapp.py").read_text(encoding="utf-8")
+    assert "extra_candidates = extras" in site and "extras-row" in site
+    local = (root / "analysis" / "webui.py").read_text(encoding="utf-8")
+    assert "extra_candidates" in local and "extras-row" in local
+
+
 def test_stop_rule_has_no_first_crossing_bias():
     from bridge_trainer.analysis.ben_pipeline import _should_stop
     # the shipped 2D-vs-P signature — mean barely over the CI. The old rule

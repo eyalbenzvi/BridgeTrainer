@@ -74,6 +74,28 @@ def _should_stop(mean: float, half: float, n: int) -> bool:
     return n >= 3 * BLOCK_SAMPLES and mean > 2.0 * half
 
 
+MAX_EXTRA_CANDIDATES = 4
+
+
+def _with_extras(candidates: list[str], extras, state) -> tuple[list, list]:
+    """Union the user's must-test calls into the engine menu.
+
+    The menu is Ben's policy over the floor, so a call Ben's style shuns
+    (a 0.9% 3NT over a preempt, say) never gets evaluated even when it is
+    a mainstream expert choice. The rollout layer doesn't care whether the
+    policy likes the call — it forces it and continues all four hands — so
+    letting the user seat extra candidates is sound. Returns the widened
+    menu and which extras actually joined (legal, non-duplicate)."""
+    out = list(candidates)
+    added = []
+    for tok in list(extras or [])[:MAX_EXTRA_CANDIDATES]:
+        tok = str(tok).upper()
+        if tok not in out and state.is_legal(tok):
+            out.append(tok)
+            added.append(tok)
+    return out, added
+
+
 def ben_available() -> bool:
     home = os.environ.get("BEN_HOME", os.path.expanduser("~/ben"))
     return os.path.isdir(os.path.join(home, "src"))
@@ -187,6 +209,8 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
     if actual is not None and actual not in candidates:
         candidates = [actual] + candidates
     state = replay(req.dealer, stem)
+    candidates, user_added = _with_extras(candidates, req.extra_candidates,
+                                          state)
     candidates = [c for c in candidates if state.is_legal(c)]
     if not candidates:
         raise ValueError("no legal candidate actions at the decision point")
@@ -261,6 +285,14 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
     notes = [f"המשכי המכרז והדגימה: מנוע Ben ‏({engine.model_id}). "
              f"בנקודת ההחלטה Ben עצמו היה מכריז "
              f"{ben_top} (הסתברות {ben_top_p * 100:.0f}%)."]
+    if user_added:
+        pol_p = {it.bid: float(it.p) for it in policy}
+        for tok in user_added:
+            notes.append(
+                f"מועמד שהוספת לבדיקה: {tok} — במדיניות Ben הוא מקבל "
+                f"{pol_p.get(tok, 0.0) * 100:.1f}% בנקודת ההחלטה; "
+                f"ההערכה בסימולציה זהה לשאר המועמדים (המשך מלא של "
+                f"כל ארבע הידיים).")
     if consistency < QUALITY_BAD:
         notes.append(
             f"אזהרה: עקביות המכרז עם שיטת המנוע נמוכה מאוד "

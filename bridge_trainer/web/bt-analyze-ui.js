@@ -137,8 +137,38 @@
     return lvl > st.level ||
       (lvl === st.level && DENOMS.indexOf(dn) > DENOMS.indexOf(st.denom));
   }
+  /* user-added candidates: calls to test IN ADDITION to the engine menu
+     (the engine's policy can starve a mainstream call — e.g. 3NT over a
+     preempt — below the menu floor; the rollout evaluates it fine) */
+  let extras = [];
+  let extrasMode = false;
+  const MAX_EXTRAS = 4;
+  function toggleExtra(tok) {
+    const i = extras.indexOf(tok);
+    if (i >= 0) extras.splice(i, 1);
+    else if (extras.length < MAX_EXTRAS && isLegal(tok)) extras.push(tok);
+    refreshExtras();
+  }
+  function refreshExtras() {
+    const row = $("extras-row");
+    if (!row) return;
+    const st = replayState();
+    const heroTurn = !st.finished && st.turn === heroSeat();
+    row.hidden = !heroTurn;
+    if (!heroTurn && extrasMode) extrasMode = false;
+    if (heroTurn) extras = extras.filter(isLegal);
+    const btn = $("btn-extras");
+    btn.classList.toggle("on", extrasMode);
+    $("extras-note").hidden = !extrasMode;
+    $("extras-chips").innerHTML = extras.map((t) =>
+      `<span class="chip" data-tok="${t}">${tokHtml(t)} ✕</span>`).join("");
+    document.querySelectorAll("#extras-chips .chip").forEach((c) => {
+      c.onclick = () => toggleExtra(c.dataset.tok);
+    });
+  }
   function addCall(tok) {
     if (!isLegal(tok)) return;
+    if (extrasMode) { toggleExtra(tok); return; }
     auction.push(tok);
     refreshAuction();
   }
@@ -206,6 +236,7 @@
     $("btn-x").disabled = !isLegal("X");
     $("btn-xx").disabled = !isLegal("XX");
     $("btn-undo").disabled = auction.length === 0;
+    refreshExtras();
     onChange();
   }
 
@@ -223,6 +254,11 @@
       $("clearhand").onclick = () => { sel.clear(); refreshPicker(); };
       $("dealer").onchange = refreshAuction;
       $("seat").onchange = refreshAuction;
+      if ($("btn-extras"))
+        $("btn-extras").onclick = () => {
+          extrasMode = !extrasMode;
+          refreshExtras();
+        };
       refreshAuction();
     },
     handSize: () => sel.size,
@@ -236,5 +272,6 @@
       const st = replayState();
       return sel.size === 13 && !st.finished && st.turn === heroSeat();
     },
+    extraCandidates: () => extras.filter(isLegal),
   };
 })();

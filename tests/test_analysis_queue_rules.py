@@ -21,8 +21,8 @@ PAGE_SRC = (ROOT / "bridge_trainer" / "app" / "webapp.py").read_text(
 # don't break; the page no longer sends them.
 REQ_REQUIRED = ["dealer", "vul", "my_seat", "my_hand", "auction",
                 "decision_index", "scoring"]
-REQ_OPTIONAL = ["system", "overrides", "narration", "candidates", "seed",
-                "max_deals"]
+REQ_OPTIONAL = ["system", "overrides", "narration", "candidates",
+                "extra_candidates", "seed", "max_deals"]
 
 
 def _block(name: str) -> str:
@@ -46,6 +46,9 @@ def test_requests_keys_are_locked_down():
     assert "r.auction.size() <= 40" in b
     assert "r.overrides.size() <= 40" in b
     assert "r.max_deals <= 2000" in b
+    for k in REQ_OPTIONAL:
+        assert f"'{k}'" in b, k
+    assert "r.extra_candidates.size() <= 4" in b
 
 
 def test_requests_client_may_not_update_status():
