@@ -47,7 +47,9 @@ from .pipeline import (AnalysisRequest, AnalysisResult, PolicyOutcome,
 from .systems.interpreter import CallMeaning
 
 BLOCK_SAMPLES = 200
-MAX_SAMPLES = 600
+MAX_SAMPLES = 1600
+SAMPLE_TIME_BUDGET_S = 420   # stop extending past this; Cloud Run kills the
+                             # request at 900s and Eventarc would redeliver
 MENU_P_FLOOR = 0.02      # forge's P_OPTION: policy mass that earns a seat
 MENU_MAX = 6
 QUALITY_WARN = 0.8       # sampler-quality thresholds for report warnings
@@ -55,6 +57,21 @@ QUALITY_BAD = 0.5
 BEN_POLICY_KEY = "realistic"   # facts slot the report treats as primary
 
 _ENGINE = None
+
+
+def _should_stop(mean: float, half: float, n: int) -> bool:
+    """Sequential stop WITHOUT the first-crossing bias.
+
+    Stopping the moment ``mean > half`` inflates borderline verdicts: on a
+    true near-zero difference the loop halts on whichever side drifts up
+    first and reports an edge the size of the CI (a shipped report showed
+    the exact signature, +0.43 against ±0.40). Stop only on a precision
+    target, or on clear dominance (mean > 2*CI, a ~4-sigma boundary that
+    first-crossing barely biases) once the sample is respectable.
+    """
+    if half <= TOSS_UP_PRECISION_IMPS:
+        return True
+    return n >= 3 * BLOCK_SAMPLES and mean > 2.0 * half
 
 
 def ben_available() -> bool:
@@ -177,12 +194,24 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
     # -- adaptive evaluation: concatenated Ben batches until the CI settles
     # (engine.merge_evaluations merges CANDIDATES on one sample set; here we
     # concatenate fresh sample BATCHES of the same candidates instead)
+    #
+    # Ben reseeds its sampler from hash(hero hand) on EVERY
+    # sample_hands_for_auction call ("same situation -> same result" by
+    # design), so seeding numpy's global RNG between batches changes
+    # nothing: every batch would duplicate the first, and the CI would
+    # shrink by 1/sqrt(k) on fabricated data. The batch loop must therefore
+    # vary bot.hash_integer itself — that is the seed Ben's
+    # get_random_generator() actually reads.
     dd_memo: dict = {}
     merged = None
     stopped_early = False
-    while merged is None or merged.n_samples < MAX_SAMPLES:
-        np.random.seed(req.seed + 7919 * (0 if merged is None
-                                          else merged.n_samples))
+    base_hash = int(bot.hash_integer)
+    batch_i = 0
+    while merged is None or (merged.n_samples < MAX_SAMPLES
+                             and time.perf_counter() - t0
+                             < SAMPLE_TIME_BUDGET_S):
+        bot.hash_integer = (base_hash + req.seed + 7919 * batch_i) % (2 ** 31)
+        batch_i += 1
         batch = engine.evaluate(bot, dealer_i, stem, candidates,
                                 n_samples=BLOCK_SAMPLES, dd_memo=dd_memo)
         merged = batch if merged is None else _concat_batches(merged, batch)
@@ -195,9 +224,10 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
             top = cmp_probe.candidates[0]
             diff = cmp_probe.imp_matrix[(top.action, top.best_alternative)]
             mean, half, _ = weighted_ci(diff, weights)
-            if mean > half or half <= TOSS_UP_PRECISION_IMPS:
+            if _should_stop(mean, half, merged.n_samples):
                 stopped_early = merged.n_samples < MAX_SAMPLES
                 break
+    bot.hash_integer = base_hash
 
     n = merged.n_samples
     weights = np.ones(n)
