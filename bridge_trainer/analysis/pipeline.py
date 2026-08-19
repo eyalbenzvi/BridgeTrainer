@@ -52,6 +52,12 @@ class AnalysisRequest:
     system: str = "two_over_one"
     scoring: str = "IMP"        # or "MP"
     candidates: list[str] | None = None   # None -> auto-suggest
+    # calls the user asks to test IN ADDITION to the engine's own menu —
+    # the answer to "the menu skipped 3NT even though experts bid it"
+    extra_candidates: list[str] = field(default_factory=list)
+    # continuation rules overriding the engine at the hero's first re-turn:
+    # [[candidate, partner_reply, my_call], ...]
+    plans: list = field(default_factory=list)
     overrides: dict[int, dict] = field(default_factory=dict)
     seed: int = 1
     max_deals: int = DEFAULT_MAX_DEALS
@@ -114,6 +120,10 @@ class AnalysisResult:
     elapsed_s: float
     seed: int
     in_dd_fog: bool
+    # Ben path extras: the engine's policy prior per candidate, and which
+    # candidates the user forced into the menu (both empty on legacy runs)
+    ben_prior: dict = field(default_factory=dict)
+    user_added: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

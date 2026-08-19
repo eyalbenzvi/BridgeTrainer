@@ -125,6 +125,11 @@ def process_request(req: dict, narration_available: bool = False,
         scoring=str(req.get("scoring", "IMP")),
         candidates=[str(c) for c in req["candidates"]]
         if req.get("candidates") else None,
+        extra_candidates=[str(c)[:3] for c in req["extra_candidates"]][:4]
+        if req.get("extra_candidates") else [],
+        plans=[[str(t)[:3] for t in row][:3] for row in req["plans"]
+               if isinstance(row, (list, tuple))][:6]
+        if req.get("plans") else [],
         seed=int(req.get("seed", 1)),
         max_deals=max(100, max_deals),
     )

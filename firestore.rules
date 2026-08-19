@@ -108,7 +108,8 @@ service cloud.firestore {
         && r.keys().hasOnly(['dealer', 'vul', 'my_seat', 'my_hand',
                              'auction', 'decision_index', 'system',
                              'scoring', 'overrides', 'narration',
-                             'candidates', 'seed', 'max_deals'])
+                             'candidates', 'extra_candidates', 'plans',
+                             'seed', 'max_deals'])
         && r.dealer in ['N', 'E', 'S', 'W']
         && r.my_seat in ['N', 'E', 'S', 'W']
         && r.vul in ['None', 'NS', 'EW', 'Both']
@@ -123,6 +124,11 @@ service cloud.firestore {
             || (r.overrides is map && r.overrides.size() <= 40))
         && (!('candidates' in r)
             || (r.candidates is list && r.candidates.size() <= 8))
+        && (!('extra_candidates' in r)
+            || (r.extra_candidates is list
+                && r.extra_candidates.size() <= 4))
+        && (!('plans' in r)
+            || (r.plans is list && r.plans.size() <= 6))
         && (!('max_deals' in r)
             || (r.max_deals is int && r.max_deals <= 2000));
     }

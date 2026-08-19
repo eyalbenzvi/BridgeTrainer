@@ -112,6 +112,8 @@ def build_facts(res: AnalysisResult) -> dict:
                 "median_imp": round(median, 1),
                 "mp_pct": round(pol.mp_pct[cand], 1),
                 "top_contracts": pol.contract_freqs[cand],
+                "ben_p": round(res.ben_prior.get(cand, 0.0), 4),
+                "user_added": cand in res.user_added,
             })
         rows.sort(key=lambda r: (-r["mp_pct"] if req.scoring == "MP"
                                  else -r["ev_imp"]))
@@ -392,17 +394,33 @@ def render_report(facts: dict, prose: dict | None = None) -> str:
     parts.append("</div>")
 
     # 2 -----------------------------------------------------------------
+    # owner spec: a summary card for candidates the engine takes seriously
+    # (policy >= 2%) or that EARNED it in the simulation (top 3 by result)
+    # or that the user asked about; the rest still appear in the table.
     parts.append('<h2>2. הפעולות המועמדות — ניתוח</h2>')
+    skipped = []
     for i, row in enumerate(real["rows"]):
+        in_summary = (i < 3 or row.get("ben_p", 1.0) >= 0.02
+                      or row.get("user_added")
+                      or row["action"] == facts["decision"]["actual"]
+                      or row["action"] == facts["recommended"])
+        if not in_summary:
+            skipped.append(row["action"])
+            continue
         star = " ★ (ההכרזה שלך בפועל)" \
             if row["action"] == facts["decision"]["actual"] else ""
         rec = " — הפעולה המומלצת" \
             if row["action"] == facts["recommended"] else ""
+        added = " (מועמד שהוספת)" if row.get("user_added") else ""
         parts.append(f'<div class="card"><h3>{token_html(row["action"])}'
-                     f'{rec}{star}</h3>')
+                     f'{rec}{star}{added}</h3>')
         parts.append(p["candidates_html"].get(
             row["action"], narrate_candidate(facts, row, i == 0)))
         parts.append("</div>")
+    if skipped:
+        parts.append(
+            '<p class="small">מועמדות נוספות שנבדקו ומופיעות בטבלה בסעיף '
+            '3: ' + ", ".join(token_html(t) for t in skipped) + '.</p>')
 
     # 3 -----------------------------------------------------------------
     parts.append('<h2>3. טבלת תוצאות הסימולציה</h2><div class="card">')

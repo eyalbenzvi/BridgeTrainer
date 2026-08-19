@@ -53,6 +53,13 @@ label { margin-inline-end:6px; }
 .bbox { direction:ltr; display:grid; grid-template-columns:repeat(5,1fr);
   gap:4px; max-width:330px; }
 .bbox button { height:36px; font-weight:700; padding:0; }
+.extras-row { margin-top:8px; }
+#btn-extras.on { outline:2px solid #2B6CB0; background:#2B6CB014; }
+#extras-chips .chip { display:inline-block; background:#2B6CB014;
+  border:1px solid #2B6CB0; border-radius:999px; padding:2px 10px;
+  margin:2px 4px; cursor:pointer; font-weight:600; direction:ltr; }
+.plan-row { margin:6px 0; font-size:13.5px; }
+.plan-row select { margin:0 3px; }
 .bcalls { display:flex; gap:6px; margin-top:8px; }
 .bcalls button { flex:1; height:36px; font-weight:700; }
 .auction-strip { direction:ltr; display:grid;
@@ -135,6 +142,19 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
   <button id="btn-xx">רידאבל</button><button id="btn-undo">↩ בטל</button>
 </div>
 <div class="note" id="auction-note" hidden></div>
+<div class="extras-row" id="extras-row" hidden>
+  <button id="btn-extras">+ בדוק גם הכרזה שלא בתפריט</button>
+  <span id="extras-chips"></span>
+  <div class="note" id="extras-note" hidden>מצב הוספה פעיל: הקש בקופסת
+  ההכרזות על הכרזות שתרצה לצרף לבדיקה (עד 4). הקשה על תגית מסירה אותה.</div>
+</div>
+<div class="extras-row" id="plans-area" hidden>
+  <button id="btn-plan-add">+ תוכנית המשך (רשות)</button>
+  <div id="plans-box"></div>
+  <div class="note" id="plans-note" hidden>כל שורה: אם אכריז X ושותף ישיב
+  Y — אכריז Z. הבחירה שלך גוברת על המנוע בתור הראשון שלך אחרי ההכרזה
+  הנבדקת (עד 6 כללים).</div>
+</div>
 </div>
 
 <div style="text-align:center">
@@ -177,6 +197,10 @@ document.getElementById("go").onclick = async () => {
     decision_indices: [auction.length],
     narration: document.getElementById("narration").value,
   };
+  const extras = UI.extraCandidates();
+  if (extras.length) body.extra_candidates = extras;
+  const plans = UI.plans();
+  if (plans.length) body.plans = plans;
   try {
     const r = await fetch("/api/analyze", {
       method: "POST", headers: {"Content-Type": "application/json"},

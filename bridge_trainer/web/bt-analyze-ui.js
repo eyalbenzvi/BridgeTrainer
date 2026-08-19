@@ -137,10 +137,88 @@
     return lvl > st.level ||
       (lvl === st.level && DENOMS.indexOf(dn) > DENOMS.indexOf(st.denom));
   }
+  /* user-added candidates: calls to test IN ADDITION to the engine menu
+     (the engine's policy can starve a mainstream call — e.g. 3NT over a
+     preempt — below the menu floor; the rollout evaluates it fine) */
+  let extras = [];
+  let extrasMode = false;
+  const MAX_EXTRAS = 4;
+  function toggleExtra(tok) {
+    const i = extras.indexOf(tok);
+    if (i >= 0) extras.splice(i, 1);
+    else if (extras.length < MAX_EXTRAS && isLegal(tok)) extras.push(tok);
+    refreshExtras();
+  }
+  function refreshExtras() {
+    const row = $("extras-row");
+    if (!row) return;
+    const st = replayState();
+    const heroTurn = !st.finished && st.turn === heroSeat();
+    row.hidden = !heroTurn;
+    if ($("plans-area")) $("plans-area").hidden = !heroTurn;
+    if (!heroTurn && extrasMode) extrasMode = false;
+    if (heroTurn) extras = extras.filter(isLegal);
+    const btn = $("btn-extras");
+    btn.classList.toggle("on", extrasMode);
+    $("extras-note").hidden = !extrasMode;
+    $("extras-chips").innerHTML = extras.map((t) =>
+      `<span class="chip" data-tok="${t}">${tokHtml(t)} ✕</span>`).join("");
+    document.querySelectorAll("#extras-chips .chip").forEach((c) => {
+      c.onclick = () => toggleExtra(c.dataset.tok);
+    });
+  }
   function addCall(tok) {
     if (!isLegal(tok)) return;
+    if (extrasMode) { toggleExtra(tok); return; }
     auction.push(tok);
     refreshAuction();
+  }
+
+  /* continuation plans: rows of "if I bid C and partner replies R, I bid M"
+     — the simulation forces M over the engine's choice at the hero's first
+     re-turn (owner spec, round 5) */
+  const MAX_PLANS = 6;
+  const ALL_CALLS = ["P", "X", "XX"].concat((() => {
+    const out = [];
+    for (let l = 1; l <= 7; l++)
+      for (const d of ["C", "D", "H", "S", "NT"]) out.push(l + d);
+    return out;
+  })());
+  function callText(t) { return t === "P" ? "פאס" : t; }
+  function planSelect(cls) {
+    const s = document.createElement("select");
+    s.className = cls;
+    s.innerHTML = '<option value="">—</option>' + ALL_CALLS.map((t) =>
+      `<option value="${t}">${callText(t)}</option>`).join("");
+    return s;
+  }
+  function addPlanRow() {
+    const box = $("plans-box");
+    if (!box || box.children.length >= MAX_PLANS) return;
+    const row = document.createElement("div");
+    row.className = "plan-row";
+    row.appendChild(document.createTextNode("אם אכריז "));
+    row.appendChild(planSelect("pl-cand"));
+    row.appendChild(document.createTextNode(" ושותף ישיב "));
+    row.appendChild(planSelect("pl-reply"));
+    row.appendChild(document.createTextNode(" — אכריז "));
+    row.appendChild(planSelect("pl-mine"));
+    const del = document.createElement("button");
+    del.type = "button";
+    del.textContent = "✕";
+    del.onclick = () => row.remove();
+    row.appendChild(del);
+    box.appendChild(row);
+  }
+  function plansList() {
+    const out = [];
+    document.querySelectorAll("#plans-box .plan-row").forEach((row) => {
+      const c = row.querySelector(".pl-cand").value;
+      const r = row.querySelector(".pl-reply").value;
+      const m = row.querySelector(".pl-mine").value;
+      if (c && r && m) out.push([c, r, m]);
+    });
+    return out.slice(0, MAX_PLANS);
   }
   function buildBBox() {
     const box = $("bbox");
@@ -206,6 +284,7 @@
     $("btn-x").disabled = !isLegal("X");
     $("btn-xx").disabled = !isLegal("XX");
     $("btn-undo").disabled = auction.length === 0;
+    refreshExtras();
     onChange();
   }
 
@@ -223,6 +302,16 @@
       $("clearhand").onclick = () => { sel.clear(); refreshPicker(); };
       $("dealer").onchange = refreshAuction;
       $("seat").onchange = refreshAuction;
+      if ($("btn-extras"))
+        $("btn-extras").onclick = () => {
+          extrasMode = !extrasMode;
+          refreshExtras();
+        };
+      if ($("btn-plan-add"))
+        $("btn-plan-add").onclick = () => {
+          $("plans-note").hidden = false;
+          addPlanRow();
+        };
       refreshAuction();
     },
     handSize: () => sel.size,
@@ -236,5 +325,7 @@
       const st = replayState();
       return sel.size === 13 && !st.finished && st.turn === heroSeat();
     },
+    extraCandidates: () => extras.filter(isLegal),
+    plans: plansList,
   };
 })();

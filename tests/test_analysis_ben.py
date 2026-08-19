@@ -60,6 +60,62 @@ def test_concat_batches_pairs_rows():
     assert m.quality == pytest.approx(0.8)
 
 
+def test_user_extras_join_the_menu():
+    """A mainstream call the policy starves (3NT over a preempt at 0.9%)
+    must be evaluable when the user asks — legal extras join the menu,
+    duplicates and illegal ones don't."""
+    from bridge_trainer.analysis.ben_pipeline import _with_extras
+    from bridge_trainer.validate.auction_state import replay
+    state = replay("W", ["3C", "P", "P"])
+    menu, added = _with_extras(["3D", "X", "P"],
+                               ["3NT", "3D", "2C", "4D"], state)
+    assert menu == ["3D", "X", "P", "3NT", "4D"]   # dup + illegal dropped
+    assert added == ["3NT", "4D"]
+    menu, added = _with_extras(["3D"], None, state)
+    assert menu == ["3D"] and added == []
+    # the cap: at most 4 extras are honored
+    menu, added = _with_extras([], ["3NT", "4C", "4D", "4H", "4S"], state)
+    assert len(added) == 4
+
+
+def test_web_ui_exposes_extra_candidates():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent / "bridge_trainer"
+    ui = (root / "web" / "bt-analyze-ui.js").read_text(encoding="utf-8")
+    assert "extraCandidates" in ui and "btn-extras" in ui
+    site = (root / "app" / "webapp.py").read_text(encoding="utf-8")
+    assert "extra_candidates = extras" in site and "extras-row" in site
+    local = (root / "analysis" / "webui.py").read_text(encoding="utf-8")
+    assert "extra_candidates" in local and "extras-row" in local
+
+
+def test_menu_fills_to_six_from_policy_order():
+    from types import SimpleNamespace as NS
+    from bridge_trainer.analysis.ben_pipeline import _menu_from_policy
+    # the user's 3C-P-P menu: 3NT (0.94%) and 4D (0.48%) must now be
+    # evaluated; 3H at 0.06% is numeric noise and stays out
+    policy = [NS(bid="3D", p=0.814), NS(bid="X", p=0.1253),
+              NS(bid="P", p=0.0431), NS(bid="3NT", p=0.0094),
+              NS(bid="4D", p=0.0048), NS(bid="3H", p=0.0006),
+              NS(bid="3S", p=0.0005)]
+    assert _menu_from_policy(policy) == ["3D", "X", "P", "3NT", "4D"]
+    # the cap: never more than six
+    policy = [NS(bid=b, p=0.1) for b in
+              ["1C", "1D", "1H", "1S", "1NT", "2C", "2D"]]
+    assert len(_menu_from_policy(policy)) == 6
+
+
+def test_plans_parse_into_per_candidate_rules():
+    from bridge_trainer.analysis.ben_pipeline import _plans_by_candidate
+    plans = _plans_by_candidate([
+        ["X", "3S", "3NT"], ["X", "3H", "P"], ["x", "3s", "4S"],  # dup rule
+        ["3D", "4C"],            # malformed row dropped
+        "junk",                  # malformed row dropped
+    ])
+    assert plans == {"X": {"3S": "3NT", "3H": "P"}}
+    assert _plans_by_candidate(None) == {}
+
+
 def test_stop_rule_has_no_first_crossing_bias():
     from bridge_trainer.analysis.ben_pipeline import _should_stop
     # the shipped 2D-vs-P signature — mean barely over the CI. The old rule
@@ -107,6 +163,43 @@ print(json.dumps({
     data = json.loads(out.stdout.strip().splitlines()[-1])
     assert data["same_hash_identical"]   # Ben's determinism (the trap)
     assert data["new_hash_fresh"]        # the loop's antidote
+
+
+@pytest.mark.skipif(not (os.path.exists(BEN_VENV)
+                         and os.path.isdir(os.path.join(BEN_HOME, "src"))),
+                    reason="Ben venv/checkout not installed")
+def test_continuation_plan_overrides_ben_subprocess():
+    """The owner's example: over 3C-P-P force X with the plan 'partner 3S
+    -> I bid 3NT'. The plan must actually fire (plan_hits > 0) and 3NT
+    contracts must appear in X's rollouts where Ben alone reached 3S."""
+    code = r"""
+import json, sys
+sys.path.insert(0, __ROOT__)
+from bridge_trainer.engine.ben import get_engine
+
+engine = get_engine()
+bot = engine.bot("K4.AT95.AT943.AJ", 2, 3, (True, False))
+stem = ["3C", "P", "P"]
+plain = engine.evaluate(bot, 3, stem, ["X"], n_samples=60, dd_memo={})
+planned = engine.evaluate(bot, 3, stem, ["X"], n_samples=60, dd_memo={},
+                          plans={"X": {"3S": "3NT"}})
+def n_nt(ev): return sum(1 for c in ev.contracts["X"] if c.startswith("3N"))
+print(json.dumps({
+    "hits": planned.plan_hits,
+    "nt_plain": n_nt(plain), "nt_planned": n_nt(planned),
+    "n": planned.n_samples,
+}))
+""".replace("__ROOT__", repr(os.path.abspath(
+        os.path.join(os.path.dirname(__file__), ".."))))
+    env = dict(os.environ, BEN_HOME=BEN_HOME)
+    out = subprocess.run([BEN_VENV, "-c", code], capture_output=True,
+                         text=True, timeout=600, env=env)
+    assert out.returncode == 0, out.stderr[-2000:]
+    data = json.loads(out.stdout.strip().splitlines()[-1])
+    total_hits = sum(data["hits"].values())
+    assert total_hits > 0                      # the rule actually fired
+    assert data["nt_planned"] > data["nt_plain"]   # and changed contracts
+    assert data["nt_planned"] >= total_hits * 0.5  # mostly stands (P-P-P)
 
 
 @pytest.mark.skipif(not (os.path.exists(BEN_VENV)
