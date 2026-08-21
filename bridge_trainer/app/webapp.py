@@ -5651,15 +5651,35 @@ _ANALYZE_CSS = """
 .bbox button, .bcalls button { height:36px; font-weight:700; padding:0;
   border:1px solid var(--line); border-radius:8px; background:var(--card);
   color:var(--fg); cursor:pointer; }
-.extras-row { margin-top:8px; }
-#btn-extras { border-radius:8px; padding:4px 10px; }
-#btn-extras.on { outline:2px solid #2B6CB0; background:#2B6CB014; }
-#extras-chips .chip { display:inline-block; background:#2B6CB014;
-  border:1px solid #2B6CB0; border-radius:999px; padding:2px 10px;
-  margin:2px 4px; cursor:pointer; font-weight:600; direction:ltr; }
-.plan-row { margin:6px 0; font-size:13.5px; }
-.plan-row select { margin:0 3px; padding:2px 4px; }
-.plan-row button { margin-inline-start:6px; }
+.hand-preview { direction:ltr; display:inline-block; margin:10px 2px 2px;
+  padding:8px 14px; border:1px solid var(--line); border-radius:10px;
+  background:var(--card); font-weight:600; font-size:16px;
+  box-shadow:0 1px 3px #0002; }
+.hand-preview .srow { line-height:1.55; }
+.hand-preview .cd { margin-right:.18em; }
+.adv { margin-top:12px; border:1px solid var(--line); border-radius:10px;
+  padding:8px 12px; background:var(--accent-tint); }
+.adv-title { font-weight:600; font-size:13.5px; margin-bottom:4px; }
+.adv-sub { font-weight:400; font-size:12px; color:var(--muted); }
+.adv-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.adv select { font:inherit; padding:4px 8px; border:1px solid var(--line);
+  border-radius:8px; background:var(--card); color:var(--fg); }
+.adv button { font:inherit; font-size:13px; border-radius:8px;
+  border:1px solid var(--line); background:var(--card); color:var(--fg);
+  padding:4px 12px; cursor:pointer; }
+.adv button:disabled { opacity:.4; }
+#extras-chips .chip { display:inline-block; background:var(--card);
+  border:1px solid var(--accent); border-radius:999px; padding:2px 10px;
+  margin:2px; cursor:pointer; font-weight:600; }
+#extras-chips .chip b { color:var(--loss); font-weight:700; }
+.plan-row { display:flex; flex-wrap:wrap; gap:8px; align-items:end;
+  background:var(--card); border:1px solid var(--line); border-radius:10px;
+  padding:6px 10px; margin:6px 0; }
+.pl-field { display:flex; flex-direction:column; gap:2px; font-size:12px;
+  color:var(--muted); }
+.plan-row .pl-del { align-self:center; color:var(--loss);
+  border-color:var(--loss); }
+.adv-add { margin-top:4px; }
 .bbox button:disabled, .bcalls button:disabled { opacity:.35;
   cursor:default; }
 .bcalls { display:flex; gap:6px; margin-top:8px; max-width:330px;
@@ -5688,9 +5708,15 @@ button.an-go { display:block; margin:14px auto; background:var(--accent);
 button.an-go:disabled { opacity:.4; cursor:default; }
 .an-status { color:var(--on-felt-muted); text-align:center;
   min-height:20px; }
-.an-list { list-style:none; margin:0; padding:0; }
-.an-list li { border-bottom:1px solid var(--line); padding:8px 2px;
-  display:flex; flex-wrap:wrap; gap:6px 12px; align-items:center; }
+.an-list { list-style:none; margin:0; padding:0; display:grid; gap:10px; }
+.an-list li { border:1px solid var(--line); border-radius:12px;
+  padding:10px 14px; background:var(--card); box-shadow:0 1px 3px #0001;
+  display:grid; gap:4px; }
+.an-line1 { display:flex; flex-wrap:wrap; gap:8px 14px; align-items:center; }
+.an-rec { font-size:17px; font-weight:700; }
+.an-hand { direction:ltr; text-align:left; font-weight:600; font-size:14px; }
+.an-meta { font-size:12px; color:var(--muted); }
+.an-actions { display:flex; gap:8px; margin-top:2px; }
 .an-list .chip { border-radius:999px; padding:1px 10px; font-size:12px;
   font-weight:600; }
 .chip.pending { background:var(--warn-bg); color:var(--warn-fg); }
@@ -5747,6 +5773,7 @@ async function submit() {
     if (plans.length)
       req.plans = plans.map(([c, r, m]) => ({c: c, r: r, m: m}));
     await window.BT.submitAnalysis(req);
+    UI.reset();
     st.textContent = "הבקשה נשלחה! החישוב רץ בענן — בדרך כלל דקה-שתיים " +
       "(עד ~10 דקות במסלול הגיבוי); הרשימה למטה תתעדכן לבד כשהדוח מוכן.";
     $("queue-card").scrollIntoView({behavior: "smooth"});
@@ -5768,16 +5795,26 @@ function rowMeta(r) {
   // the row by the last stem call instead ("אחרי 3♥")
   const entered = (q.auction || [])[q.decision_index];
   const last = (q.auction || [])[(q.auction || []).length - 1];
-  const call = entered || (last ? "אחרי " + tokLabel(last) : "פתיחה");
-  return {when, call, entered: !!entered, hand: q.my_hand || ""};
+  const call = entered ? UI.tokHtml(entered)
+    : (last ? "אחרי " + UI.tokHtml(last) : "פתיחה");
+  return {when, call, hand: q.my_hand || ""};
 }
-function tokLabel(tok) { return tok === "P" ? "פאס" : tok; }
+
+function handInline(pbn) {
+  const G = {S: "♠", H: "♥", D: "♦", C: "♣"};
+  const C = {S: "ss", H: "sh", D: "sd", C: "sc"};
+  return pbn.split(".").map((cards, i) => {
+    const st = "SHDC"[i];
+    return '<span class="' + C[st] + '">' + G[st] + "</span>" +
+      (cards || "—");
+  }).join(" ");
+}
 
 function renderList(rows) {
   ROWS = rows;
   const ul = $("an-list");
   if (!rows.length) {
-    ul.innerHTML = '<li><span class="meta2">אין עדיין ניתוחים. ' +
+    ul.innerHTML = '<li><span class="an-meta">אין עדיין ניתוחים. ' +
       'מלא את הטופס למעלה ולחץ "נתח".</span></li>';
     return;
   }
@@ -5785,22 +5822,25 @@ function renderList(rows) {
   for (const r of rows) {
     const li = document.createElement("li");
     const m = rowMeta(r);
-    let extra = "";
+    let rec = "";
     if (r.status === "done" && r.summary) {
-      extra = 'המלצה: <b dir="ltr">' + UI.tokHtml(r.summary.recommended) +
-        "</b> (" + (r.summary.n_deals || "?") + " חלוקות)";
+      rec = '<span class="an-rec">המלצה: ' +
+        UI.tokHtml(r.summary.recommended) + "</span>" +
+        '<span class="an-meta">' + (r.summary.n_deals || "?") +
+        " חלוקות</span>";
     } else if (r.status === "error") {
-      extra = '<span class="meta2">' + (r.error || "") + "</span>";
+      rec = '<span class="an-meta">' + (r.error || "") + "</span>";
     }
     li.innerHTML =
-      '<span class="chip ' + r.status + '">' +
+      '<div class="an-line1"><span class="chip ' + r.status + '">' +
       (STATUS_HE[r.status] || r.status) + "</span>" +
-      "<span>" + (m.entered ? UI.tokHtml(m.call) : m.call) + "</span>" +
-      "<span>" + extra + "</span>" +
+      "<span>" + m.call + "</span>" + rec + "</div>" +
+      '<div class="an-hand">' + handInline(m.hand) + "</div>" +
+      '<div class="an-meta">' + m.when + "</div>" +
+      '<div class="an-actions">' +
       (r.status === "done"
         ? '<button data-open="' + r.id + '">פתח דוח</button>' : "") +
-      '<button data-del="' + r.id + '">מחק</button>' +
-      '<span class="meta2" dir="ltr">' + m.hand + " · " + m.when + "</span>";
+      '<button data-del="' + r.id + '">מחק</button></div>';
     ul.appendChild(li);
   }
   ul.querySelectorAll("button[data-open]").forEach((b) =>
@@ -5816,6 +5856,7 @@ function renderList(rows) {
 async function openReport(id) {
   const card = $("viewer-card");
   card.hidden = false;
+  $("an-close").onclick = () => { card.hidden = true; };
   $("an-frame").srcdoc =
     "<p style='font-family:sans-serif'>טוען את הדוח...</p>";
   card.scrollIntoView({behavior: "smooth"});
@@ -5824,12 +5865,6 @@ async function openReport(id) {
     if (!rep || !rep.html) throw new Error("הדוח לא נמצא");
     $("an-frame").srcdoc = rep.html;
     const fname = "bridge-analysis-" + id.slice(0, 8) + ".html";
-    // print / save-as-PDF from a full window
-    $("an-open-print").onclick = () => {
-      const w = window.open("", "_blank");
-      w.document.write(rep.html);
-      w.document.close();
-    };
     // download: a self-contained HTML file — opens in any browser, no
     // sign-in needed by the recipient
     $("an-download").onclick = () => {
@@ -5899,10 +5934,12 @@ def _analyze_html() -> str:
 <div class="card">
 <h2>1. היד שלך <span id="handsum">(0/13)</span></h2>
 <div id="picker"></div>
+<div class="hand-preview" id="hand-preview" hidden></div>
 <div class="an-row">
   <label>הזנה מהירה (PBN):</label>
   <input type="text" id="quick" dir="ltr" size="22"
-         placeholder="AQ2.KJ3.KQ54.A32">
+         placeholder="AQ2.KJ3.KQ54.A32"
+         title="מפרידים: נקודה / פסיק / רווח; x = הקלף הנמוך הפנוי; - = סדרה חסרה">
   <button type="button" id="quickfill">מלא מהטקסט</button>
   <button type="button" id="clearhand">נקה</button>
 </div>
@@ -5946,19 +5983,20 @@ def _analyze_html() -> str:
   <button type="button" id="btn-undo">&#8617; בטל</button>
 </div>
 <div class="note" id="auction-note" hidden></div>
-<div class="extras-row" id="extras-row" hidden>
-  <button type="button" id="btn-extras">+ בדוק גם הכרזה שלא בתפריט</button>
-  <span id="extras-chips"></span>
-  <div class="note" id="extras-note" hidden>מצב הוספה פעיל: הקש בקופסת
-  ההכרזות על הכרזות שתרצה לצרף לבדיקה (עד 4) — הן ייבחנו בסימולציה גם אם
-  המנוע כמעט לא שוקל אותן. הקשה על תגית מסירה אותה.</div>
+<div class="adv" id="extras-area" hidden>
+  <div class="adv-title">בדיקת הכרזה נוספת
+    <span class="adv-sub">(רשות · עד 4 · תיבחן גם אם המנוע לא שוקל אותה)</span></div>
+  <div class="adv-row">
+    <select id="extra-select"></select>
+    <button type="button" id="extra-add">הוסף</button>
+    <span id="extras-chips"></span>
+  </div>
 </div>
-<div class="extras-row" id="plans-area" hidden>
-  <button type="button" id="btn-plan-add">+ תוכנית המשך (רשות)</button>
+<div class="adv" id="plans-area" hidden>
+  <div class="adv-title">תוכניות המשך
+    <span class="adv-sub">(רשות · הבחירה שלך גוברת על המנוע בתורך הבא)</span></div>
   <div id="plans-box"></div>
-  <div class="note" id="plans-note" hidden>כל שורה: אם אכריז X ושותף ישיב
-  Y — אכריז Z. בסימולציה הבחירה שלך גוברת על המנוע בתור הראשון שלך אחרי
-  ההכרזה הנבדקת (עד 6 כללים).</div>
+  <button type="button" id="btn-plan-add" class="adv-add">+ הוסף כלל</button>
 </div>
 </div>
 
@@ -5973,9 +6011,9 @@ def _analyze_html() -> str:
 <div class="card" id="viewer-card" hidden>
 <h2>הדוח</h2>
 <div class="an-row">
+<button type="button" id="an-close">סגור ✕</button>
 <button type="button" id="an-share">שתף &#128228;</button>
 <button type="button" id="an-download">הורד קובץ</button>
-<button type="button" id="an-open-print">הדפסה / שמירה כ-PDF</button>
 </div>
 <p style="color:var(--muted);font-size:12.5px;margin:4px 0">הקובץ
 המשותף/המורד נפתח בכל דפדפן — מי שמקבל אותו לא צריך להתחבר לאתר.</p>

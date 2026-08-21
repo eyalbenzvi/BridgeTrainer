@@ -53,6 +53,40 @@ label { margin-inline-end:6px; }
 .bbox { direction:ltr; display:grid; grid-template-columns:repeat(5,1fr);
   gap:4px; max-width:330px; }
 .bbox button { height:36px; font-weight:700; padding:0; }
+.ss { color:#2838C8; } .sh { color:#C8102E; }
+.sd { color:#BC5A00; } .sc { color:#1A7A1A; }
+.ss,.sh,.sd,.sc { font-variant-emoji:text; }
+table.bidding { width:100%; max-width:440px; border-collapse:collapse;
+  font-size:16px; border-radius:10px; overflow:hidden; direction:ltr; }
+table.bidding th { padding:5px 4px 4px; font-weight:600; font-size:13px;
+  width:25%; border:0; }
+table.bidding th.v { background:#B3252F; color:#fff; }
+table.bidding th.nv { background:#E6F4EA; color:#1C5C34; }
+table.bidding th.me { box-shadow:inset 0 -3px 0 #EAB84C; }
+table.bidding th small { display:block; font-weight:400; font-size:10px; }
+table.bidding th sup.d { font-size:9px; border:1px solid currentColor;
+  border-radius:999px; padding:0 3px; margin-left:3px; }
+table.bidding td { text-align:center; padding:0;
+  border-top:1px solid #D9E0DA; }
+table.bidding td .call { display:block; min-height:32px; line-height:32px;
+  font-weight:600; }
+table.bidding td.turn { background:#FdF6E3; font-weight:700;
+  outline:2px solid #EAB84C; }
+.hand-preview { direction:ltr; display:inline-block; margin:10px 2px;
+  padding:8px 14px; border:1px solid #D9E0DA; border-radius:10px;
+  background:#fff; font-weight:600; font-size:16px; }
+.hand-preview .srow { line-height:1.55; }
+.hand-preview .cd { margin-right:.18em; }
+.adv { margin-top:12px; border:1px solid #D9E0DA; border-radius:10px;
+  padding:8px 12px; background:#2B6CB014; }
+.adv-title { font-weight:600; font-size:13.5px; margin-bottom:4px; }
+.adv-sub { font-weight:400; font-size:12px; color:#5C6B62; }
+.adv-row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.plan-row { display:flex; flex-wrap:wrap; gap:8px; align-items:end;
+  background:#fff; border:1px solid #D9E0DA; border-radius:10px;
+  padding:6px 10px; margin:6px 0; }
+.pl-field { display:flex; flex-direction:column; gap:2px; font-size:12px;
+  color:#5C6B62; }
 .extras-row { margin-top:8px; }
 #btn-extras.on { outline:2px solid #2B6CB0; background:#2B6CB014; }
 #extras-chips .chip { display:inline-block; background:#2B6CB014;
@@ -92,6 +126,7 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
 <div class="card" id="step-hand">
 <h2>1. היד שלך <span id="handsum">(0/13)</span></h2>
 <div id="picker"></div>
+<div class="hand-preview" id="hand-preview" hidden></div>
 <div class="row">
   <label>הזנה מהירה (PBN):</label>
   <input type="text" id="quick" class="ltr" size="26"
@@ -142,18 +177,16 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
   <button id="btn-xx">רידאבל</button><button id="btn-undo">↩ בטל</button>
 </div>
 <div class="note" id="auction-note" hidden></div>
-<div class="extras-row" id="extras-row" hidden>
-  <button id="btn-extras">+ בדוק גם הכרזה שלא בתפריט</button>
-  <span id="extras-chips"></span>
-  <div class="note" id="extras-note" hidden>מצב הוספה פעיל: הקש בקופסת
-  ההכרזות על הכרזות שתרצה לצרף לבדיקה (עד 4). הקשה על תגית מסירה אותה.</div>
+<div class="adv" id="extras-area" hidden>
+  <div class="adv-title">בדיקת הכרזה נוספת <span class="adv-sub">(רשות · עד 4)</span></div>
+  <div class="adv-row"><select id="extra-select"></select>
+  <button id="extra-add">הוסף</button><span id="extras-chips"></span></div>
 </div>
-<div class="extras-row" id="plans-area" hidden>
-  <button id="btn-plan-add">+ תוכנית המשך (רשות)</button>
+<div class="adv" id="plans-area" hidden>
+  <div class="adv-title">תוכניות המשך <span class="adv-sub">(רשות)</span></div>
   <div id="plans-box"></div>
-  <div class="note" id="plans-note" hidden>כל שורה: אם אכריז X ושותף ישיב
-  Y — אכריז Z. הבחירה שלך גוברת על המנוע בתור הראשון שלך אחרי ההכרזה
-  הנבדקת (עד 6 כללים).</div>
+  <button id="btn-plan-add" class="adv-add">+ הוסף כלל</button>
+</div>
 </div>
 </div>
 

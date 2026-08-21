@@ -1,25 +1,27 @@
 // Shared UI logic for the bidding-analysis input flow, used by BOTH front
 // ends: the deployed site's analyze.html (submits to Firestore, computed by
-// the GitHub Actions worker) and the local `trainer analyze` page (submits
-// to the local server). Classic script, exposes window.BTAnalyzeUI.
+// the cloud worker) and the local `trainer analyze` page (submits to the
+// local server). Classic script, exposes window.BTAnalyzeUI.
 //
-// The host page provides the skeleton elements by id (picker, quick,
-// quickfill, clearhand, handsum, seat, dealer, strip, turnline, bbox,
-// btn-p/btn-x/btn-xx/btn-undo, auction-note) and calls
-// BTAnalyzeUI.init({onChange}). Auction legality mirrors
-// validate/auction_state.py (bid ordering, X/XX rules, three passes end).
+// The host page provides the skeleton elements by id (picker, hand-preview,
+// quick, quickfill, clearhand, handsum, seat, dealer, vul, strip, turnline,
+// bbox, btn-p/btn-x/btn-xx/btn-undo, auction-note, extra-select/extra-add/
+// extras-chips, plans-box/btn-plan-add) and calls BTAnalyzeUI.init(...).
+// Auction legality mirrors validate/auction_state.py.
 //
-// INPUT MODEL (user-requested): the auction is entered UP TO the hero's
-// turn and STOPS there — the analyzed call itself is never entered and
-// there are no trailing passes. ready() is true exactly when the hand is
-// complete and it is the hero's turn in an unfinished auction.
+// INPUT MODEL: the auction is entered UP TO the hero's turn and STOPS there
+// — the analyzed call itself is never entered and there are no trailing
+// passes. ready() is true exactly when the hand is complete and it is the
+// hero's turn in an unfinished auction.
 "use strict";
 (function () {
   const SUITS = ["S", "H", "D", "C"];
   const GLYPH = { S: "♠", H: "♥", D: "♦", C: "♣" };
+  const SUIT_CLS = { S: "ss", H: "sh", D: "sd", C: "sc" };
   const RANKS = "AKQJT98765432";
   const SEAT_HE = { N: "צפון", E: "מזרח", S: "דרום", W: "מערב" };
-  const SEATS = ["N", "E", "S", "W"];
+  const SEATS = ["N", "E", "S", "W"];   // bidding rotation
+  const COLS = ["W", "N", "E", "S"];    // display columns (rotation order)
   const DENOMS = ["C", "D", "H", "S", "NT"];
 
   const sel = new Set();
@@ -27,7 +29,11 @@
   let onChange = () => {};
   const $ = (id) => document.getElementById(id);
 
-  /* ---------- card picker ---------- */
+  function suitHtml(s) {
+    return `<span class="${SUIT_CLS[s]}">${GLYPH[s]}</span>`;
+  }
+
+  /* ---------- card picker + live hand preview ---------- */
   function buildPicker() {
     const root = $("picker");
     root.innerHTML = "";
@@ -35,16 +41,15 @@
       const row = document.createElement("div");
       row.className = "suitrow";
       const g = document.createElement("span");
-      g.className = "glyph" + (s === "H" || s === "D" ? " red" : "");
+      g.className = "glyph " + SUIT_CLS[s];
       g.textContent = GLYPH[s];
       row.appendChild(g);
       for (const r of RANKS) {
         const b = document.createElement("button");
         b.type = "button";
-        b.className = "cardbtn";
-        b.textContent = r;
+        b.className = "cardbtn " + SUIT_CLS[s];
+        b.textContent = r === "T" ? "10" : r;
         b.dataset.card = s + r;
-        if (s === "H" || s === "D") b.classList.add("red");
         b.onclick = () => toggleCard(s + r);
         row.appendChild(b);
       }
@@ -76,29 +81,52 @@
       sum.textContent = `(${sel.size}/13)`;
       sum.classList.toggle("bad", sel.size !== 13);
     }
+    const pv = $("hand-preview");
+    if (pv) {
+      pv.hidden = sel.size === 0;
+      pv.innerHTML = SUITS.map((s) => {
+        const cards = RANKS.split("").filter((r) => sel.has(s + r))
+          .map((r) => `<span class="cd">${r === "T" ? "10" : r}</span>`)
+          .join("");
+        return `<div class="srow">${suitHtml(s)} ${cards || "—"}</div>`;
+      }).join("");
+    }
     onChange();
   }
   function handPBN() {
     return SUITS.map((s) =>
       RANKS.split("").filter((r) => sel.has(s + r)).join("")).join(".");
   }
+  // Quick fill accepts ".", "," and spaces as suit separators, "-" as a
+  // void, and "x"/"X" as "the lowest card still free in that suit".
   function quickFill() {
     const t = $("quick").value.trim().toUpperCase();
-    const parts = t.split(".");
+    const parts = t.split(/[.,\s]+/).filter((p) => p !== "");
     if (parts.length !== 4) {
-      alert("פורמט: סדרות מופרדות בנקודה, ♠.♥.♦.♣"); return;
+      alert("פורמט: ארבע סדרות (♠ ♥ ♦ ♣) מופרדות בנקודה/פסיק/רווח; " +
+            '"-" לסדרה חסרה'); return;
     }
-    const chosen = [];
-    for (let i = 0; i < 4; i++)
+    const chosen = new Set();
+    const wildcards = [];      // [suit, ...] resolved lowest-first at the end
+    for (let i = 0; i < 4; i++) {
+      if (parts[i] === "-") continue;                    // void
       for (const ch of parts[i]) {
         const r = ch === "0" ? "T" : ch;
+        if (r === "X") { wildcards.push(SUITS[i]); continue; }
         if (!RANKS.includes(r)) { alert("קלף לא חוקי: " + ch); return; }
-        chosen.push(SUITS[i] + r);
+        if (chosen.has(SUITS[i] + r)) { alert("קלף כפול בהזנה"); return; }
+        chosen.add(SUITS[i] + r);
       }
-    if (chosen.length !== 13) {
-      alert("צריך בדיוק 13 קלפים (יש " + chosen.length + ")"); return;
     }
-    if (new Set(chosen).size !== 13) { alert("קלף כפול בהזנה"); return; }
+    for (const s of wildcards) {   // x -> lowest free card in the suit
+      const free = RANKS.split("").reverse()
+        .find((r) => !chosen.has(s + r));
+      if (!free) { alert("יותר מ-13 קלפים בסדרת " + GLYPH[s]); return; }
+      chosen.add(s + free);
+    }
+    if (chosen.size !== 13) {
+      alert("צריך בדיוק 13 קלפים (יש " + chosen.size + ")"); return;
+    }
     sel.clear(); chosen.forEach((c) => sel.add(c));
     refreshPicker();
   }
@@ -107,6 +135,14 @@
   function dealer() { return $("dealer").value; }
   function heroSeat() { return $("seat").value; }
   function seatOf(i) { return SEATS[(SEATS.indexOf(dealer()) + i) % 4]; }
+  function vulSeats() {
+    const v = $("vul") ? $("vul").value : "none";
+    const us = "NS".includes(heroSeat()) ? "NS" : "EW";
+    if (v === "both") return "NESW";
+    if (v === "us") return us;
+    if (v === "them") return us === "NS" ? "EW" : "NS";
+    return "";
+  }
   function replayState() {
     let level = 0, denom = "", lastBidSeat = "", doubled = 0, tp = 0;
     auction.forEach((tok, i) => {
@@ -137,78 +173,108 @@
     return lvl > st.level ||
       (lvl === st.level && DENOMS.indexOf(dn) > DENOMS.indexOf(st.denom));
   }
-  /* user-added candidates: calls to test IN ADDITION to the engine menu
-     (the engine's policy can starve a mainstream call — e.g. 3NT over a
-     preempt — below the menu floor; the rollout evaluates it fine) */
-  let extras = [];
-  let extrasMode = false;
-  const MAX_EXTRAS = 4;
-  function toggleExtra(tok) {
-    const i = extras.indexOf(tok);
-    if (i >= 0) extras.splice(i, 1);
-    else if (extras.length < MAX_EXTRAS && isLegal(tok)) extras.push(tok);
-    refreshExtras();
-  }
-  function refreshExtras() {
-    const row = $("extras-row");
-    if (!row) return;
-    const st = replayState();
-    const heroTurn = !st.finished && st.turn === heroSeat();
-    row.hidden = !heroTurn;
-    if ($("plans-area")) $("plans-area").hidden = !heroTurn;
-    if (!heroTurn && extrasMode) extrasMode = false;
-    if (heroTurn) extras = extras.filter(isLegal);
-    const btn = $("btn-extras");
-    btn.classList.toggle("on", extrasMode);
-    $("extras-note").hidden = !extrasMode;
-    $("extras-chips").innerHTML = extras.map((t) =>
-      `<span class="chip" data-tok="${t}">${tokHtml(t)} ✕</span>`).join("");
-    document.querySelectorAll("#extras-chips .chip").forEach((c) => {
-      c.onclick = () => toggleExtra(c.dataset.tok);
-    });
-  }
   function addCall(tok) {
     if (!isLegal(tok)) return;
-    if (extrasMode) { toggleExtra(tok); return; }
     auction.push(tok);
     refreshAuction();
   }
 
-  /* continuation plans: rows of "if I bid C and partner replies R, I bid M"
-     — the simulation forces M over the engine's choice at the hero's first
-     re-turn (owner spec, round 5) */
-  const MAX_PLANS = 6;
   const ALL_CALLS = ["P", "X", "XX"].concat((() => {
     const out = [];
     for (let l = 1; l <= 7; l++)
-      for (const d of ["C", "D", "H", "S", "NT"]) out.push(l + d);
+      for (const d of DENOMS) out.push(l + d);
     return out;
   })());
-  function callText(t) { return t === "P" ? "פאס" : t; }
-  function planSelect(cls) {
+  function callText(t) {
+    return t === "P" ? "פאס" : (t === "X" ? "דאבל"
+      : (t === "XX" ? "רידאבל" : t));
+  }
+
+  /* ---------- user-added candidates (a plain select, not a mode) ---------
+     the engine's policy can starve a mainstream call (a 0.9% 3NT over a
+     preempt) below the menu floor; adding it here forces it into the
+     evaluated menu. */
+  let extras = [];
+  const MAX_EXTRAS = 4;
+  function legalCalls() { return ALL_CALLS.filter(isLegal); }
+  function refreshExtras() {
+    const box = $("extra-select");
+    if (!box) return;
+    const st = replayState();
+    const heroTurn = !st.finished && st.turn === heroSeat();
+    const area = $("extras-area");
+    if (area) area.hidden = !heroTurn;
+    if ($("plans-area")) $("plans-area").hidden = !heroTurn;
+    if (!heroTurn) return;
+    extras = extras.filter(isLegal);
+    const keep = box.value;
+    const opts = legalCalls().filter((t) => !extras.includes(t));
+    box.innerHTML = '<option value="">בחר הכרזה…</option>' + opts.map((t) =>
+      `<option value="${t}">${callText(t)}</option>`).join("");
+    if (opts.includes(keep)) box.value = keep;
+    const add = $("extra-add");
+    if (add) add.disabled = extras.length >= MAX_EXTRAS;
+    $("extras-chips").innerHTML = extras.map((t) =>
+      `<span class="chip" data-tok="${t}" role="button">` +
+      `${tokHtml(t)} <b>✕</b></span>`).join("");
+    document.querySelectorAll("#extras-chips .chip").forEach((c) => {
+      c.onclick = () => {
+        extras = extras.filter((t) => t !== c.dataset.tok);
+        refreshExtras();
+      };
+    });
+    refreshPlanCandidates();
+  }
+  function addExtra() {
+    const tok = $("extra-select").value;
+    if (!tok || extras.includes(tok) || extras.length >= MAX_EXTRAS) return;
+    extras.push(tok);
+    $("extra-select").value = "";
+    refreshExtras();
+  }
+
+  /* ---------- continuation plans -----------------------------------------
+     "if I bid C and partner replies R, I bid M" — the simulation forces M
+     over the engine's choice at the hero's first re-turn. */
+  const MAX_PLANS = 6;
+  function planSelect(cls, opts, label) {
+    const wrap = document.createElement("label");
+    wrap.className = "pl-field";
+    wrap.innerHTML = `<span>${label}</span>`;
     const s = document.createElement("select");
     s.className = cls;
-    s.innerHTML = '<option value="">—</option>' + ALL_CALLS.map((t) =>
+    s.innerHTML = '<option value="">—</option>' + opts.map((t) =>
       `<option value="${t}">${callText(t)}</option>`).join("");
-    return s;
+    wrap.appendChild(s);
+    return wrap;
   }
   function addPlanRow() {
     const box = $("plans-box");
     if (!box || box.children.length >= MAX_PLANS) return;
     const row = document.createElement("div");
     row.className = "plan-row";
-    row.appendChild(document.createTextNode("אם אכריז "));
-    row.appendChild(planSelect("pl-cand"));
-    row.appendChild(document.createTextNode(" ושותף ישיב "));
-    row.appendChild(planSelect("pl-reply"));
-    row.appendChild(document.createTextNode(" — אכריז "));
-    row.appendChild(planSelect("pl-mine"));
+    row.appendChild(planSelect("pl-cand", legalCalls(), "אם אכריז"));
+    row.appendChild(planSelect("pl-reply", ALL_CALLS, "ושותף ישיב"));
+    row.appendChild(planSelect("pl-mine", ALL_CALLS, "אכריז"));
     const del = document.createElement("button");
     del.type = "button";
+    del.className = "pl-del";
     del.textContent = "✕";
+    del.title = "הסר כלל";
     del.onclick = () => row.remove();
     row.appendChild(del);
     box.appendChild(row);
+  }
+  // the auction changed -> the legal candidate set changed; refresh the
+  // candidate select of every plan row, keeping still-legal picks
+  function refreshPlanCandidates() {
+    const legal = legalCalls();
+    document.querySelectorAll("#plans-box .pl-cand").forEach((s) => {
+      const keep = s.value;
+      s.innerHTML = '<option value="">—</option>' + legal.map((t) =>
+        `<option value="${t}">${callText(t)}</option>`).join("");
+      if (legal.includes(keep)) s.value = keep;
+    });
   }
   function plansList() {
     const out = [];
@@ -220,6 +286,8 @@
     });
     return out.slice(0, MAX_PLANS);
   }
+
+  /* ---------- bidding box + auction table ---------- */
   function buildBBox() {
     const box = $("bbox");
     box.innerHTML = "";
@@ -227,9 +295,7 @@
       for (const dn of DENOMS) {
         const b = document.createElement("button");
         b.type = "button";
-        const red = dn === "H" || dn === "D";
-        b.innerHTML = lvl + (dn === "NT" ? "NT"
-          : `<span${red ? ' class="red"' : ""}>${GLYPH[dn]}</span>`);
+        b.innerHTML = lvl + (dn === "NT" ? "NT" : suitHtml(dn));
         b.dataset.tok = lvl + dn;
         b.onclick = () => addCall(lvl + dn);
         box.appendChild(b);
@@ -240,27 +306,33 @@
     if (tok === "X" || tok === "XX") return tok;
     const dn = tok.slice(1);
     if (dn === "NT") return tok;
-    const red = dn === "H" || dn === "D";
-    return tok[0] + `<span${red ? ' class="red"' : ""}>${GLYPH[dn]}</span>`;
+    return tok[0] + suitHtml(dn);
+  }
+  function auctionTableHtml(pendingCell) {
+    const vul = vulSeats();
+    const head = COLS.map((s) => {
+      const cls = (vul.includes(s) ? "v" : "nv") +
+        (s === heroSeat() ? " me" : "");
+      return `<th class="${cls}">${SEAT_HE[s]}` +
+        (s === dealer() ? '<sup class="d">D</sup>' : "") +
+        `<small>${s === heroSeat() ? "אתה" : "&nbsp;"}</small></th>`;
+    }).join("");
+    const cells = [];
+    for (let i = 0; i < COLS.indexOf(dealer()); i++) cells.push("<td></td>");
+    auction.forEach((tok) => {
+      cells.push(`<td><span class="call">${tokHtml(tok)}</span></td>`);
+    });
+    if (pendingCell) cells.push('<td class="turn">?</td>');
+    while (cells.length % 4) cells.push("<td></td>");
+    let rows = "";
+    for (let i = 0; i < cells.length; i += 4)
+      rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
+    return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
   }
   function refreshAuction() {
     const st = replayState();
     const heroTurn = !st.finished && st.turn === heroSeat();
-    const strip = $("strip");
-    strip.innerHTML = SEATS.map((s) =>
-      `<div class="hdr">${SEAT_HE[s]}${s === heroSeat() ? " (אתה)" : ""}</div>`
-    ).join("");
-    const pad = SEATS.indexOf(dealer());
-    for (let i = 0; i < pad; i++) strip.innerHTML += "<div></div>";
-    auction.forEach((tok, i) => {
-      const hero = seatOf(i) === heroSeat();
-      strip.innerHTML += `<div class="cell${hero ? " hero" : ""}">` +
-        tokHtml(tok) + "</div>";
-    });
-    if (heroTurn) {
-      // the decision cell: the analyzed call, never entered by the user
-      strip.innerHTML += '<div class="cell hero dp">?</div>';
-    }
+    $("strip").innerHTML = auctionTableHtml(heroTurn);
     const tl = $("turnline");
     const note = $("auction-note");
     if (st.finished) {
@@ -302,16 +374,9 @@
       $("clearhand").onclick = () => { sel.clear(); refreshPicker(); };
       $("dealer").onchange = refreshAuction;
       $("seat").onchange = refreshAuction;
-      if ($("btn-extras"))
-        $("btn-extras").onclick = () => {
-          extrasMode = !extrasMode;
-          refreshExtras();
-        };
-      if ($("btn-plan-add"))
-        $("btn-plan-add").onclick = () => {
-          $("plans-note").hidden = false;
-          addPlanRow();
-        };
+      if ($("vul")) $("vul").addEventListener("change", refreshAuction);
+      if ($("extra-add")) $("extra-add").onclick = addExtra;
+      if ($("btn-plan-add")) $("btn-plan-add").onclick = addPlanRow;
       refreshAuction();
     },
     handSize: () => sel.size,
@@ -321,11 +386,22 @@
     dealer,
     heroSeat,
     tokHtml,
+    suitHtml,
     ready() {
       const st = replayState();
       return sel.size === 13 && !st.finished && st.turn === heroSeat();
     },
     extraCandidates: () => extras.filter(isLegal),
     plans: plansList,
+    reset() {
+      sel.clear();
+      auction = [];
+      extras = [];
+      const pb = $("plans-box");
+      if (pb) pb.innerHTML = "";
+      if ($("quick")) $("quick").value = "";
+      refreshPicker();
+      refreshAuction();
+    },
   };
 })();

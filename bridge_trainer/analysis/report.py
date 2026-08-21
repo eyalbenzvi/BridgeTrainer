@@ -317,6 +317,9 @@ th, td { border: 1px solid var(--line); padding: 5px 8px;
          text-align: right; }
 th { background: var(--accent-tint); font-weight: 600; }
 td.num, th.num { text-align: center; direction: ltr; }
+td.act { text-align: center; direction: rtl; font-weight: 600; }
+td.act small.vs { display: block; font-weight: 400; font-size: 11px;
+                  color: var(--muted); }
 tr.rec { background: var(--rec-bg); font-weight: 600; }
 tr.actual td:first-child::after { content: " ★"; color: var(--accent); }
 .auction-grid { direction: ltr; }
@@ -541,8 +544,9 @@ def _results_table(facts: dict, policy: str) -> str:
         if row["action"] == facts["decision"]["actual"]:
             classes.append("actual")
         cls = f' class="{" ".join(classes)}"' if classes else ""
-        cells = [token_html(row["action"]) +
-                 f' <small>מול {token_html(row["vs"])}</small>',
+        act = (token_html(row["action"]) +
+               f'<small class="vs">מול {token_html(row["vs"])}</small>')
+        cells = [act,
                  f"{row['ev_imp']:+.2f}",
                  f"±{row['ci']:.2f}"] + \
             ([] if single else [f"{row['ev_imp_raw']:+.2f}"]) + \
@@ -551,8 +555,9 @@ def _results_table(facts: dict, policy: str) -> str:
              f"{row['median_imp']:+.1f}"]
         if scoring_mp:
             cells.insert(1, f"{row['mp_pct']:.1f}%")
-        out.append(f"<tr{cls}>" + "".join(
-            f'<td class="num">{c}</td>' for c in cells) + "</tr>")
+        tds = [f'<td class="act">{cells[0]}</td>'] + \
+            [f'<td class="num">{c}</td>' for c in cells[1:]]
+        out.append(f"<tr{cls}>" + "".join(tds) + "</tr>")
     out.append("</table></div>")
     return "".join(out)
 
