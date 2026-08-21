@@ -82,11 +82,14 @@ def test_web_ui_exposes_extra_candidates():
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent / "bridge_trainer"
     ui = (root / "web" / "bt-analyze-ui.js").read_text(encoding="utf-8")
-    assert "extraCandidates" in ui and "btn-extras" in ui
+    assert "extraCandidates" in ui and "extra-add" in ui
+    assert "reset(" in ui                       # cleared after submit
     site = (root / "app" / "webapp.py").read_text(encoding="utf-8")
-    assert "extra_candidates = extras" in site and "extras-row" in site
+    assert "extra_candidates = extras" in site and "extras-area" in site
+    assert "UI.reset()" in site and "an-close" in site
+    assert "an-open-print" not in site          # print button removed
     local = (root / "analysis" / "webui.py").read_text(encoding="utf-8")
-    assert "extra_candidates" in local and "extras-row" in local
+    assert "extra_candidates" in local and "extras-area" in local
 
 
 def test_menu_fills_to_six_from_policy_order():
