@@ -1,0 +1,197 @@
+
+/* ===== progress dashboard =====
+   Data ink is deliberately NOT --accent: in this app blue means "tappable"
+   (links, CTAs, .typebadge, the gloss buttons), so an accent-filled bar reads
+   as a control. Every colour below is a color-mix against --card/--fg, both of
+   which are already themed for light/dark plus the manual override, so dark
+   mode needs no parallel palette. */
+#dash {
+  --data:      color-mix(in srgb, var(--fg) 62%, var(--card));
+  --data-weak: color-mix(in srgb, var(--fg) 22%, var(--card));
+  --data-ci:   color-mix(in srgb, var(--fg) 16%, transparent);
+  color: var(--on-felt);
+}
+/* loose text rides on the green felt, where the card --muted is unreadable */
+#dash > .footnote, #dash > .dnote { color: var(--on-felt-muted); }
+
+/* ---- hero ---- */
+.hero { text-align: center; padding: 20px 16px 14px; }
+/* em, not px: the app's 3-step text scaling sets body font-size, so the hero
+   follows the user's choice for free. --fg ink, never the band colour: --gold
+   on white is ~1.9:1 and unreadable at display size -- the tone lives in the
+   chip instead, which uses the contrast-checked --on-* pairs. */
+.hero .hnum { font-size: 3.8em; font-weight: 800; line-height: .95;
+              letter-spacing: -.02em; color: var(--fg); }
+.hero .hnum.small { color: var(--muted); font-size: 2.6em; }
+.hero .hagg { display: inline-block; margin-top: 6px; border-radius: 999px;
+              padding: 4px 13px; font-size: 13px; font-weight: 700;
+              border: 0; font-family: inherit; cursor: pointer; }
+.hero .hagg.tone-win { background: var(--win); color: var(--on-win); }
+.hero .hagg.tone-gold { background: var(--gold); color: var(--on-gold); }
+.hero .hagg.tone-loss { background: var(--loss); color: var(--on-loss); }
+.hero .haggtxt { font-size: 13px; color: var(--muted); margin: 7px 0 0; }
+.hero .hsub { margin-top: 9px; font-size: 13px; color: var(--muted);
+              display: flex; flex-wrap: wrap; justify-content: center;
+              gap: 2px 13px; }
+.hero .hsub b { font-weight: 600; color: var(--fg);
+                font-variant-numeric: tabular-nums; }
+.hero .hdisc { font-size: 12px; color: var(--muted); margin: 9px 0 0;
+               line-height: 1.4; }
+/* the rail teaches the full 0-100 scale; the 62px numeral carries the
+   precision, so the rail's job is orientation, not discrimination */
+/* the interval band must read DARKER than the track it sits on, or the one
+   piece of uncertainty information on the hero disappears into its own rail */
+.rail { position: relative; height: 22px; margin: 14px 0 0;
+        border-radius: 7px;
+        background: color-mix(in srgb, var(--fg) 9%, var(--card)); }
+.rail > i { position: absolute; display: block; }
+/* A fill is legitimate HERE and not on the category rows: this rail runs the
+   full 0-100, so its length is a true proportion. Without it a lone marker on
+   an empty track reads as a slider handle rather than a position on a scale. */
+.rail .rfill { inset-inline-start: 0; top: 0; bottom: 0; border-radius: 7px;
+               background: color-mix(in srgb, var(--fg) 20%, var(--card)); }
+.rail .rlife { top: -3px; bottom: -3px; width: 2px; background: var(--muted); }
+.rail .rband { top: 5px; bottom: 5px; border-radius: 4px;
+               background: color-mix(in srgb, var(--fg) 30%, var(--card)); }
+.rail .rmark { top: 1px; bottom: 1px; width: 5px; border-radius: 3px;
+               background: var(--fg); box-shadow: 0 0 0 2px var(--card); }
+.railax { position: relative; height: 14px; margin-bottom: 2px; }
+.railax span { position: absolute; width: 3em; margin-inline-start: -1.5em;
+               text-align: center; font-size: 10px; color: var(--muted);
+               font-variant-numeric: tabular-nums; }
+.spark { display: block; width: 100%; height: auto; margin-top: 10px; }
+.trendline { font-size: 12px; color: var(--muted); margin-top: 3px; }
+.trendline .up { color: var(--win); font-style: normal; }
+.trendline .down { color: var(--loss); font-style: normal; }
+
+/* ---- mix bar ---- */
+/* 14px, not 22px: a thick fully-saturated red/gold/green block was the
+   loudest object on the page. The 2px gap renders in the surface colour,
+   which IS the separator -- no inset shadow, i.e. no ink that isn't data.
+   Labels live in the key line below, never inside a segment (a small segment
+   used to clip its own text under min-width:0 + overflow:hidden). */
+.mix { display: flex; gap: 2px; height: 14px; border-radius: 99px;
+       overflow: hidden; background: var(--card); margin: 12px 0 6px; }
+.mix > i { display: block; min-width: 0; }
+.mix .s-ok { background: var(--win); }
+.mix .s-mid { background: var(--gold); }
+.mix .s-bad { background: var(--loss); }
+.mixkey { display: flex; flex-wrap: wrap; gap: 3px 13px; font-size: 12px;
+          color: var(--muted); justify-content: center; }
+.mixkey b { font-weight: 700; color: var(--fg);
+            font-variant-numeric: tabular-nums; }
+.mixkey .sw { width: 9px; height: 9px; border-radius: 3px;
+              display: inline-block; margin-inline-end: 5px;
+              vertical-align: middle; }
+.mixkey .sw.ok { background: var(--win); }
+.mixkey .sw.mid { background: var(--gold); }
+.mixkey .sw.bad { background: var(--loss); }
+
+/* ---- collapsible sections ---- */
+.dsec { background: var(--card); color: var(--fg); border-radius: 14px;
+        margin: 12px 0; box-shadow: 0 1px 3px #0003, 0 4px 14px #0000001f; }
+/* mirrors the .card rule: a drop shadow reads as grime on a dark surface */
+@media (prefers-color-scheme: dark) {
+  .dsec { border: 1px solid var(--line); box-shadow: none; }
+}
+html[data-theme="dark"] .dsec { border: 1px solid var(--line);
+                                box-shadow: none; }
+html[data-theme="light"] .dsec { border: 0;
+  box-shadow: 0 1px 3px #0003, 0 4px 14px #0000001f; }
+.dsec > summary { display: flex; align-items: center; gap: 10px;
+  padding: 13px 16px; min-height: 52px; cursor: pointer; color: var(--fg);
+  font-size: 16px; font-weight: 700; list-style: none; }
+.dsec > summary::-webkit-details-marker { display: none; }
+/* the heading keeps the text tone -- it is a heading, not a link. The accent
+   chevron alone signals that it expands. */
+.dsec > summary::before { content: "\25C2"; color: var(--accent);
+                          font-size: 11px; flex: 0 0 auto; }
+.dsec[open] > summary::before { content: "\25BE"; }
+.dsec > summary:focus-visible { border-radius: 14px; }
+.dsec.empty > summary { color: var(--muted); cursor: default; }
+.dsec.empty > summary::before { color: var(--muted); }
+.dsum { margin-inline-start: auto; font-size: 13px; font-weight: 600;
+        color: var(--muted); font-variant-numeric: tabular-nums;
+        text-align: end; }
+.dsec > .dbody { padding: 0 16px 16px; }
+.dsub { border-top: 1px solid var(--line); }
+.dsub > summary { display: flex; align-items: center; gap: 8px;
+  padding: 11px 0; min-height: 44px; font-size: 14px; font-weight: 600;
+  color: var(--fg); list-style: none; cursor: pointer; }
+.dsub > summary::-webkit-details-marker { display: none; }
+.dsub > summary::before { content: "\25C2"; color: var(--accent);
+                          font-size: 10px; }
+.dsub[open] > summary::before { content: "\25BE"; }
+.dsub > .dbody { padding: 0 0 10px; }
+.subh { font-weight: 700; margin: 13px 0 3px; font-size: 13px; }
+
+/* ---- category rows: dot + interval on a 40-100 domain ---- */
+/* A bar could not do this job. A mean panel score essentially never leaves
+   ~60-95, so a 0-100 bar renders a 78 and a 90 almost identically -- but
+   rescaling a BAR to start at 40 would misstate the ratios, because a bar's
+   length IS its encoding. A dot is a position mark, and position on a
+   non-zero domain is legitimate. The track is therefore an AXIS, not a bar:
+   1px, uniform width on every row, so no length comparison is possible. */
+.rrow { display: grid; grid-template-columns: 8.2em 1fr 2.6em 2.2em;
+        gap: 9px; align-items: center; margin: 11px 0; font-size: 13px; }
+.rlbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtrack { position: relative; height: 12px; }
+.rtrack::before { content: ""; position: absolute; inset-inline: 0; top: 5.5px;
+                  height: 1px; background: var(--data-weak); }
+.rtrack > i { position: absolute; display: block; }
+.rtrack .rtick { top: 2px; height: 8px; width: 1px;
+                 background: var(--data-weak); }
+.rtrack .rthr { top: 0; height: 12px; width: 1px; background: var(--muted);
+                opacity: .5; }
+.rtrack .rci { top: 4.5px; height: 3px; border-radius: 2px;
+               background: var(--data-ci); }
+.rtrack .rdot { top: 1px; width: 10px; height: 10px; margin-inline-start: -5px;
+                border-radius: 50%; background: var(--data);
+                box-shadow: 0 0 0 2px var(--card); }
+/* n < 12: a mean with no interval shown -- hollow, so "provisional" reads
+   without relying on colour or on text */
+.rtrack .rdot.thin { background: var(--card);
+                     box-shadow: 0 0 0 2px var(--card),
+                                 inset 0 0 0 2px var(--data); }
+.rrow.low .rdot { background: var(--loss); }
+.rrow.low .rdot.thin { box-shadow: 0 0 0 2px var(--card),
+                                   inset 0 0 0 2px var(--loss); }
+.rtrack .runder { top: 0; inset-inline-start: 0; color: var(--loss);
+                  font-size: 11px; line-height: 12px; font-style: normal; }
+.rval { text-align: end; font-weight: 600;
+        font-variant-numeric: tabular-nums; }
+.rn { text-align: end; color: var(--muted); font-size: 11px;
+      font-variant-numeric: tabular-nums; }
+.rcap { font-size: 11px; color: var(--muted); margin: 2px 0 8px;
+        display: grid; grid-template-columns: 8.2em 1fr 2.6em 2.2em; gap: 9px; }
+.rcap .ax { position: relative; height: 1.2em; }
+.rcap .ax span { position: absolute; margin-inline-start: -1em; width: 2em;
+                 text-align: center; font-variant-numeric: tabular-nums; }
+.rmore { font-size: 12px; color: var(--muted); margin-top: 9px; }
+
+/* ---- misc rows ---- */
+.mrow { display: flex; align-items: center; gap: 10px; padding: 10px 0;
+        min-height: 44px; border-top: 1px solid var(--line);
+        color: inherit; text-decoration: none; }
+.mrow:first-child { border-top: 0; }
+.mrow .mtxt { flex: 1; font-size: 13px; min-width: 0; }
+.mrow .go { color: var(--accent); font-weight: 700; flex: 0 0 auto;
+            white-space: nowrap; }
+.patlist { list-style: none; margin: 0; padding: 0; }
+.patlist li { padding: 10px 0; border-top: 1px solid var(--line);
+              font-size: 13px; line-height: 1.5; }
+.patlist li:first-child { border-top: 0; }
+.bandtab { width: 100%; border-collapse: collapse; font-size: 13px;
+           margin-top: 8px; }
+.bandtab td { padding: 5px 0; border-top: 1px solid var(--line);
+              vertical-align: baseline; }
+.bandtab td.sc { font-variant-numeric: tabular-nums; color: var(--muted);
+                 text-align: end; white-space: nowrap; }
+.bandtab i.sw { width: 10px; height: 10px; border-radius: 3px;
+                display: inline-block; margin-inline-end: 6px; }
+/* the zone tints are decorative reinforcement; numbers and labels carry the
+   meaning, so drop them rather than fight the forced palette */
+@media (forced-colors: active) {
+  .rail .rband, .rtrack .rci, .rtrack .rtick { display: none; }
+  .rail .rmark, .rtrack .rdot { background: CanvasText; }
+}

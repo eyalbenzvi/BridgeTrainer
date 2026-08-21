@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script>(function(){try{var d=document.documentElement,t=localStorage.getItem('bt_theme'),s=localStorage.getItem('bt_scale');if(t&&t!=='system')d.setAttribute('data-theme',t);if(s&&s!=='s')d.setAttribute('data-scale',s);}catch(e){}})();</script>
+<title>ניתוח הכרזה</title>
+<link rel="stylesheet" href="app.css?v=343a14bd">
+<link rel="stylesheet" href="analyze.css?v=973f7027">
+<link rel="preconnect" href="https://www.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://firestore.googleapis.com" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js" crossorigin>
+<link rel="modulepreload" href="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js" crossorigin>
+<link rel="modulepreload" href="bt-logic.js">
+<link rel="modulepreload" href="firebase-config.js">
+<script type="module" src="bt-firebase.js"></script></head>
+<body data-nav="analyze">
+<main id="main" tabindex="-1">
+<h1>ניתוח הכרזה מיד אמיתית</h1>
+<div class="card">
+<p style="margin:0;font-size:13.5px">הזן יד ומכרז מהמשחק שלך וקבל דוח
+ניתוח מלא: סימולציית חלוקות מותנית במכרז, פתרון דאבל-דאמי, השוואת כל
+הפעולות בנקודת ההחלטה, חלוקות מייצגות ומסקנה מנומקת. החישוב רץ בענן —
+בדרך כלל הדוח מופיע כאן תוך דקה-שתיים (ועד ~10 דקות כשמסלול הגיבוי
+פועל); העמוד מתעדכן לבד.</p>
+</div>
+
+<div class="card">
+<h2>1. היד שלך <span id="handsum">(0/13)</span></h2>
+<div id="picker"></div>
+<div class="hand-preview" id="hand-preview" hidden></div>
+<div class="an-row">
+  <label>הזנה מהירה (PBN):</label>
+  <input type="text" id="quick" dir="ltr" size="22"
+         placeholder="AQ2.KJ3.KQ54.A32"
+         title="מפרידים: נקודה / פסיק / רווח; x = הקלף הנמוך הפנוי; - = סדרה חסרה">
+  <button type="button" id="quickfill">מלא מהטקסט</button>
+  <button type="button" id="clearhand">נקה</button>
+</div>
+</div>
+
+<div class="card">
+<h2>2. תנאי המשחק</h2>
+<div class="an-row">
+  <label>המושב שלך:</label>
+  <select id="seat"><option value="S">דרום</option>
+    <option value="N">צפון</option><option value="E">מזרח</option>
+    <option value="W">מערב</option></select>
+  <label>המחלק:</label>
+  <select id="dealer"><option value="N">צפון</option>
+    <option value="E">מזרח</option><option value="S">דרום</option>
+    <option value="W">מערב</option></select>
+  <label>פגיעות:</label>
+  <select id="vul"><option value="none">ללא</option>
+    <option value="us">שלנו</option><option value="them">שלהם</option>
+    <option value="both">שני הצדדים</option></select>
+</div>
+<div class="an-row">
+  <label>סוג תחרות:</label>
+  <select id="scoring"><option value="IMP">מפגשי (IMP)</option>
+    <option value="MP">ניקוד מקסימלי (MP)</option></select>
+</div>
+</div>
+
+<div class="card">
+<h2>3. המכרז — עד תורך</h2>
+<p style="color:var(--muted);font-size:13px;margin-top:0">
+הזן את ההכרזות מתחילת המכרז ו<b>עצור כשמגיע תורך</b> — את ההכרזה
+שעליה תישאל אל תזין (היא מסומנת ?), ואין להזין פאסים בסופו.</p>
+<div class="auction-strip" id="strip"></div>
+<div id="turnline"></div>
+<div class="bbox" id="bbox"></div>
+<div class="bcalls">
+  <button type="button" id="btn-p">פאס</button>
+  <button type="button" id="btn-x">דאבל</button>
+  <button type="button" id="btn-xx">רידאבל</button>
+  <button type="button" id="btn-undo">&#8617; בטל</button>
+</div>
+<div class="note" id="auction-note" hidden></div>
+<div class="adv" id="extras-area" hidden>
+  <div class="adv-title">בדיקת הכרזה נוספת
+    <span class="adv-sub">(רשות · עד 4 · תיבחן גם אם המנוע לא שוקל אותה)</span></div>
+  <div class="adv-row">
+    <select id="extra-select"></select>
+    <button type="button" id="extra-add">הוסף</button>
+    <span id="extras-chips"></span>
+  </div>
+</div>
+<div class="adv" id="plans-area" hidden>
+  <div class="adv-title">תוכניות המשך
+    <span class="adv-sub">(רשות · הבחירה שלך גוברת על המנוע בתורך הבא)</span></div>
+  <div id="plans-box"></div>
+  <button type="button" id="btn-plan-add" class="adv-add">+ הוסף כלל</button>
+</div>
+</div>
+
+<button type="button" class="an-go" id="go" disabled>נתח &#9654;</button>
+<div class="an-status" id="an-status"></div>
+
+<div class="card" id="queue-card">
+<h2>הניתוחים שלי</h2>
+<ul class="an-list" id="an-list"><li><span class="meta2">טוען...</span></li></ul>
+</div>
+
+<div class="card" id="viewer-card" hidden>
+<h2>הדוח</h2>
+<div class="an-row">
+<button type="button" id="an-close">סגור ✕</button>
+<button type="button" id="an-share">שתף &#128228;</button>
+<button type="button" id="an-download">הורד קובץ</button>
+</div>
+<p style="color:var(--muted);font-size:12.5px;margin:4px 0">הקובץ
+המשותף/המורד נפתח בכל דפדפן — מי שמקבל אותו לא צריך להתחבר לאתר.</p>
+<iframe class="an-report" id="an-frame" title="דוח הניתוח"></iframe>
+</div>
+</main>
+<script src="bt-shared.js?v=eccf3d5a"></script>
+<script src="bt-analyze-ui.js?v=741551e2"></script>
+<script src="analyze.js?v=16f0dfbf"></script>
+</body></html>
