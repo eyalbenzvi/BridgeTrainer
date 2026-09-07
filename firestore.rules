@@ -109,7 +109,7 @@ service cloud.firestore {
                              'auction', 'decision_index', 'system',
                              'scoring', 'overrides', 'narration',
                              'candidates', 'extra_candidates', 'plans',
-                             'seed', 'max_deals'])
+                             'partner_bids', 'seed', 'max_deals'])
         && r.dealer in ['N', 'E', 'S', 'W']
         && r.my_seat in ['N', 'E', 'S', 'W']
         && r.vul in ['None', 'NS', 'EW', 'Both']
@@ -129,6 +129,8 @@ service cloud.firestore {
                 && r.extra_candidates.size() <= 4))
         && (!('plans' in r)
             || (r.plans is list && r.plans.size() <= 6))
+        && (!('partner_bids' in r)
+            || (r.partner_bids is list && r.partner_bids.size() <= 6))
         && (!('max_deals' in r)
             || (r.max_deals is int && r.max_deals <= 2000));
     }

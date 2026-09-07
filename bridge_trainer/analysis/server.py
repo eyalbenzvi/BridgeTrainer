@@ -53,6 +53,9 @@ def analyze_decision_points(payload: dict, reports_dir: Path) -> list[dict]:
                               payload.get("extra_candidates") or []][:4],
             plans=[list(row)[:3] for row in payload.get("plans") or []
                    if isinstance(row, (list, tuple))][:6],
+            partner_bids=[list(row)[:2] for row in
+                          payload.get("partner_bids") or []
+                          if isinstance(row, (list, tuple))][:6],
             seed=int(payload.get("seed", 1)),
             max_deals=int(payload.get("max_deals", 2000)),
         )

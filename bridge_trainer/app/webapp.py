@@ -5768,7 +5768,10 @@ async function submit() {
     };
     const extras = UI.extraCandidates();
     if (extras.length) req.extra_candidates = extras;
-    // Firestore rejects nested arrays -> ship plans as {c,r,m} maps
+    // Firestore rejects nested arrays -> ship as maps
+    const pbids = UI.partnerBids();
+    if (pbids.length)
+      req.partner_bids = pbids.map(([c, r]) => ({c: c, r: r}));
     const plans = UI.plans();
     if (plans.length)
       req.plans = plans.map(([c, r, m]) => ({c: c, r: r, m: m}));
@@ -5991,6 +5994,12 @@ def _analyze_html() -> str:
     <button type="button" id="extra-add">הוסף</button>
     <span id="extras-chips"></span>
   </div>
+</div>
+<div class="adv" id="pbids-area" hidden>
+  <div class="adv-title">אילוץ הכרזת שותף
+    <span class="adv-sub">(רשות · כופה על השותף הכרזה מסוימת בתגובה להכרזתך)</span></div>
+  <div id="pbids-box"></div>
+  <button type="button" id="btn-pbid-add" class="adv-add">+ הוסף אילוץ</button>
 </div>
 <div class="adv" id="plans-area" hidden>
   <div class="adv-title">תוכניות המשך

@@ -99,6 +99,18 @@ def _plans_by_candidate(triples) -> dict[str, dict[str, str]]:
     return plans
 
 
+def _pbids_by_candidate(pairs) -> dict[str, str]:
+    """[[my_call, partner_reply], ...] -> {cand: forced_reply}.
+    First rule wins on duplicate candidates."""
+    pbids: dict[str, str] = {}
+    for row in list(pairs or [])[:MAX_PLANS]:
+        if not isinstance(row, (list, tuple)) or len(row) != 2:
+            continue
+        cand, reply = (str(t).upper()[:3] for t in row)
+        pbids.setdefault(cand, reply)
+    return pbids
+
+
 def _with_extras(candidates: list[str], extras, state) -> tuple[list, list]:
     """Union the user's must-test calls into the engine menu.
 
@@ -233,9 +245,11 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
         candidates = [actual] + candidates
     state = replay(req.dealer, stem)
     plans = _plans_by_candidate(req.plans)
-    # a plan's candidate must be evaluated even if the menu skipped it —
-    # planned candidates outrank plain extras for the extras cap
+    partner_bids = _pbids_by_candidate(req.partner_bids)
+    # a plan's or partner-bid's candidate must be evaluated even if the menu
+    # skipped it — these outrank plain extras for the extras cap
     extras_wanted = [c for c in plans if c not in candidates] + \
+        [c for c in partner_bids if c not in candidates] + \
         list(req.extra_candidates or [])
     candidates, user_added = _with_extras(candidates, extras_wanted, state)
     candidates = [c for c in candidates if state.is_legal(c)]
@@ -265,7 +279,8 @@ def run_analysis_ben(req: AnalysisRequest, progress=None) -> AnalysisResult:
         batch_i += 1
         batch = engine.evaluate(bot, dealer_i, stem, candidates,
                                 n_samples=BLOCK_SAMPLES, dd_memo=dd_memo,
-                                plans=plans or None)
+                                plans=plans or None,
+                                partner_bids=partner_bids or None)
         merged = batch if merged is None else _concat_batches(merged, batch)
         if progress:
             progress(merged.n_samples, MAX_SAMPLES)
