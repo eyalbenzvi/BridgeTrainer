@@ -58,6 +58,9 @@ class AnalysisRequest:
     # continuation rules overriding the engine at the hero's first re-turn:
     # [[candidate, partner_reply, my_call], ...]
     plans: list = field(default_factory=list)
+    # forced partner replies: [[my_call, partner_reply], ...]
+    # overrides the partner's first response after the hero's candidate
+    partner_bids: list = field(default_factory=list)
     overrides: dict[int, dict] = field(default_factory=dict)
     seed: int = 1
     max_deals: int = DEFAULT_MAX_DEALS

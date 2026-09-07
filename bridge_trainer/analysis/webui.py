@@ -182,6 +182,11 @@ iframe.report { width:100%; height:75vh; border:1px solid var(--line);
   <div class="adv-row"><select id="extra-select"></select>
   <button id="extra-add">הוסף</button><span id="extras-chips"></span></div>
 </div>
+<div class="adv" id="pbids-area" hidden>
+  <div class="adv-title">אילוץ הכרזת שותף <span class="adv-sub">(רשות)</span></div>
+  <div id="pbids-box"></div>
+  <button id="btn-pbid-add" class="adv-add">+ הוסף אילוץ</button>
+</div>
 <div class="adv" id="plans-area" hidden>
   <div class="adv-title">תוכניות המשך <span class="adv-sub">(רשות)</span></div>
   <div id="plans-box"></div>
@@ -232,6 +237,8 @@ document.getElementById("go").onclick = async () => {
   };
   const extras = UI.extraCandidates();
   if (extras.length) body.extra_candidates = extras;
+  const pbids = UI.partnerBids();
+  if (pbids.length) body.partner_bids = pbids;
   const plans = UI.plans();
   if (plans.length) body.plans = plans;
   try {

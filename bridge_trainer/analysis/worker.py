@@ -122,6 +122,15 @@ def _plan_row(row) -> list | None:
     return [str(t)[:3] for t in row[:3]]
 
 
+def _pbid_row(row) -> list | None:
+    """One partner-bid constraint: {c,r} map or a 2-list."""
+    if isinstance(row, dict):
+        row = [row.get("c"), row.get("r")]
+    if not isinstance(row, (list, tuple)) or len(row) < 2 or None in row[:2]:
+        return None
+    return [str(t)[:3] for t in row[:2]]
+
+
 def process_request(req: dict, narration_available: bool = False,
                     engine=None) -> tuple:
     """Validate + run one analysis. Returns (summary, html, facts_json).
@@ -140,6 +149,9 @@ def process_request(req: dict, narration_available: bool = False,
         plans=[_plan_row(row) for row in req["plans"]
                if _plan_row(row)][:6]
         if req.get("plans") else [],
+        partner_bids=[_pbid_row(row) for row in req["partner_bids"]
+                      if _pbid_row(row)][:6]
+        if req.get("partner_bids") else [],
         seed=int(req.get("seed", 1)),
         max_deals=max(100, max_deals),
     )

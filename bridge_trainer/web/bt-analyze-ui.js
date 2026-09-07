@@ -204,6 +204,7 @@
     const heroTurn = !st.finished && st.turn === heroSeat();
     const area = $("extras-area");
     if (area) area.hidden = !heroTurn;
+    if ($("pbids-area")) $("pbids-area").hidden = !heroTurn;
     if ($("plans-area")) $("plans-area").hidden = !heroTurn;
     if (!heroTurn) return;
     extras = extras.filter(isLegal);
@@ -223,6 +224,7 @@
         refreshExtras();
       };
     });
+    refreshPbidCandidates();
     refreshPlanCandidates();
   }
   function addExtra() {
@@ -231,6 +233,56 @@
     extras.push(tok);
     $("extra-select").value = "";
     refreshExtras();
+  }
+
+  /* ---------- partner bid constraints -------------------------------------
+     "if I bid X, partner bids Y" — forces the partner's reply in the
+     simulation, overriding the engine's choice for the partner. */
+  const MAX_PBIDS = 6;
+  function pbidSelect(cls, opts, label) {
+    const wrap = document.createElement("label");
+    wrap.className = "pl-field";
+    wrap.innerHTML = `<span>${label}</span>`;
+    const s = document.createElement("select");
+    s.className = cls;
+    s.innerHTML = '<option value="">—</option>' + opts.map((t) =>
+      `<option value="${t}">${callText(t)}</option>`).join("");
+    wrap.appendChild(s);
+    return wrap;
+  }
+  function addPbidRow() {
+    const box = $("pbids-box");
+    if (!box || box.children.length >= MAX_PBIDS) return;
+    const row = document.createElement("div");
+    row.className = "plan-row";
+    row.appendChild(pbidSelect("pb-cand", legalCalls(), "אם אכריז"));
+    row.appendChild(pbidSelect("pb-reply", ALL_CALLS, "שותף יכריז"));
+    const del = document.createElement("button");
+    del.type = "button";
+    del.className = "pl-del";
+    del.textContent = "✕";
+    del.title = "הסר כלל";
+    del.onclick = () => row.remove();
+    row.appendChild(del);
+    box.appendChild(row);
+  }
+  function refreshPbidCandidates() {
+    const legal = legalCalls();
+    document.querySelectorAll("#pbids-box .pb-cand").forEach((s) => {
+      const keep = s.value;
+      s.innerHTML = '<option value="">—</option>' + legal.map((t) =>
+        `<option value="${t}">${callText(t)}</option>`).join("");
+      if (legal.includes(keep)) s.value = keep;
+    });
+  }
+  function pbidsList() {
+    const out = [];
+    document.querySelectorAll("#pbids-box .plan-row").forEach((row) => {
+      const c = row.querySelector(".pb-cand").value;
+      const r = row.querySelector(".pb-reply").value;
+      if (c && r) out.push([c, r]);
+    });
+    return out.slice(0, MAX_PBIDS);
   }
 
   /* ---------- continuation plans -----------------------------------------
@@ -376,6 +428,7 @@
       $("seat").onchange = refreshAuction;
       if ($("vul")) $("vul").addEventListener("change", refreshAuction);
       if ($("extra-add")) $("extra-add").onclick = addExtra;
+      if ($("btn-pbid-add")) $("btn-pbid-add").onclick = addPbidRow;
       if ($("btn-plan-add")) $("btn-plan-add").onclick = addPlanRow;
       refreshAuction();
     },
@@ -392,11 +445,14 @@
       return sel.size === 13 && !st.finished && st.turn === heroSeat();
     },
     extraCandidates: () => extras.filter(isLegal),
+    partnerBids: pbidsList,
     plans: plansList,
     reset() {
       sel.clear();
       auction = [];
       extras = [];
+      const pbb = $("pbids-box");
+      if (pbb) pbb.innerHTML = "";
       const pb = $("plans-box");
       if (pb) pb.innerHTML = "";
       if ($("quick")) $("quick").value = "";

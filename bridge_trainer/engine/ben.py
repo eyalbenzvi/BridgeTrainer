@@ -243,16 +243,20 @@ class BenEngine:
     def evaluate(self, bot, dealer_i: int, auction: list[str],
                  bids: list[str], n_samples: int | None = None,
                  dd_memo: dict | None = None,
-                 plans: dict | None = None) -> Evaluation:
+                 plans: dict | None = None,
+                 partner_bids: dict | None = None) -> Evaluation:
         """Mirror of BotBid.bid()'s rollout block, but on OUR candidate
         list, all candidates on the same sampled layouts (INV1 pairing).
         n_samples temporarily overrides the sampler's target count.
         plans: {candidate_tok: {partner_reply_tok: my_tok}} — the user's
-        continuation rules, overriding Ben at the hero's first re-turn."""
+        continuation rules, overriding Ben at the hero's first re-turn.
+        partner_bids: {candidate_tok: forced_partner_reply} — forces the
+        partner's first response after the hero's candidate."""
         padded, hands_np, hands_pbn, quality = self.sample_for_auction(
             bot, dealer_i, auction, n_samples)
         return self.rollout_eval(bot, padded, bids, hands_np, hands_pbn,
-                                 quality, dd_memo=dd_memo, plans=plans)
+                                 quality, dd_memo=dd_memo, plans=plans,
+                                 partner_bids=partner_bids)
 
     def sample_for_auction(self, bot, dealer_i: int, auction: list[str],
                            n_samples: int | None = None):
@@ -310,9 +314,45 @@ class BenEngine:
             hits[key] = hits.get(key, 0) + len(idxs)
         return auctions_np
 
+    def _apply_partner_bid(self, bot, padded, cand_ben: str,
+                           forced_reply: str, hands_np, hands_pbn,
+                           auctions_np, hits: dict, hit_prefix: str):
+        """Force the partner's first reply after the hero's candidate.
+
+        The auction columns after the candidate are: LHO, partner, RHO, ...
+        For each sample row where the auction didn't end before the partner's
+        turn and the forced call is legal, we replace the partner's bid and
+        re-roll the rest of the auction from that point."""
+        from bidding import bidding as ben_bidding
+
+        col = len(padded)          # candidate column
+        pad_end = ben_bidding.BID2ID["PAD_END"]
+        forced_ben = to_ben(forced_reply)
+
+        groups: dict[int, list[int]] = {}
+        for i in range(auctions_np.shape[0]):
+            lho_id = int(auctions_np[i, col + 1])
+            if lho_id == pad_end:
+                continue
+            groups.setdefault(lho_id, []).append(i)
+
+        for lho_id, idxs in groups.items():
+            lho = ben_bidding.ID2BID[lho_id]
+            prefix = list(padded) + [cand_ben, lho]
+            if not ben_bidding.can_bid(forced_ben, prefix):
+                continue
+            sub = bot.bidding_rollout(
+                prefix, forced_ben, hands_np[idxs],
+                [hands_pbn[j] for j in idxs])
+            auctions_np[idxs] = sub
+            key = f"{hit_prefix}|pard->{forced_reply}"
+            hits[key] = hits.get(key, 0) + len(idxs)
+        return auctions_np
+
     def rollout_eval(self, bot, padded, bids, hands_np, hands_pbn,
                      quality: float, dd_memo: dict | None = None,
-                     plans: dict | None = None) -> Evaluation:
+                     plans: dict | None = None,
+                     partner_bids: dict | None = None) -> Evaluation:
         """Rollout + DD + score the candidates on the given sample rows."""
         from bidding import bidding as ben_bidding
 
@@ -322,6 +362,10 @@ class BenEngine:
         for bid in bids:
             ben_bid = to_ben(bid)
             auctions_np = bot.bidding_rollout(padded, ben_bid, hands_np, hands_pbn)
+            if partner_bids and partner_bids.get(bid):
+                auctions_np = self._apply_partner_bid(
+                    bot, padded, ben_bid, partner_bids[bid], hands_np,
+                    hands_pbn, auctions_np, plan_hits, bid)
             if plans and plans.get(bid):
                 auctions_np = self._apply_plan(
                     bot, padded, ben_bid, plans[bid], hands_np, hands_pbn,
