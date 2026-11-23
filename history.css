@@ -1,0 +1,76 @@
+
+/* ===== practice log (history.html) =====
+   Deliberately NOT appended to dashboard.css: that constant is guarded against
+   --accent fills and `direction: ltr` (they belong to the chart vocabulary
+   there), and the dashboard would download log-only rules it never uses.
+   The filter controls add no CSS at all -- they reuse .segctl from app.css,
+   which is already accent-styled and already in the contrast test's pair list.
+   The felt-tone scoping below mirrors #dash's (UI-1): everything on this page
+   outside a .card rides on the green felt, where the card --muted is
+   unreadable. */
+#hist { color: var(--on-felt); }
+#hist > .footnote { color: var(--on-felt-muted); }
+
+/* ---- summary + filters ---- */
+.hsum { font-size: 13px; color: var(--on-felt); margin: 2px 0 10px;
+        display: flex; flex-wrap: wrap; gap: 3px 10px; align-items: baseline; }
+.hsum b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.hsum .hsnote { color: var(--on-felt-muted); }
+/* The only .alllink in the app that sits directly ON the felt: --accent over
+   the green measures 1.16:1 in light mode, i.e. invisible -- and this is the
+   one-tap escape from a filtered view, the control a ?f=miss deep link makes
+   essential. On-felt ink + an underline carries the affordance instead, at the
+   44px target the filter buttons also take. */
+#hist .hsum .alllink { color: var(--on-felt); text-decoration: underline;
+  min-height: 44px; padding: 0 2px; }
+.hfilt { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 4px; }
+/* 44px targets: .segctl's own padding lands at ~37px, under the minimum */
+.hfilt .segctl button { min-height: 44px; }
+
+/* ---- day heading ----
+   A real <h2>, because heading navigation is how a screen-reader user moves
+   through hundreds of rows. Sticky so the day a row belongs to is always on
+   screen; the felt gradient is `fixed`, so a solid --felt-deep panel is the
+   one background that matches under the heading while it is stuck. */
+/* --felt-deep, a shade darker than the felt behind it: a stuck heading has to
+   be opaque (scrolled rows must not show through), and the darker band reads as
+   a deliberate divider rather than a mismatched patch. Square corners, so
+   nothing peeks through a rounded edge while it is stuck. */
+.dday { position: sticky; top: 0; z-index: 5;
+        margin: 16px 0 6px; padding: 8px 4px;
+        font-size: 14px; font-weight: 700; color: var(--on-felt);
+        background: var(--felt-deep); }
+.dday .ddsub { font-weight: 400; font-size: 12px;
+               color: var(--on-felt-muted); }
+.dday:focus-visible { outline: 2px solid var(--on-felt); outline-offset: 2px; }
+
+/* ---- one log row ----
+   A grid, not .mrow's flex: over hundreds of rows flex leaves nothing aligned,
+   so no column can be scanned. RTL reading order is score, time, what
+   happened, then the affordance. The last column is `auto` so a removed
+   problem's label has room to grow. */
+/* 3.2em, not 2.6em, on the score track: the widest chip is not a number but
+   the "ללא ציון" label a fallback grade prints instead of a fabricated 40. */
+.hrow { display: grid; grid-template-columns: 3.2em 3.2em 1fr auto; gap: 9px;
+        align-items: center; min-height: 44px; padding: 7px 0;
+        border-top: 1px solid var(--line); color: inherit;
+        text-decoration: none; }
+.hrow:first-child { border-top: 0; }
+.hrow .mtxt { font-size: 13px; min-width: 0; line-height: 1.45; }
+.hrow .rtime { font-size: 12px; color: var(--muted);
+               font-variant-numeric: tabular-nums; }
+.hrow .go { color: var(--accent); font-weight: 700; white-space: nowrap; }
+.hrow .go.muted { color: var(--muted); font-size: 11px; font-weight: 400; }
+.hrow .hmark { color: var(--muted); }
+/* a reconstructed or missing grade must not wear the chrome of a measured one */
+.hrow .scorechip.noscore { background: transparent; color: var(--muted);
+  border: 1px solid var(--line); font-size: 10px; font-weight: 600;
+  min-width: 0; width: 100%; padding: 0 2px; white-space: nowrap; }
+.hcard { padding: 6px 14px; }
+.hmore { margin: 12px 0 2px; }
+/* the paging control: a card-toned button, so the page's one gold CTA stays
+   "practise new problems" */
+.morebtn { display: block; width: 100%; min-height: 48px; cursor: pointer;
+  font: inherit; font-size: 15px; font-weight: 700; padding: 12px;
+  border-radius: 12px; background: var(--card); color: var(--accent);
+  border: 1px solid var(--line); }
