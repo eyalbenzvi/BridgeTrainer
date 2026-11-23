@@ -13,6 +13,11 @@
 // — the analyzed call itself is never entered and there are no trailing
 // passes. ready() is true exactly when the hand is complete and it is the
 // hero's turn in an unfinished auction.
+//
+// LEAD MODE (lead_analyze.html, init({mode: "lead"})): the auction is
+// entered to the END (three passes after the last bid) and ready() is true
+// when the hand is complete, the board was not passed out and the hero is
+// the opening leader (declarer's left-hand opponent).
 "use strict";
 (function () {
   const SUITS = ["S", "H", "D", "C"];
@@ -27,6 +32,7 @@
   const sel = new Set();
   let auction = [];
   let onChange = () => {};
+  let mode = "bid";
   const $ = (id) => document.getElementById(id);
 
   function suitHtml(s) {
@@ -145,6 +151,7 @@
   }
   function replayState() {
     let level = 0, denom = "", lastBidSeat = "", doubled = 0, tp = 0;
+    const firstNamer = {};    // side+denom -> first seat to name it
     auction.forEach((tok, i) => {
       if (tok === "P") tp += 1;
       else if (tok === "X") { doubled = 1; tp = 0; }
@@ -152,12 +159,18 @@
       else {
         level = +tok[0]; denom = tok.slice(1); doubled = 0; tp = 0;
         lastBidSeat = seatOf(i);
+        const k = ("NS".includes(lastBidSeat) ? "NS" : "EW") + denom;
+        if (!(k in firstNamer)) firstNamer[k] = lastBidSeat;
       }
     });
     const finished = (auction.length >= 4 && level === 0 && tp >= 4) ||
                      (level > 0 && tp >= 3);
+    const declarer = level > 0
+      ? firstNamer[("NS".includes(lastBidSeat) ? "NS" : "EW") + denom] : "";
+    const leader = declarer
+      ? SEATS[(SEATS.indexOf(declarer) + 1) % 4] : "";
     return { level, denom, lastBidSeat, doubled, tp, finished,
-             turn: seatOf(auction.length) };
+             declarer, leader, turn: seatOf(auction.length) };
   }
   function sameSide(a, b) { return "NS".includes(a) === "NS".includes(b); }
   function isLegal(tok) {
@@ -381,8 +394,46 @@
       rows += "<tr>" + cells.slice(i, i + 4).join("") + "</tr>";
     return `<table class="bidding"><tr>${head}</tr>${rows}</table>`;
   }
+  function contractHtml(st) {
+    return tokHtml(st.level + st.denom) +
+      (st.doubled === 2 ? "XX" : (st.doubled === 1 ? "X" : "")) +
+      " (" + SEAT_HE[st.declarer] + ")";
+  }
+  function refreshLeadNote(st) {
+    const tl = $("turnline");
+    const note = $("auction-note");
+    tl.innerHTML = "";
+    note.hidden = false;
+    if (!st.finished) {
+      tl.innerHTML = "תור: <b>" + SEAT_HE[st.turn] + "</b>";
+      note.textContent = "הזן את המכרז עד הסוף — כולל שלושת הפאסים " +
+        "שאחרי ההכרזה האחרונה.";
+    } else if (st.level === 0) {
+      note.textContent = "כולם פאס — אין הובלה. בטל הכרזות (↩).";
+    } else if (st.leader !== heroSeat()) {
+      note.innerHTML = "החוזה: " + contractHtml(st) + ". המוביל הוא <b>" +
+        SEAT_HE[st.leader] + '</b> — עדכן את "המושב שלך" (או תקן את ' +
+        "המכרז).";
+    } else {
+      note.innerHTML = "החוזה: " + contractHtml(st) +
+        ". אתה מוביל — אפשר ללחוץ \"נתח\".";
+    }
+  }
   function refreshAuction() {
     const st = replayState();
+    if (mode === "lead") {
+      $("strip").innerHTML = auctionTableHtml(false);
+      refreshLeadNote(st);
+      document.querySelectorAll("#bbox button").forEach((b) => {
+        b.disabled = !isLegal(b.dataset.tok);
+      });
+      $("btn-p").disabled = !isLegal("P");
+      $("btn-x").disabled = !isLegal("X");
+      $("btn-xx").disabled = !isLegal("XX");
+      $("btn-undo").disabled = auction.length === 0;
+      onChange();
+      return;
+    }
     const heroTurn = !st.finished && st.turn === heroSeat();
     $("strip").innerHTML = auctionTableHtml(heroTurn);
     const tl = $("turnline");
@@ -416,6 +467,7 @@
   window.BTAnalyzeUI = {
     init(opts) {
       onChange = (opts && opts.onChange) || (() => {});
+      mode = (opts && opts.mode) || "bid";
       buildPicker();
       buildBBox();
       $("btn-p").onclick = () => addCall("P");
@@ -442,6 +494,9 @@
     suitHtml,
     ready() {
       const st = replayState();
+      if (mode === "lead")
+        return sel.size === 13 && st.finished && st.level > 0 &&
+          st.leader === heroSeat();
       return sel.size === 13 && !st.finished && st.turn === heroSeat();
     },
     extraCandidates: () => extras.filter(isLegal),

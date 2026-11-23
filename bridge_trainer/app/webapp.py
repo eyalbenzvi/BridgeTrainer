@@ -1498,6 +1498,7 @@ const HE = {
   brand: "מאמן הברידג'",
   home: "בית", practice: "תרגול", progress: "התקדמות", account: "חשבון",
   analyze: "ניתוח יד",
+  leadAnalyze: "ניתוח הובלה",
   skip: "דלג לתוכן", mainNav: "ניווט ראשי", settings: "הגדרות",
   theme: "ערכת נושא", themeSystem: "מערכת", themeLight: "בהיר",
   themeDark: "כהה", textSize: "גודל טקסט", sizeS: "רגיל", sizeL: "גדול",
@@ -2361,6 +2362,8 @@ const ICO = {
 const NAV_ITEMS = [
   {id: "practice", href: "index.html", ico: ICO.spade, label: HE.home},
   {id: "analyze", href: "analyze.html", ico: ICO.scope, label: HE.analyze},
+  {id: "lead-analyze", href: "lead_analyze.html", ico: ICO.scope,
+   label: HE.leadAnalyze},
   {id: "progress", href: "dashboard.html", ico: ICO.chart, label: HE.progress},
 ];
 function initChrome() {
@@ -5814,6 +5817,8 @@ function handInline(pbn) {
 }
 
 function renderList(rows) {
+  // the queue is shared with lead_analyze.html — show only bidding rows
+  rows = rows.filter((r) => !(r.req && r.req.kind === "lead"));
   ROWS = rows;
   const ul = $("an-list");
   if (!rows.length) {
@@ -5932,6 +5937,8 @@ def _analyze_html() -> str:
 הפעולות בנקודת ההחלטה, חלוקות מייצגות ומסקנה מנומקת. החישוב רץ בענן —
 בדרך כלל הדוח מופיע כאן תוך דקה-שתיים (ועד ~10 דקות כשמסלול הגיבוי
 פועל); העמוד מתעדכן לבד.</p>
+<p style="margin:6px 0 0;font-size:13.5px">רוצה לבדוק <b>הובלת
+פתיחה</b>? <a href="lead_analyze.html">לניתוח הובלה &larr;</a></p>
 </div>
 
 <div class="card">
@@ -6035,6 +6042,309 @@ def _analyze_html() -> str:
 </body></html>"""
 
 
+# ---------------------------------------------------------------------------
+# lead_analyze.html — the opening-lead twin of analyze.html. Same input
+# components (web/bt-analyze-ui.js in mode "lead": the auction is entered to
+# the END), same Firestore queue (analysis_requests with req.kind == "lead"),
+# same worker; the engine grades every lead on shared sampled layouts.
+
+_LEAD_ANALYZE_JS = """
+"use strict";
+const UI = window.BTAnalyzeUI;
+const $ = (id) => document.getElementById(id);
+let UNSUB = null;
+const RANKS = "AKQJT98765432";
+const G = {S: "♠", H: "♥", D: "♦", C: "♣"};
+const C = {S: "ss", H: "sh", D: "sd", C: "sc"};
+
+function cardHtml(card) {
+  if (!card) return "";
+  return '<span class="' + C[card[0]] + '">' + G[card[0]] + "</span>" +
+    (card[1] === "T" ? "10" : card[1]);
+}
+function groupHtml(cards) {
+  if (!cards || !cards.length) return "";
+  if (cards.length === 1) return cardHtml(cards[0]);
+  return '<span class="' + C[cards[0][0]] + '">' + G[cards[0][0]] +
+    "</span>" + cards.map((c) => c[1] === "T" ? "10" : c[1]).join("/");
+}
+
+// the optional "my actual lead" select follows the entered hand
+function refreshActual() {
+  const box = $("actual-lead");
+  const keep = box.value;
+  const pbn = UI.handSize() === 13 ? UI.handPBN() : "";
+  const cards = [];
+  if (pbn) pbn.split(".").forEach((h, i) => {
+    for (const r of h) cards.push("SHDC"[i] + r);
+  });
+  box.innerHTML = '<option value="">— לא צוין —</option>' + cards.map((c) =>
+    '<option value="' + c + '">' + G[c[0]] + (c[1] === "T" ? "10" : c[1]) +
+    "</option>").join("");
+  if (cards.includes(keep)) box.value = keep;
+}
+
+function refreshGo() {
+  $("go").disabled = !UI.ready();
+  refreshActual();
+}
+
+function init() {
+  UI.init({onChange: refreshGo, mode: "lead"});
+  $("go").onclick = submit;
+  if (UNSUB) UNSUB();
+  UNSUB = window.BT.watchAnalyses(renderList);
+  refreshGo();
+}
+
+async function submit() {
+  const st = $("an-status");
+  $("go").disabled = true;
+  const vulSel = $("vul").value;
+  const us = "NS".includes(UI.heroSeat()) ? "NS" : "EW";
+  const vul = {none: "None", both: "Both",
+               us: us, them: us === "NS" ? "EW" : "NS"}[vulSel];
+  try {
+    const lreq = {
+      kind: "lead", dealer: UI.dealer(), vul: vul, my_seat: UI.heroSeat(),
+      my_hand: UI.handPBN(), auction: UI.auction(),
+      scoring: $("scoring").value,
+    };
+    const act = $("actual-lead").value;
+    if (act) lreq.actual_lead = act;
+    await window.BT.submitAnalysis(lreq);
+    UI.reset();
+    st.textContent = "הבקשה נשלחה! החישוב רץ בענן — בדרך כלל דקה-שתיים " +
+      "(עד ~10 דקות במסלול הגיבוי); הרשימה למטה תתעדכן לבד כשהדוח מוכן.";
+    $("queue-card").scrollIntoView({behavior: "smooth"});
+  } catch (e) {
+    console.error(e);
+    st.textContent = "השליחה נכשלה: " + (e.message || e);
+  }
+  refreshGo();
+}
+
+const STATUS_HE = {pending: "ממתין בתור", running: "מחשב...",
+                   done: "מוכן", error: "שגיאה"};
+
+function handInline(pbn) {
+  return (pbn || "").split(".").map((cards, i) => {
+    const st = "SHDC"[i];
+    return '<span class="' + C[st] + '">' + G[st] + "</span>" +
+      (cards || "—");
+  }).join(" ");
+}
+
+function contractHtml(spec) {
+  // '4HS' / '3NTWx' -> 4♥ (S)
+  const m = /^(\\d)(NT|[SHDC])([NESW])(x*)$/.exec(spec || "");
+  if (!m) return "";
+  return UI.tokHtml(m[1] + m[2]) + (m[4] ? m[4].toUpperCase() : "") +
+    " (" + {N: "צפון", E: "מזרח", S: "דרום", W: "מערב"}[m[3]] + ")";
+}
+
+function renderList(rows) {
+  rows = rows.filter((r) => r.req && r.req.kind === "lead");
+  const ul = $("an-list");
+  if (!rows.length) {
+    ul.innerHTML = '<li><span class="an-meta">אין עדיין ניתוחי הובלה. ' +
+      'מלא את הטופס למעלה ולחץ "נתח".</span></li>';
+    return;
+  }
+  ul.innerHTML = "";
+  for (const r of rows) {
+    const q = r.req || {};
+    const li = document.createElement("li");
+    const when = r.createdAt && r.createdAt.seconds
+      ? new Date(r.createdAt.seconds * 1000).toLocaleString("he-IL") : "";
+    let rec = "";
+    if (r.status === "done" && r.summary) {
+      rec = '<span class="an-rec">המלצה: ' +
+        groupHtml(r.summary.recommended_cards ||
+                  [r.summary.recommended]) + "</span>" +
+        '<span class="an-meta">' + (r.summary.n_deals || "?") +
+        " חלוקות</span>";
+    } else if (r.status === "error") {
+      rec = '<span class="an-meta">' + (r.error || "") + "</span>";
+    }
+    const vs = r.summary && r.summary.contract
+      ? "נגד " + contractHtml(r.summary.contract) : "הובלת פתיחה";
+    li.innerHTML =
+      '<div class="an-line1"><span class="chip ' + r.status + '">' +
+      (STATUS_HE[r.status] || r.status) + "</span>" +
+      "<span>" + vs + "</span>" + rec + "</div>" +
+      '<div class="an-hand">' + handInline(q.my_hand) + "</div>" +
+      '<div class="an-meta">' + when +
+      (q.actual_lead ? " · הובלת בפועל: " + cardHtml(q.actual_lead) : "") +
+      "</div>" +
+      '<div class="an-actions">' +
+      (r.status === "done"
+        ? '<button data-open="' + r.id + '">פתח דוח</button>' : "") +
+      '<button data-del="' + r.id + '">מחק</button></div>';
+    ul.appendChild(li);
+  }
+  ul.querySelectorAll("button[data-open]").forEach((b) =>
+    (b.onclick = () => openReport(b.dataset.open)));
+  ul.querySelectorAll("button[data-del]").forEach((b) =>
+    (b.onclick = async () => {
+      if (!confirm("למחוק את הניתוח?")) return;
+      try { await window.BT.deleteAnalysis(b.dataset.del); }
+      catch (e) { alert("מחיקה נכשלה: " + e.message); }
+    }));
+}
+
+async function openReport(id) {
+  const card = $("viewer-card");
+  card.hidden = false;
+  $("an-close").onclick = () => { card.hidden = true; };
+  $("an-frame").srcdoc =
+    "<p style='font-family:sans-serif'>טוען את הדוח...</p>";
+  card.scrollIntoView({behavior: "smooth"});
+  try {
+    const rep = await window.BT.getAnalysisReport(id);
+    if (!rep || !rep.html) throw new Error("הדוח לא נמצא");
+    $("an-frame").srcdoc = rep.html;
+    const fname = "bridge-lead-analysis-" + id.slice(0, 8) + ".html";
+    $("an-download").onclick = () => {
+      const blob = new Blob([rep.html], {type: "text/html"});
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = fname;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    };
+    $("an-share").onclick = async () => {
+      const file = new File([rep.html], fname, {type: "text/html"});
+      if (navigator.canShare && navigator.canShare({files: [file]})) {
+        try {
+          await navigator.share({files: [file],
+                                 title: "ניתוח הובלה — BridgeTrainer"});
+          return;
+        } catch (e) { if (e.name === "AbortError") return; }
+      }
+      $("an-download").click();
+    };
+  } catch (e) {
+    $("an-frame").srcdoc = "<p>שגיאה בטעינת הדוח: " +
+      (e.message || e) + "</p>";
+  }
+}
+
+if (window.BT) window.BT.start(init);
+else addEventListener("bt-ready", () => window.BT.start(init), {once: true});
+"""
+
+_LEAD_ANALYZE_SRC = f"lead_analyze.js?v={_asset_ver(_LEAD_ANALYZE_JS)}"
+
+
+def _lead_analyze_html() -> str:
+    return f"""<!DOCTYPE html>
+<html lang="he" dir="rtl"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{_theme_head_script()}
+<title>ניתוח הובלה</title>
+<link rel="stylesheet" href="{_CSS_HREF}">
+<link rel="stylesheet" href="{_ANALYZE_CSS_HREF}">
+{_head_preloads()}
+<script type="module" src="bt-firebase.js"></script></head>
+<body data-nav="lead-analyze">
+<main id="main" tabindex="-1">
+<h1>ניתוח הובלת פתיחה מיד אמיתית</h1>
+<div class="card">
+<p style="margin:0;font-size:13.5px">הזן את היד שלך ואת המכרז המלא
+מהמשחק, וקבל דוח ניתוח של כל ההובלות האפשריות: סימולציית חלוקות
+מותנית במכרז, פתרון דאבל-דאמי של כל הובלה על אותן חלוקות, לקיחות הגנה
+צפויות, סיכוי להכשיל, IMP צפוי ומסקנה מנומקת. החישוב רץ בענן — בדרך
+כלל הדוח מופיע כאן תוך דקה-שתיים; העמוד מתעדכן לבד.</p>
+<p style="margin:6px 0 0;font-size:13.5px">רוצה לבדוק <b>הכרזה</b>?
+<a href="analyze.html">לניתוח הכרזה &larr;</a></p>
+</div>
+
+<div class="card">
+<h2>1. היד שלך <span id="handsum">(0/13)</span></h2>
+<div id="picker"></div>
+<div class="hand-preview" id="hand-preview" hidden></div>
+<div class="an-row">
+  <label>הזנה מהירה (PBN):</label>
+  <input type="text" id="quick" dir="ltr" size="22"
+         placeholder="KQJ4.T93.852.A72"
+         title="מפרידים: נקודה / פסיק / רווח; x = הקלף הנמוך הפנוי; - = סדרה חסרה">
+  <button type="button" id="quickfill">מלא מהטקסט</button>
+  <button type="button" id="clearhand">נקה</button>
+</div>
+</div>
+
+<div class="card">
+<h2>2. תנאי המשחק</h2>
+<div class="an-row">
+  <label>המושב שלך (המוביל):</label>
+  <select id="seat"><option value="W">מערב</option>
+    <option value="N">צפון</option><option value="E">מזרח</option>
+    <option value="S">דרום</option></select>
+  <label>המחלק:</label>
+  <select id="dealer"><option value="N">צפון</option>
+    <option value="E">מזרח</option><option value="S">דרום</option>
+    <option value="W">מערב</option></select>
+  <label>פגיעות:</label>
+  <select id="vul"><option value="none">ללא</option>
+    <option value="us">שלנו</option><option value="them">שלהם</option>
+    <option value="both">שני הצדדים</option></select>
+</div>
+<div class="an-row">
+  <label>סוג תחרות:</label>
+  <select id="scoring"><option value="IMP">מפגשי (IMP)</option>
+    <option value="MP">ניקוד מקסימלי (MP)</option></select>
+</div>
+</div>
+
+<div class="card">
+<h2>3. המכרז — עד הסוף</h2>
+<p style="color:var(--muted);font-size:13px;margin-top:0">
+הזן את כל ההכרזות מתחילת המכרז <b>ועד שלושת הפאסים שסוגרים אותו</b>.
+המוביל הוא היריב משמאל לכרוז — זה צריך להיות אתה.</p>
+<div class="auction-strip" id="strip"></div>
+<div id="turnline"></div>
+<div class="bbox" id="bbox"></div>
+<div class="bcalls">
+  <button type="button" id="btn-p">פאס</button>
+  <button type="button" id="btn-x">דאבל</button>
+  <button type="button" id="btn-xx">רידאבל</button>
+  <button type="button" id="btn-undo">&#8617; בטל</button>
+</div>
+<div class="note" id="auction-note" hidden></div>
+<div class="adv">
+  <div class="adv-title">ההובלה שלך בפועל
+    <span class="adv-sub">(רשות · הדוח יראה כמה היא עלתה לעומת המומלצת)</span></div>
+  <div class="adv-row"><select id="actual-lead"></select></div>
+</div>
+</div>
+
+<button type="button" class="an-go" id="go" disabled>נתח &#9654;</button>
+<div class="an-status" id="an-status"></div>
+
+<div class="card" id="queue-card">
+<h2>ניתוחי ההובלה שלי</h2>
+<ul class="an-list" id="an-list"><li><span class="meta2">טוען...</span></li></ul>
+</div>
+
+<div class="card" id="viewer-card" hidden>
+<h2>הדוח</h2>
+<div class="an-row">
+<button type="button" id="an-close">סגור ✕</button>
+<button type="button" id="an-share">שתף &#128228;</button>
+<button type="button" id="an-download">הורד קובץ</button>
+</div>
+<p style="color:var(--muted);font-size:12.5px;margin:4px 0">הקובץ
+המשותף/המורד נפתח בכל דפדפן — מי שמקבל אותו לא צריך להתחבר לאתר.</p>
+<iframe class="an-report" id="an-frame" title="דוח הניתוח"></iframe>
+</div>
+</main>
+<script src="{_SHARED_SRC}"></script>
+<script src="{_analyze_ui_src()}"></script>
+<script src="{_LEAD_ANALYZE_SRC}"></script>
+</body></html>"""
+
+
 _ASSET_FILES = ("firebase-config.js", "bt-logic.js", "bt-firebase.js",
                 "bt-analyze-ui.js")
 
@@ -6049,6 +6359,8 @@ def write_app(out_dir: str | Path) -> None:
     (out / "dashboard.html").write_text(_dashboard_html(), encoding="utf-8")
     (out / "history.html").write_text(_history_html(), encoding="utf-8")
     (out / "analyze.html").write_text(_analyze_html(), encoding="utf-8")
+    (out / "lead_analyze.html").write_text(_lead_analyze_html(),
+                                           encoding="utf-8")
     # Emit the shared CSS/JS as external files (T2/PERF-F-4): every page links
     # them instead of inlining ~73 KB, so the browser caches them once and each
     # page's HTML shrinks to a few KB. The Python constants stay the source of
@@ -6069,6 +6381,7 @@ def write_app(out_dir: str | Path) -> None:
     (out / "history.js").write_text(_HISTORY_JS, encoding="utf-8")
     (out / "analyze.css").write_text(_ANALYZE_CSS, encoding="utf-8")
     (out / "analyze.js").write_text(_ANALYZE_JS, encoding="utf-8")
+    (out / "lead_analyze.js").write_text(_LEAD_ANALYZE_JS, encoding="utf-8")
     web = resources.files("bridge_trainer") / "web"
     for name in _ASSET_FILES:
         (out / name).write_text((web / name).read_text(encoding="utf-8"),

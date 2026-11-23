@@ -135,10 +135,42 @@ service cloud.firestore {
             || (r.max_deals is int && r.max_deals <= 2000));
     }
 
+    // Opening-lead analysis (lead_analyze.html): same queue, same worker,
+    // discriminated by req.kind == 'lead'. The auction is the COMPLETE one
+    // (to the closing passes); the worker re-validates that the hero is on
+    // lead. Neither validator admits the other's shape.
+    function validLeadAnalysisReq() {
+      let d = request.resource.data;
+      let r = request.resource.data.req;
+      return d.keys().hasOnly(['uid', 'status', 'createdAt', 'req'])
+        && d.uid == request.auth.uid
+        && d.status == 'pending'
+        && d.req is map
+        && r.keys().hasAll(['kind', 'dealer', 'vul', 'my_seat', 'my_hand',
+                            'auction', 'scoring'])
+        && r.keys().hasOnly(['kind', 'dealer', 'vul', 'my_seat', 'my_hand',
+                             'auction', 'scoring', 'actual_lead', 'seed',
+                             'max_deals'])
+        && r.kind == 'lead'
+        && r.dealer in ['N', 'E', 'S', 'W']
+        && r.my_seat in ['N', 'E', 'S', 'W']
+        && r.vul in ['None', 'NS', 'EW', 'Both']
+        && r.scoring in ['IMP', 'MP']
+        && r.my_hand is string && r.my_hand.size() <= 20
+        && r.auction is list && r.auction.size() >= 4
+        && r.auction.size() <= 60
+        && (!('actual_lead' in r)
+            || (r.actual_lead is string && r.actual_lead.size() == 2))
+        && (!('seed' in r) || r.seed is int)
+        && (!('max_deals' in r)
+            || (r.max_deals is int && r.max_deals <= 1000));
+    }
+
     match /analysis_requests/{id} {
       allow get, list: if request.auth != null
         && resource.data.uid == request.auth.uid;
-      allow create: if request.auth != null && validAnalysisReq();
+      allow create: if request.auth != null
+        && (validAnalysisReq() || validLeadAnalysisReq());
       allow delete: if request.auth != null
         && resource.data.uid == request.auth.uid;
       allow update: if false;

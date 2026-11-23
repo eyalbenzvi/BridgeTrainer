@@ -131,10 +131,47 @@ def _pbid_row(row) -> list | None:
     return [str(t)[:3] for t in row[:2]]
 
 
+def process_lead_request(req: dict, engine=None) -> tuple:
+    """Opening-lead analysis (lead_analyze.html, req.kind == "lead"):
+    same queue, same report docs, different engine entry point."""
+    import json
+
+    from .lead_analysis import (DEFAULT_SAMPLES, MAX_SAMPLES,
+                                LeadAnalysisRequest, run_lead_analysis)
+    from .lead_report import render_lead_report
+    actual = req.get("actual_lead")
+    lreq = LeadAnalysisRequest(
+        dealer=str(req["dealer"]), vul=str(req["vul"]),
+        my_seat=str(req["my_seat"]), my_hand=str(req["my_hand"]),
+        auction=[str(t) for t in req["auction"]],
+        scoring=str(req.get("scoring", "IMP")),
+        actual_lead=str(actual)[:2] if actual else None,
+        seed=int(req.get("seed", 1)),
+        n_samples=min(int(req.get("max_deals", DEFAULT_SAMPLES)),
+                      MAX_SAMPLES),
+    )
+    facts = run_lead_analysis(lreq, engine=engine)
+    html = render_lead_report(facts)
+    if len(html.encode("utf-8")) > MAX_HTML_BYTES:
+        raise RuntimeError("report too large for a Firestore document")
+    summary = {
+        "kind": "lead",
+        "recommended": facts["recommended"],
+        "recommended_cards": facts["recommended_cards"],
+        "actual": facts["actual_lead"],
+        "contract": facts["contract"]["contract"],
+        "n_deals": facts["meta"]["n_samples"],
+        "scoring": lreq.scoring,
+    }
+    return summary, html, json.dumps(facts, ensure_ascii=False)
+
+
 def process_request(req: dict, narration_available: bool = False,
                     engine=None) -> tuple:
     """Validate + run one analysis. Returns (summary, html, facts_json).
     Raises on any invalid payload — the caller records status=error."""
+    if req.get("kind") == "lead":
+        return process_lead_request(req, engine=engine)
     max_deals = min(int(req.get("max_deals", DEFAULT_DEALS)), MAX_DEALS_CAP)
     areq = AnalysisRequest(
         dealer=str(req["dealer"]), vul=str(req["vul"]),
