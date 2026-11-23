@@ -91,3 +91,43 @@ def test_page_request_fields_match_rule_allowlist():
     allowed = set(REQ_REQUIRED) | set(REQ_OPTIONAL)
     assert keys <= allowed, keys - allowed
     assert set(REQ_REQUIRED) <= keys
+
+
+# ---- opening-lead analysis (lead_analyze.html) -----------------------------
+LEAD_REQUIRED = ["kind", "dealer", "vul", "my_seat", "my_hand", "auction",
+                 "scoring"]
+LEAD_OPTIONAL = ["actual_lead", "seed", "max_deals"]
+
+
+def test_lead_requests_have_their_own_locked_validator():
+    b = _block("function validLeadAnalysisReq()")
+    b = b[:b.index("match /analysis_requests")]
+    assert "d.uid == request.auth.uid" in b
+    assert "d.status == 'pending'" in b
+    assert "r.kind == 'lead'" in b
+    for k in LEAD_REQUIRED + LEAD_OPTIONAL:
+        assert f"'{k}'" in b, k
+    assert "r.auction.size() <= 60" in b
+    assert "r.max_deals <= 1000" in b
+    create = _block("match /analysis_requests/{id}")
+    assert "validAnalysisReq() || validLeadAnalysisReq()" in create
+
+
+def test_bidding_validator_rejects_lead_kind():
+    # 'kind' is not in the bidding allowlist, so a lead request can never
+    # pass as a bidding one (and vice versa: decision_index is not allowed)
+    b = _block("function validAnalysisReq()")
+    b = b[:b.index("function validLeadAnalysisReq()")]
+    assert "'kind'" not in b
+    lb = _block("function validLeadAnalysisReq()")
+    lb = lb[:lb.index("match /analysis_requests")]
+    assert "decision_index" not in lb
+
+
+def test_lead_page_request_fields_match_rule_allowlist():
+    m = re.search(r"const lreq = \{([\s\S]*?)\};", PAGE_SRC)
+    assert m, "lead page lreq literal not found"
+    keys = set(re.findall(r"(\w+):", m.group(1)))
+    assert keys <= set(LEAD_REQUIRED) | set(LEAD_OPTIONAL)
+    assert set(LEAD_REQUIRED) <= keys
+    assert "lreq.actual_lead" in PAGE_SRC
