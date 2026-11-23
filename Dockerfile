@@ -10,7 +10,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 ENV BEN_HOME=/opt/ben \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PIP_DEFAULT_TIMEOUT=300 \
+    PIP_RETRIES=10
 
 # Ben checkout, pinned exactly like scripts/setup_ben.sh; BBA/EPBot binaries
 # removed (never used here), .git dropped to slim the image.
@@ -29,9 +31,13 @@ RUN git -C /opt/ben apply /tmp/ben_rollout_context.patch \
 # process stats, so the bump is behavior-neutral for the rollout path.
 # tensorflow comes from requirements.txt (pinned there) — installing it
 # separately first would download a second, newer copy only to downgrade it.
+# The download (tensorflow is ~600 MB) has timed out from Cloud Build at
+# pip's 15 s default read timeout — hence PIP_DEFAULT_TIMEOUT/PIP_RETRIES
+# above and one whole-command retry here.
 RUN sed -i 's/^psutil==5\.9\.0[[:space:]]*$/psutil==5.9.8/' /opt/ben/requirements.txt \
     && grep -q '^psutil==5.9.8$' /opt/ben/requirements.txt \
-    && pip install --no-cache-dir -r /opt/ben/requirements.txt \
+    && (pip install --no-cache-dir -r /opt/ben/requirements.txt \
+        || (sleep 30 && pip install --no-cache-dir -r /opt/ben/requirements.txt)) \
     && pip install --no-cache-dir firebase-admin
 
 COPY . /app
